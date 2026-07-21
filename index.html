@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2f6bff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="퀵오더">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
+<title>퀵오더</title>
+<style>
+  :root{
+    --bg:#eef1f7; --ink:#151824; --muted:#66707f; --faint:#9aa4b3;
+    --line:#e2e7f0; --card:#fff; --card2:#f4f6fb;
+    --brand:#2f6bff; --brand-soft:#e7eeff; --ok:#15a34a; --ok-soft:#e4f6ea;
+    --danger:#dc2626; --danger-soft:#fdecec; --warn:#d97706; --warn-soft:#fdf0dc;
+    --font:-apple-system,BlinkMacSystemFont,"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --bg:#0b0e15; --ink:#e9ecf4; --muted:#98a1b2; --faint:#5c6474;
+    --line:#242a37; --card:#161a24; --card2:#1e2330;
+    --brand:#5b8cff; --brand-soft:#1b2540; --ok:#34d17f; --ok-soft:#12301f;
+    --danger:#f87171; --danger-soft:#2c1616; --warn:#e2a34a; --warn-soft:#2e2413;
+  }}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink);
+    line-height:1.5;-webkit-text-size-adjust:100%;overscroll-behavior-y:contain}
+  .wrap{max-width:640px;margin:0 auto;padding:18px 16px calc(60px + env(safe-area-inset-bottom))}
+  header{display:flex;align-items:baseline;gap:9px;padding:6px 2px 16px}
+  header b{font-size:24px;font-weight:800;letter-spacing:-.02em}
+  header .sub{font-size:12px;color:var(--faint);font-weight:600}
+  .chip{font-size:11px;color:var(--brand);background:var(--brand-soft);padding:4px 10px;
+    border-radius:999px;font-weight:700;cursor:pointer;border:none;font-family:inherit}
+  .chip+.chip{margin-left:6px}
+
+  .tabs{display:flex;gap:6px;background:var(--card2);border:1px solid var(--line);
+    border-radius:13px;padding:5px;margin-bottom:16px}
+  .tabs button{flex:1;border:none;background:none;font-family:inherit;font-size:13.5px;font-weight:800;
+    color:var(--muted);padding:11px 8px;border-radius:9px;cursor:pointer}
+  .tabs button.on{background:var(--card);color:var(--brand);box-shadow:0 2px 6px -2px rgba(0,0,0,.2)}
+  .pane{display:none}.pane.on{display:block}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px}
+  .card h2{margin:0 0 3px;font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px}
+  .card h2 .n{width:22px;height:22px;border-radius:7px;background:var(--brand-soft);color:var(--brand);
+    font-size:12px;font-weight:800;display:grid;place-items:center;flex:none}
+  .card p.hint{margin:0 0 12px;font-size:12.5px;color:var(--muted);padding-left:30px}
+
+  .drop{border:1.5px dashed var(--line);border-radius:12px;background:var(--card2);padding:20px;
+    text-align:center;color:var(--faint);font-size:13px;cursor:pointer;display:block;transition:.15s}
+  .drop:hover,.drop.hi{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
+  .drop b{display:block;color:var(--ink);font-size:13.5px;margin-top:5px;word-break:break-all}
+  .drop.on{border-style:solid;border-color:color-mix(in srgb,var(--brand) 45%,var(--line));
+    background:color-mix(in srgb,var(--brand) 7%,var(--card))}
+  input[type=file]{display:none}
+
+  .minibtn{background:var(--card2);border:1px solid var(--line);color:var(--ink);font-family:inherit;
+    font-size:11.5px;font-weight:700;padding:6px 11px;border-radius:8px;cursor:pointer;flex:none}
+  .setrow{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:11.5px;color:var(--muted)}
+  .setrow span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  .pvhead{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .pvhead b{font-size:13px;font-weight:800}
+  .pvhead span{font-size:12px;color:var(--muted);font-weight:600}
+  .pvhead button{margin-left:auto}
+  .tblbox{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card)}
+  .tblscroll{overflow-x:auto;-webkit-overflow-scrolling:touch;max-height:320px;overflow-y:auto}
+  table.pv{border-collapse:collapse;width:100%;font-size:12px}
+  table.pv th,table.pv td{text-align:left;padding:8px 10px;white-space:nowrap;border-bottom:1px solid var(--line)}
+  table.pv th{font-size:10.5px;color:var(--muted);font-weight:700;background:var(--card2);position:sticky;top:0;z-index:1}
+  table.pv td{max-width:180px;overflow:hidden;text-overflow:ellipsis}
+  table.pv td.num{font-variant-numeric:tabular-nums;text-align:right}
+  .pvfoot{font-size:11.5px;color:var(--faint);text-align:center;padding:8px 4px 0}
+
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:2px}
+  .brow{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;
+    border:1.5px solid var(--line);background:var(--card);font-size:12.5px;font-weight:600;cursor:pointer;user-select:none}
+  .brow.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
+  .box{width:21px;height:21px;border-radius:6px;border:2px solid var(--line);flex:none;
+    display:grid;place-items:center;background:var(--card)}
+  .brow .box{width:15px;height:15px;border-radius:4px}
+  .box svg{opacity:0}
+  .on>.box svg,.on .box svg{opacity:1}
+  .on>.box,.vrow.on .box,.brow.on .box,.rrow.on .box{background:var(--brand);border-color:var(--brand)}
+
+  .vlist{display:flex;flex-direction:column;gap:8px}
+  .vrow{display:flex;align-items:center;gap:11px;border:1.5px solid var(--line);border-radius:12px;
+    padding:12px;cursor:pointer;user-select:none}
+  .vrow.on{border-color:var(--brand);background:var(--brand-soft)}
+  .vinfo{flex:1;min-width:0}
+  .vinfo b{font-size:14px;font-weight:800;display:block}
+  .vinfo span{font-size:11.5px;color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .vdel{background:none;border:none;color:var(--faint);font-size:16px;cursor:pointer;flex:none;padding:4px 6px}
+  .empty{text-align:center;color:var(--faint);font-size:12.5px;padding:16px 8px;line-height:1.6}
+
+  .vendorbox{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:10px}
+  .vendorbox .vh{background:var(--card2);padding:10px 12px;font-size:13px;font-weight:800;display:flex;align-items:center;gap:8px}
+  .vendorbox .vh .cnt{margin-left:auto;font-size:11px;color:var(--muted);font-weight:700}
+  .vendorbox .vh .all{background:var(--card);border:1px solid var(--line);color:var(--muted);
+    font-family:inherit;font-size:10.5px;font-weight:700;padding:4px 9px;border-radius:7px;cursor:pointer}
+  .brands{display:flex;flex-wrap:wrap;gap:7px;padding:11px}
+
+  .rrow{border:1.5px solid var(--line);border-radius:12px;padding:12px;margin-bottom:9px}
+  .rtop{display:flex;align-items:center;gap:10px}
+  .rtop .cnt{font-size:12px;color:var(--muted);font-weight:700;flex:none}
+  .rmail{display:flex;align-items:center;gap:8px;margin-top:9px}
+  .rmail input{flex:1;min-width:0;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);
+    border-radius:9px;padding:10px;font-family:inherit;font-size:13px;outline:none}
+  .rmail input:focus{border-color:var(--brand);background:var(--card)}
+  .dlbtn{font-size:11.5px;color:#fff;background:var(--brand);font-weight:700;border:none;
+    padding:9px 13px;border-radius:9px;cursor:pointer;flex:none;font-family:inherit}
+
+  .go{width:100%;border:none;cursor:pointer;font-family:inherit;font-weight:800;font-size:16px;color:#fff;
+    background:var(--brand);border-radius:14px;padding:16px;margin-top:4px;
+    box-shadow:0 12px 24px -12px color-mix(in srgb,var(--brand) 70%,transparent);
+    display:flex;align-items:center;justify-content:center;gap:9px}
+  .go:active{transform:scale(.99)}
+  .go[disabled]{filter:grayscale(.4) opacity(.5);cursor:not-allowed;box-shadow:none}
+  .go .spin{width:17px;height:17px;border:3px solid rgba(255,255,255,.4);border-top-color:#fff;
+    border-radius:50%;animation:sp .7s linear infinite;display:none}
+  .go.loading .spin{display:inline-block}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .msg{margin-top:14px;font-size:13px;padding:12px 14px;border-radius:12px;display:none;white-space:pre-wrap;line-height:1.55}
+  .msg.show{display:block}
+  .msg.ok{background:var(--ok-soft);color:color-mix(in srgb,var(--ok) 75%,var(--ink))}
+  .msg.err{background:var(--danger-soft);color:color-mix(in srgb,var(--danger) 78%,var(--ink))}
+  .msg.warn{background:var(--warn-soft);color:color-mix(in srgb,var(--warn) 80%,var(--ink))}
+  .foot{color:var(--faint);font-size:11.5px;text-align:center;margin-top:18px;line-height:1.6}
+
+  .modal{position:fixed;inset:0;background:rgba(8,12,20,.55);display:none;z-index:50;align-items:flex-end;justify-content:center}
+  .modal.on{display:flex}
+  .sheet{background:var(--card);width:100%;max-width:640px;max-height:88vh;border-radius:20px 20px 0 0;
+    display:flex;flex-direction:column;padding:10px 16px calc(16px + env(safe-area-inset-bottom))}
+  @media(min-width:640px){.modal{align-items:center}.sheet{border-radius:18px;max-height:82vh}}
+  .grip{width:40px;height:5px;border-radius:3px;background:var(--line);margin:4px auto 12px;flex:none}
+  .sheet h3{margin:0 0 3px;font-size:16px;font-weight:800}
+  .sheet .sub2{margin:0 0 12px;font-size:12px;color:var(--muted)}
+  .mlist{overflow-y:auto;display:flex;flex-direction:column;gap:8px;flex:1;margin-bottom:12px}
+  .mitem{border:1.5px solid var(--line);border-radius:12px;padding:11px}
+  .sheet .row{display:flex;gap:9px}
+  .sheet .row button{flex:1;border:none;cursor:pointer;font-family:inherit;font-weight:800;font-size:14px;border-radius:12px;padding:14px}
+  .btn-go{background:var(--brand);color:#fff}
+  .btn-cancel{background:var(--card2);color:var(--ink);border:1px solid var(--line)!important;flex:0 0 90px!important}
+  .fld{display:flex;flex-direction:column;gap:5px;margin-bottom:11px}
+  .fld label{font-size:12px;font-weight:700}
+  .fld input{border:1.5px solid var(--line);background:var(--card2);color:var(--ink);border-radius:10px;
+    padding:12px;font-family:inherit;font-size:14px;outline:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <b>퀵오더</b><span class="sub">by JK</span>
+    <span style="margin-left:auto"></span>
+    <button class="chip" id="btn-settings">설정</button>
+  </header>
+
+  <div class="tabs">
+    <button id="tab-o" class="on">① 발주서 변환</button>
+    <button id="tab-i">② 송장 취합</button>
+  </div>
+
+  <!-- ================= 발주서 변환 ================= -->
+  <div class="pane on" id="pane-o">
+    <div class="card">
+      <h2><span class="n">1</span>쇼핑몰 주문 파일</h2>
+      <p class="hint">메일에서 발주서를 가져오거나 파일을 올려주세요.</p>
+      <button class="go" id="mail-order" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 발주서 가져오기</button>
+      <div class="setrow"><span id="gmail-who-o">메일 연결 확인 중…</span></div>
+      <label class="drop" id="drop-order" style="margin-top:8px">
+        주문 파일 선택 (또는 여기로 끌어다 놓기)
+        <b id="order-name"></b>
+        <input type="file" id="f-order" accept=".xlsx,.xlsm">
+      </label>
+
+      <div id="date-wrap" style="display:none;margin-top:14px">
+        <div class="pvhead">
+          <div><b>발주 날짜 선택</b> <span id="dt-info"></span></div>
+          <select class="minibtn" id="dt-col" style="max-width:44%"></select>
+        </div>
+        <div class="chips" id="dt-chips"></div>
+        <div class="pvfoot" id="dt-foot"></div>
+      </div>
+
+      <div id="prev-wrap" style="display:none;margin-top:14px">
+        <div class="pvhead">
+          <div><b>내용 확인</b> <span id="pv-cnt"></span></div>
+          <button class="minibtn" id="pv-toggle">전체 열 보기</button>
+        </div>
+        <div class="tblbox"><div class="tblscroll"><table class="pv" id="pv-table"></table></div></div>
+        <div class="pvfoot" id="pv-foot"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span class="n">2</span>업체 양식 (발주서)</h2>
+      <p class="hint">한 번 올려두면 이 기기에 저장되어 다음부터 체크만 하면 됩니다.</p>
+      <div class="vlist" id="vlist"><div class="empty">불러오는 중…</div></div>
+      <label class="drop" id="drop-tpl" style="margin-top:10px;padding:14px">
+        ＋ 업체 양식 추가
+        <input type="file" id="f-tpl" accept=".xlsx,.xlsm" multiple>
+      </label>
+    </div>
+
+    <div class="card" id="card3" style="display:none">
+      <h2><span class="n">3</span>업체별 브랜드 선택</h2>
+      <p class="hint">한 번 체크하면 다음에도 자동으로 기억됩니다.</p>
+      <div id="vbrands"></div>
+    </div>
+
+    <button class="go" id="run-o" disabled><span class="spin"></span><span id="run-o-lbl">발주서 변환하기</span></button>
+    <div class="msg" id="msg-o"></div>
+
+    <div class="card" id="result-o" style="display:none;margin-top:14px">
+      <h2><span class="n">4</span>변환 결과</h2>
+      <p class="hint">업체별 발주서가 만들어졌습니다.</p>
+      <div id="rlist-o"></div>
+    </div>
+  </div>
+
+  <!-- ================= 송장 취합 ================= -->
+  <div class="pane" id="pane-i">
+    <div class="card">
+      <h2><span class="n">1</span>송장취합양식</h2>
+      <p class="hint">송장을 채워 넣을 양식 파일입니다.</p>
+      <button class="go" id="mail-sab" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 송장취합양식 가져오기</button>
+      <label class="drop" id="drop-sab">
+        송장취합양식 선택 (또는 끌어다 놓기)
+        <b id="sab-name"></b>
+        <input type="file" id="f-sab" accept=".xlsx,.xlsm">
+      </label>
+    </div>
+
+    <div class="card">
+      <h2><span class="n">2</span>업체 회신 송장</h2>
+      <p class="hint">업체들이 택배사·운송장번호를 채워 보낸 파일. 여러 개 가능합니다.</p>
+      <button class="go" id="mail-rep" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 회신 송장 가져오기</button>
+      <div class="setrow"><span id="reply-filter">회신 검색조건: 송장, 운송장, 회신</span><button class="minibtn" id="reply-filter-btn">검색조건</button></div>
+      <label class="drop" id="drop-rep" style="padding:14px;margin-top:8px">
+        ＋ 회신 송장 파일 추가
+        <input type="file" id="f-rep" accept=".xlsx,.xlsm" multiple>
+      </label>
+      <div class="vlist" id="replist" style="margin-top:10px"></div>
+    </div>
+
+    <button class="go" id="run-i" disabled><span class="spin"></span><span id="run-i-lbl">송장 취합하기</span></button>
+    <div class="msg" id="msg-i"></div>
+
+    <div class="card" id="result-i" style="display:none;margin-top:14px">
+      <h2><span class="n">3</span>취합 결과</h2>
+      <div id="rlist-i"></div>
+    </div>
+  </div>
+
+  <p class="foot">퀵오더 · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
+</div>
+
+<!-- 메일 선택 모달 -->
+<div class="modal" id="mailmodal">
+  <div class="sheet">
+    <div class="grip"></div>
+    <h3 id="mail-title">메일에서 가져오기</h3>
+    <p class="sub2" id="mail-sub">최근 7일 메일이에요.</p>
+    <div class="mlist" id="mail-list"></div>
+    <div class="row">
+      <button class="btn-cancel" id="mail-cancel">취소</button>
+      <button class="btn-go" id="mail-ok" disabled>가져오기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 설정 모달 -->
+<div class="modal" id="setmodal">
+  <div class="sheet">
+    <div class="grip"></div>
+    <h3>설정</h3>
+    <p class="sub2">이 기기에 저장된 정보입니다.</p>
+    <div class="mlist" id="setlist"></div>
+    <div class="row">
+      <button class="btn-cancel" id="set-close">닫기</button>
+      <button class="btn-go" id="set-add">＋ 업체 메일 추가</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async></script>
+<script src="qo-logic.js"></script>
+<script src="qo-gmail.js"></script>
+<script src="qo-app.js"></script>
+</body>
+</html>
