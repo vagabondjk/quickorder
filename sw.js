@@ -1,8 +1,8 @@
 /* 퀵오더 서비스워커 — '항상 최신' 방식 (network-first)
    앱 파일은 매번 새로 받아오고, 인터넷이 안 될 때만 캐시를 사용한다.
    → 재배포하면 새로고침만으로 바로 최신 코드가 뜬다. */
-const CACHE = "quickorder-v13";
-const ASSETS = ["./", "./index.html", "./qo-logic.js", "./qo-gmail.js", "./qo-app.js",
+const CACHE = "quickorder-v15";
+const ASSETS = ["./", "./index.html", "./qo-lock.js", "./qo-logic.js", "./qo-gmail.js", "./qo-app.js",
   "./manifest.json", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 // 절대 안 바뀌는 외부 라이브러리는 캐시 우선(빠름)
 const CDN = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
