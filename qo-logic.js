@@ -494,7 +494,7 @@ function collectInvoices(sabangWb, replies, opts) {
 
 /* ---------------- 내용 미리보기 ---------------- */
 function preview(wb, limit) {
-  limit = limit || 30;
+  limit = limit || 2000;   // 최신 주문(아래쪽)까지 다 보이도록 넉넉히
   const ws = pickOrderSheet(wb);
   const hr = findHeaderRow(ws);
   const d = dims(ws);
@@ -520,14 +520,27 @@ function preview(wb, limit) {
 
 /* ---------------- 범용 미리보기 (어떤 엑셀이든) ---------------- */
 function previewAny(wb, limit) {
-  limit = limit || 50;
-  // 데이터가 가장 많은 시트 선택 (양식/취합/결과 등 무엇이든)
-  let ws = null, best = -1;
+  limit = limit || 2000;   // 전체 내용이 다 보이도록 넉넉히
+  // 시트 선택: '헤더 아래 실제 데이터 행이 가장 많은' 시트.
+  //  (단순 rowCount는 서식만 있는 빈 시트가 크게 잡혀 잘못 골라짐)
+  let ws = null, bestData = -1, wsFb = null, bestFb = -1;
   for (const w of wb.worksheets) {
     const d = dims(w);
-    const score = (d.rows || 0) * 1000 + (d.cols || 0);
-    if (score > best) { best = score; ws = w; }
+    if (!d.rows || !d.cols) continue;
+    const fb = (d.rows || 0) * 1000 + (d.cols || 0);
+    if (fb > bestFb) { bestFb = fb; wsFb = w; }
+    const hr = findHeaderRow(w);
+    const cmax = Math.min(d.cols, 60);
+    const rlim = Math.min(d.rows, hr + 5000);   // 과도한 스캔 방지
+    let dataRows = 0;
+    for (let r = hr + 1; r <= rlim; r++) {
+      let any = false;
+      for (let c = 1; c <= cmax; c++) { if (!isBlank(getV(w, r, c))) { any = true; break; } }
+      if (any) dataRows++;
+    }
+    if (dataRows > bestData) { bestData = dataRows; ws = w; }
   }
+  if (!ws || bestData <= 0) ws = wsFb || wb.worksheets[0];   // 전부 비었으면(빈 양식) 열만이라도
   if (!ws) return { columns: [], rows: [], total: 0, sheet: "", sheets: [] };
   const hr = findHeaderRow(ws);
   const d = dims(ws);

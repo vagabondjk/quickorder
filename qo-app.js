@@ -36,10 +36,14 @@ async function openPreview(buf, title) {
   $("pv-modal-foot").textContent = "";
   try {
     const wb = await QO.loadWorkbook(buf.slice(0));
-    const pv = QO.previewAny(wb, 100);
+    const pv = QO.previewAny(wb, 2000);
     $("pv-modal-sub").textContent = `시트: ${esc(pv.sheet)} · 전체 ${pv.total}건` +
       (pv.sheets.length > 1 ? ` · (${pv.sheets.length}개 시트 중)` : "");
     if (!pv.columns.length) { $("pv-modal-foot").textContent = "표시할 내용이 없어요."; return; }
+    if (pv.total === 0) {
+      $("pv-modal-sub").textContent = `시트: ${esc(pv.sheet)} · 빈 양식(내용 없음)`;
+      $("pv-modal-foot").innerHTML = "ℹ️ 이 파일은 <b>빈 양식(템플릿)</b>이라 채워진 내용이 없습니다. 아래는 열(항목) 목록입니다.";
+    }
     let h = "<tr>" + pv.columns.map((c, i) => `<th>${esc(c || "열" + (i + 1))}</th>`).join("") + "</tr>";
     pv.rows.forEach(row => {
       h += "<tr>" + pv.columns.map((_, i) => {
@@ -49,8 +53,10 @@ async function openPreview(buf, title) {
       }).join("") + "</tr>";
     });
     $("pv-modal-table").innerHTML = h;
-    $("pv-modal-foot").textContent = pv.total > pv.rows.length
-      ? `앞 ${pv.rows.length}건만 표시 · 전체 ${pv.total}건` : `전체 ${pv.total}건`;
+    if (pv.total > 0) {   // 빈 양식일 때는 위의 안내문(ℹ️)을 덮어쓰지 않는다
+      $("pv-modal-foot").textContent = pv.total > pv.rows.length
+        ? `앞 ${pv.rows.length}건만 표시 · 전체 ${pv.total}건` : `전체 ${pv.total}건`;
+    }
   } catch (e) {
     $("pv-modal-sub").textContent = "";
     $("pv-modal-foot").textContent = "⚠ 미리보기 실패: " + e.message;
@@ -526,10 +532,7 @@ function showResultI(out, buf, filename) {
     if (out.missingCount === 0) {
       h += `<div class="msg show ok" style="margin-top:8px">✔ 취합본 빈칸 없음 — 주문 ${out.orderRows}행 전부 송장 기입 완료</div>`;
     } else {
-      let lst = (out.missing || []).map(m => `\n· ${esc(m.label)}`).join("");
-      const more = out.missingCount - (out.missing || []).length;
-      if (more > 0) lst += `\n· … 외 ${more}건`;
-      h += `<div class="msg show err" style="margin-top:8px">⚠ 취합본 송장 빈칸 ${out.missingCount}건 / 주문 ${out.orderRows}행\n아래 주문은 업체 회신에 송장이 없어 비어 있습니다 — 회신 누락 여부를 확인하세요:${lst}</div>`;
+      h += `<div class="msg show err" style="margin-top:8px">⚠ 취합본 송장 빈칸 <b>${out.missingCount}건</b> / 주문 ${out.orderRows}행 — 회신 누락 여부를 확인하세요</div>`;
     }
   }
   h += `<div class="rrow" style="margin-top:12px"><div class="rtop"><div class="vinfo"><b>송장 취합본</b>
