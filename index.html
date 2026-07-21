@@ -146,6 +146,19 @@
   .fld label{font-size:12px;font-weight:700}
   .fld input{border:1.5px solid var(--line);background:var(--card2);color:var(--ink);border-radius:10px;
     padding:12px;font-family:inherit;font-size:14px;outline:none}
+  .flt-group{margin-bottom:16px}
+  .flt-h{font-size:13px;font-weight:800;margin-bottom:2px}
+  .flt-desc{font-size:11px;color:var(--faint);margin-bottom:8px;line-height:1.4}
+  .flt-item{display:flex;align-items:center;gap:8px;background:var(--card2);border:1px solid var(--line);
+    border-radius:9px;padding:8px 10px;margin-bottom:6px}
+  .flt-item span{flex:1;min-width:0;font-size:13px;font-weight:600;word-break:break-all}
+  .flt-item .ed,.flt-item .rm{background:none;border:none;cursor:pointer;font-size:13px;flex:none;padding:2px 4px;font-family:inherit;font-weight:700}
+  .flt-item .ed{color:var(--muted)} .flt-item .rm{color:var(--danger)}
+  .flt-none{font-size:12px;color:var(--faint);padding:4px 2px 8px}
+  .flt-add{display:flex;gap:7px;margin-top:2px}
+  .flt-add input{flex:1;min-width:0;border:1.5px solid var(--line);background:var(--card);color:var(--ink);
+    border-radius:9px;padding:10px;font-family:inherit;font-size:13px;outline:none}
+  .flt-add input:focus{border-color:var(--brand)}
 </style>
 </head>
 <body>
@@ -168,6 +181,7 @@
       <p class="hint">메일에서 발주서를 가져오거나 파일을 올려주세요.</p>
       <button class="go" id="mail-order" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 발주서 가져오기</button>
       <div class="setrow"><span id="gmail-who-o">메일 연결 확인 중…</span></div>
+      <div class="setrow"><span id="order-filter">발주서 검색: onekglobal.co.kr · 키워드 랩노마드</span><button class="minibtn" id="order-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-order" style="margin-top:8px">
         주문 파일 선택 (또는 여기로 끌어다 놓기)
         <b id="order-name"></b>
@@ -267,6 +281,36 @@
       <button class="btn-cancel" id="mail-cancel">취소</button>
       <button class="btn-go" id="mail-ok" disabled>가져오기</button>
     </div>
+  </div>
+</div>
+
+<!-- 검색조건 관리 모달 (발주서/회신 공용) -->
+<div class="modal" id="filtermodal">
+  <div class="sheet">
+    <div class="grip"></div>
+    <h3 id="filter-title">발주서 검색조건</h3>
+    <p class="sub2" id="filter-sub">이 조건에 맞는 메일만 골라서 가져옵니다.</p>
+    <div style="overflow-y:auto;flex:1">
+      <div class="flt-group">
+        <div class="flt-h">📮 보내는 곳 (메일/도메인)</div>
+        <div class="flt-desc">이 발신자에서 온 메일 우선. 예: onekglobal.co.kr</div>
+        <div id="flt-senders"></div>
+        <div class="flt-add"><input id="flt-sender-in" placeholder="메일 또는 도메인 추가" autocapitalize="off" spellcheck="false"><button class="minibtn" id="flt-sender-btn">추가</button></div>
+      </div>
+      <div class="flt-group">
+        <div class="flt-h">🔑 제목·파일명 키워드</div>
+        <div class="flt-desc">제목·본문·첨부파일명에 이 단어가 있으면 대상. 예: 랩노마드 발주서</div>
+        <div id="flt-keywords"></div>
+        <div class="flt-add"><input id="flt-keyword-in" placeholder="키워드 추가" autocapitalize="off" spellcheck="false"><button class="minibtn" id="flt-keyword-btn">추가</button></div>
+      </div>
+      <div class="flt-group" id="flt-exclude-group">
+        <div class="flt-h">🚫 제외할 단어</div>
+        <div class="flt-desc">이 단어가 있으면 제외. 예: 플라스머, 송장, 회신</div>
+        <div id="flt-excludes"></div>
+        <div class="flt-add"><input id="flt-exclude-in" placeholder="제외할 단어 추가" autocapitalize="off" spellcheck="false"><button class="minibtn" id="flt-exclude-btn">추가</button></div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px"><button class="btn-go" id="filter-close">완료</button></div>
   </div>
 </div>
 

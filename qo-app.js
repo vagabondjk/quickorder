@@ -562,28 +562,112 @@ async function ensureGmail() {
   updateGmailWho();
 }
 
+/* 발주서 검색조건 (PC 앱과 동일한 기본값) */
+async function getOrderFilter() {
+  return {
+    senders: await DB.get("orderSenders", ["onekglobal.co.kr"]),
+    keywords: await DB.get("orderKeywords", ["랩노마드 발주서", "랩노마드발주서", "★랩노마드", "랩노마드"]),
+    exclude: await DB.get("orderExclude", ["플라스머", "디에스피", "송장", "회신", "운송장", "택배"]),
+  };
+}
+async function drawOrderFilter() {
+  const f = await getOrderFilter();
+  const info = $("order-filter");
+  if (info) info.textContent = "발주서 검색: " + (f.senders.join(", ") || "(발신자 없음)") +
+    " · 키워드 " + (f.keywords.join(", ") || "(없음)");
+}
+
 /* 회신 검색조건 */
 async function getReplyFilter() {
   return {
     senders: await DB.get("replySenders", []),
     keywords: await DB.get("replyKeywords", ["송장", "운송장", "회신"]),
+    exclude: await DB.get("replyExclude", []),
   };
 }
-$("reply-filter-btn").onclick = async () => {
-  const f = await getReplyFilter();
-  const s = prompt("업체 메일/도메인 (쉼표로 구분, 비워도 됨)\n예: plasmer.co.kr, ds@dsp.co.kr", f.senders.join(", "));
-  if (s === null) return;
-  const k = prompt("회신 파일명·제목·본문 키워드 (쉼표로 구분)\n예: 송장, 운송장, 회신", f.keywords.join(", "));
-  if (k === null) return;
-  await DB.set("replySenders", s.split(",").map(x => x.trim()).filter(Boolean));
-  await DB.set("replyKeywords", k.split(",").map(x => x.trim()).filter(Boolean));
-  drawReplyFilter();
-};
 async function drawReplyFilter() {
   const f = await getReplyFilter();
   const el = $("reply-filter");
   if (el) el.textContent = "회신 검색: " + (f.senders.length ? f.senders.join(", ") + " · " : "") + (f.keywords.join(", ") || "(없음)");
 }
+
+/* ---------- 검색조건 관리 모달 (발주서/회신 공용) ---------- */
+const filterModal = $("filtermodal");
+let filterMode = "order";   // 'order' | 'reply'
+// 각 목록의 저장 키
+const FKEY = {
+  order: { senders: "orderSenders", keywords: "orderKeywords", exclude: "orderExclude" },
+  reply: { senders: "replySenders", keywords: "replyKeywords", exclude: "replyExclude" },
+};
+
+async function openFilter(mode) {
+  filterMode = mode;
+  $("filter-title").textContent = mode === "order" ? "발주서 검색조건" : "회신 송장 검색조건";
+  await renderFilterLists();
+  filterModal.classList.add("on");
+}
+async function renderFilterLists() {
+  const f = filterMode === "order" ? await getOrderFilter() : await getReplyFilter();
+  drawChipList("flt-senders", f.senders, "senders");
+  drawChipList("flt-keywords", f.keywords, "keywords");
+  drawChipList("flt-excludes", f.exclude || [], "exclude");
+}
+function drawChipList(boxId, items, kind) {
+  const box = $(boxId); box.innerHTML = "";
+  if (!items.length) { const e = document.createElement("div"); e.className = "flt-none"; e.textContent = "(없음)"; box.appendChild(e); return; }
+  items.forEach((val, i) => {
+    const el = document.createElement("div");
+    el.className = "flt-item";
+    el.innerHTML = `<span>${esc(val)}</span><button class="ed">수정</button><button class="rm">삭제</button>`;
+    el.querySelector(".ed").onclick = () => editFilterItem(kind, i);
+    el.querySelector(".rm").onclick = () => removeFilterItem(kind, i);
+    box.appendChild(el);
+  });
+}
+async function getList(kind) {
+  const key = FKEY[filterMode][kind];
+  const def = kind === "senders" ? (filterMode === "order" ? ["onekglobal.co.kr"] : [])
+    : kind === "keywords" ? (filterMode === "order" ? ["랩노마드 발주서", "랩노마드발주서", "★랩노마드", "랩노마드"] : ["송장", "운송장", "회신"])
+    : (filterMode === "order" ? ["플라스머", "디에스피", "송장", "회신", "운송장", "택배"] : []);
+  return await DB.get(key, def);
+}
+async function setList(kind, arr) {
+  await DB.set(FKEY[filterMode][kind], arr);
+  await renderFilterLists();
+  drawOrderFilter(); drawReplyFilter();
+}
+async function addFilterItem(kind, inputId) {
+  const inp = $(inputId), val = inp.value.trim();
+  if (!val) return;
+  const arr = await getList(kind);
+  if (!arr.includes(val)) arr.push(val);
+  inp.value = "";
+  await setList(kind, arr);
+}
+async function editFilterItem(kind, i) {
+  const arr = await getList(kind);
+  const v = prompt("수정", arr[i]);
+  if (v === null) return;
+  const t = v.trim();
+  if (!t) return;
+  arr[i] = t;
+  await setList(kind, arr);
+}
+async function removeFilterItem(kind, i) {
+  const arr = await getList(kind);
+  arr.splice(i, 1);
+  await setList(kind, arr);
+}
+$("flt-sender-btn").onclick = () => addFilterItem("senders", "flt-sender-in");
+$("flt-keyword-btn").onclick = () => addFilterItem("keywords", "flt-keyword-in");
+$("flt-exclude-btn").onclick = () => addFilterItem("exclude", "flt-exclude-in");
+$("flt-sender-in").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); addFilterItem("senders", "flt-sender-in"); } };
+$("flt-keyword-in").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); addFilterItem("keywords", "flt-keyword-in"); } };
+$("flt-exclude-in").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); addFilterItem("exclude", "flt-exclude-in"); } };
+$("filter-close").onclick = () => filterModal.classList.remove("on");
+filterModal.onclick = e => { if (e.target === filterModal) filterModal.classList.remove("on"); };
+$("order-filter-btn") && ($("order-filter-btn").onclick = () => openFilter("order"));
+$("reply-filter-btn") && ($("reply-filter-btn").onclick = () => openFilter("reply"));
 
 /* 메일 선택 모달 */
 const mailModal = $("mailmodal");
@@ -608,9 +692,11 @@ async function openMail(target) {
     let opt;
     if (target === "rep") {
       const f = await getReplyFilter();
-      opt = { days: 7, senders: f.senders, keywords: f.keywords, union: true, scanText: true };
+      opt = { days: 7, senders: f.senders, keywords: f.keywords, exclude: f.exclude || [], union: true, scanText: true };
     } else {
-      opt = { days: 7, keywords: ["발주", "주문", "랩노마드", "사방넷", "통합"], scanText: true };
+      // 발주서/사방넷: 저장된 발신자·키워드·제외어로 선별 (PC 앱과 동일)
+      const f = await getOrderFilter();
+      opt = { days: 7, senders: f.senders, keywords: f.keywords, exclude: f.exclude, union: false, scanText: true };
     }
     opt.onProgress = (i, n) => { const p = $("mail-prog"); if (p) p.textContent = `${i} / ${n}`; };
     mailItems = await GMAIL.listMails(opt);
@@ -695,4 +781,5 @@ async function setOrderFromBuf(buf, name) {
 loadForms().catch(e => { $("vlist").innerHTML = '<div class="empty">저장소를 열지 못했어요</div>'; });
 initGmail();
 drawReplyFilter();
+drawOrderFilter();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});

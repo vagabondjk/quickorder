@@ -1,5 +1,5 @@
 /* 퀵오더 서비스워커 — 오프라인에서도 열리게 */
-const CACHE = "quickorder-v3";
+const CACHE = "quickorder-v5";
 const ASSETS = ["./", "./index.html", "./qo-logic.js", "./qo-gmail.js", "./qo-app.js",
   "./manifest.json", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png",
   "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"];
