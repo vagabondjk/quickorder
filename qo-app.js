@@ -2,6 +2,11 @@
    퀵오더 앱 — 화면 동작 + 기기 저장(IndexedDB)
    =================================================================== */
 "use strict";
+// 구글 클라이언트 ID (기본 내장) — github 주소에서만 작동하게 묶여 있어 공개돼도 안전.
+// 기기·주소가 바뀌어도 다시 입력할 필요가 없다.
+const DEFAULT_CLIENT_ID = "598124965893-16qej37hhlah9ivtr9hdk76c50ms5aqs.apps.googleusercontent.com";
+async function clientId() { return (await DB.get("gmailClientId", "")) || DEFAULT_CLIENT_ID; }
+
 const CHK = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>';
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -465,7 +470,7 @@ async function drawSettings() {
   const box = $("setlist"); box.innerHTML = "";
 
   // --- 구글 메일 연결 ---
-  const cid = await DB.get("gmailClientId", "");
+  const cid = await clientId();          // 저장값 없으면 기본 내장 ID를 보여줌
   const gbox = document.createElement("div");
   gbox.className = "mitem"; gbox.style.marginBottom = "10px";
   gbox.innerHTML = `<div style="font-weight:700;font-size:13px">📧 구글 메일 연결</div>
@@ -538,8 +543,8 @@ async function drawSettings() {
    ================================================================= */
 let gmailReady = false;
 async function initGmail() {
-  const cid = await DB.get("gmailClientId", "");
-  GMAIL.init(cid);                      // 클라이언트 ID 등록(라이브러리 늦어도 됨)
+  const cid = await clientId();          // 저장값 없으면 기본 내장 ID 사용
+  GMAIL.init(cid);                       // 클라이언트 ID 등록(라이브러리 늦어도 됨)
   updateGmailWho();
   if (cid) {
     gmailReady = await GMAIL.waitReady();  // GSI 로드까지 기다렸다 준비
@@ -552,7 +557,7 @@ function updateGmailWho() {
   const a = $("gmail-who-o"); if (a) a.textContent = txt;
 }
 async function ensureGmail() {
-  const cid = await DB.get("gmailClientId", "");
+  const cid = await clientId();          // 저장값 없으면 기본 내장 ID
   if (!cid) { $("btn-settings").click(); throw new Error("먼저 설정에서 클라이언트 ID를 저장하세요."); }
   if (!gmailReady) { GMAIL.init(cid); gmailReady = await GMAIL.waitReady(); updateGmailWho(); }
   if (!gmailReady) throw new Error("구글 로그인 라이브러리를 불러오지 못했어요.\n인터넷/광고차단을 확인하고 새로고침 해보세요.");
