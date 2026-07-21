@@ -8,8 +8,57 @@ const DEFAULT_CLIENT_ID = "598124965893-16qej37hhlah9ivtr9hdk76c50ms5aqs.apps.go
 async function clientId() { return (await DB.get("gmailClientId", "")) || DEFAULT_CLIENT_ID; }
 
 const CHK = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>';
+
+// 여러 이메일(쉼표·세미콜론·줄바꿈·공백 구분) → 정리된 배열
+function parseEmails(str) {
+  const seen = new Set(), out = [];
+  for (const raw of String(str || "").split(/[,;\s]+/)) {
+    const e = raw.trim();
+    if (!e) continue;
+    const key = e.toLowerCase();
+    if (!seen.has(key)) { seen.add(key); out.push(e); }
+  }
+  return out;
+}
+function invalidEmails(list) { return list.filter(e => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)); }
+const EYE = '👁';   // 미리보기 버튼 아이콘
+
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* ---------------- 엑셀 미리보기 (어떤 파일이든) ---------------- */
+async function openPreview(buf, title) {
+  const m = $("pvmodal");
+  m.classList.add("on");
+  $("pv-modal-title").textContent = title || "미리보기";
+  $("pv-modal-sub").textContent = "읽는 중…";
+  $("pv-modal-table").innerHTML = "";
+  $("pv-modal-foot").textContent = "";
+  try {
+    const wb = await QO.loadWorkbook(buf.slice(0));
+    const pv = QO.previewAny(wb, 100);
+    $("pv-modal-sub").textContent = `시트: ${esc(pv.sheet)} · 전체 ${pv.total}건` +
+      (pv.sheets.length > 1 ? ` · (${pv.sheets.length}개 시트 중)` : "");
+    if (!pv.columns.length) { $("pv-modal-foot").textContent = "표시할 내용이 없어요."; return; }
+    let h = "<tr>" + pv.columns.map((c, i) => `<th>${esc(c || "열" + (i + 1))}</th>`).join("") + "</tr>";
+    pv.rows.forEach(row => {
+      h += "<tr>" + pv.columns.map((_, i) => {
+        const v = row[i] == null ? "" : row[i];
+        const num = /^[0-9,.\-]+$/.test(v) && v !== "";
+        return `<td${num ? ' class="num"' : ""}>${esc(v)}</td>`;
+      }).join("") + "</tr>";
+    });
+    $("pv-modal-table").innerHTML = h;
+    $("pv-modal-foot").textContent = pv.total > pv.rows.length
+      ? `앞 ${pv.rows.length}건만 표시 · 전체 ${pv.total}건` : `전체 ${pv.total}건`;
+  } catch (e) {
+    $("pv-modal-sub").textContent = "";
+    $("pv-modal-foot").textContent = "⚠ 미리보기 실패: " + e.message;
+  }
+}
+$("pv-modal-close").onclick = () => $("pvmodal").classList.remove("on");
+$("pvmodal").onclick = e => { if (e.target === $("pvmodal")) $("pvmodal").classList.remove("on"); };
+$("sab-preview").onclick = () => { if (S.sabBuf) openPreview(S.sabBuf, "송장취합양식"); };
 
 /* ---------------- 기기 저장소 (IndexedDB) ---------------- */
 const DB = (() => {
@@ -201,7 +250,7 @@ function renderPreview() {
 }
 
 /* --- 업체 양식 --- */
-$("f-tpl").addEventListener("change", function () { addForms(this.files); this.value = ""; });
+$("f-tpl").addEventListener("change", function () { const fs = [...this.files]; this.value = ""; addForms(fs); });
 bindDrop("drop-tpl", f => addForms(f));
 async function addForms(files) {
   let added = 0;
@@ -227,8 +276,12 @@ function drawForms() {
   S.forms.forEach(f => {
     const el = document.createElement("div");
     el.className = "vrow" + (f.checked ? " on" : "");
-    el.innerHTML = `<span class="box">${CHK}</span><div class="vinfo"><b>${esc(f.name)}</b><span>${esc(f.file)}</span></div><button class="vdel">✕</button>`;
+    el.innerHTML = `<span class="box">${CHK}</span><div class="vinfo"><b>${esc(f.name)}</b><span>${esc(f.file)}</span></div><button class="pv" title="미리보기">${EYE}</button><button class="vdel">✕</button>`;
     el.onclick = async ev => {
+      if (ev.target.classList.contains("pv")) {
+        ev.stopPropagation();
+        openPreview(f.data, f.name + " 양식"); return;
+      }
       if (ev.target.classList.contains("vdel")) {
         ev.stopPropagation();
         if (!confirm(`'${f.name}' 양식을 지울까요?`)) return;
@@ -244,36 +297,67 @@ function drawForms() {
 }
 
 /* --- 업체별 브랜드 --- */
+// 한 브랜드는 한 업체에만 배정 가능. 다른 업체가 이미 가진 브랜드는 여기서 못 고름.
+function brandOwner(b, exceptName) {
+  const checked = S.forms.filter(f => f.checked);
+  for (const f of checked) {
+    if (f.name === exceptName) continue;
+    if ((S.sel[f.name] || []).includes(b)) return f.name;
+  }
+  return null;
+}
 function buildVendorBrands() {
   const checked = S.forms.filter(f => f.checked);
   const card = $("card3"), box = $("vbrands");
   if (!checked.length || !S.brands.length) { card.style.display = "none"; box.innerHTML = ""; return; }
   card.style.display = "block"; box.innerHTML = "";
+  // 자동 배정 초기화 (학습된 brand_vendor) — 단, 다른 업체가 이미 쥔 건 제외
   checked.forEach(f => {
     if (!S.sel[f.name]) S.sel[f.name] = S.brands.filter(b => S.brandVendor[b] === f.name);
+  });
+  checked.forEach(f => {
     const wrap = document.createElement("div");
     wrap.className = "vendorbox";
+    wrap.dataset.vendor = f.name;
     wrap.innerHTML = `<div class="vh">🏭 ${esc(f.name)}<span class="cnt"></span><button class="all">전체</button></div>
-      <div class="brands">${S.brands.map(b => {
-        const on = S.sel[f.name].includes(b);
-        return `<span class="brow${on ? " on" : ""}" data-b="${esc(b)}"><span class="box">${CHK}</span>${esc(b)}</span>`;
-      }).join("")}</div>`;
-    wrap.querySelectorAll(".brow").forEach(chip => {
-      chip.onclick = () => {
-        const b = chip.dataset.b, arr = S.sel[f.name], i = arr.indexOf(b);
-        if (i >= 0) arr.splice(i, 1); else arr.push(b);
-        chip.classList.toggle("on", i < 0);
-        updCnt(wrap, f); refreshO();
-      };
-    });
+      <div class="brands"></div>`;
+    box.appendChild(wrap);
+    renderVendorChips(wrap, f);
     wrap.querySelector(".all").onclick = () => {
-      const all = S.sel[f.name].length === S.brands.length;
-      S.sel[f.name] = all ? [] : S.brands.slice();
-      wrap.querySelectorAll(".brow").forEach(c => c.classList.toggle("on", !all));
-      updCnt(wrap, f); refreshO();
+      const mine = S.sel[f.name] || [];
+      // 자유롭거나 내 것인 브랜드만 대상 (남의 것은 건드리지 않음)
+      const selectable = S.brands.filter(b => brandOwner(b, f.name) === null || mine.includes(b));
+      S.sel[f.name] = (mine.length === selectable.length && mine.length > 0) ? [] : selectable;
+      buildVendorBrands();                                    // 다른 업체 표시도 갱신
     };
-    box.appendChild(wrap); updCnt(wrap, f);
   });
+  refreshO();
+}
+function renderVendorChips(wrap, f) {
+  const brandsBox = wrap.querySelector(".brands");
+  brandsBox.innerHTML = S.brands.map(b => {
+    const mine = (S.sel[f.name] || []).includes(b);
+    const owner = brandOwner(b, f.name);
+    if (mine) return `<span class="brow on" data-b="${esc(b)}"><span class="box">${CHK}</span>${esc(b)}</span>`;
+    if (owner) return `<span class="brow taken" data-b="${esc(b)}" title="${esc(owner)}가 선택함">${esc(b)} <small>· ${esc(owner)}</small></span>`;
+    return `<span class="brow" data-b="${esc(b)}"><span class="box">${CHK}</span>${esc(b)}</span>`;
+  }).join("");
+  brandsBox.querySelectorAll(".brow").forEach(chip => {
+    chip.onclick = () => {
+      const b = chip.dataset.b;
+      const arr = S.sel[f.name] || (S.sel[f.name] = []);
+      const i = arr.indexOf(b);
+      if (i >= 0) { arr.splice(i, 1); }                       // 내 것 → 해제
+      else {
+        // 다른 업체가 쥐고 있으면 그쪽에서 떼어내 이리로 이동
+        const owner = brandOwner(b, f.name);
+        if (owner) { const o = S.sel[owner]; const k = o.indexOf(b); if (k >= 0) o.splice(k, 1); }
+        arr.push(b);
+      }
+      buildVendorBrands();                                    // 전 업체 다시 그려서 중복 방지 반영
+    };
+  });
+  updCnt(wrap, f);
 }
 function updCnt(wrap, f) {
   const n = S.sel[f.name].length;
@@ -325,30 +409,34 @@ function showResultO(results, skipped) {
     el.className = "rrow";
     el.innerHTML = `<div class="rtop"><div class="vinfo"><b>${esc(r.supplier)}</b><span>${esc(r.filename)}</span></div>
       <span class="cnt">${r.count}건</span></div>
-      <div class="rmail"><input type="email" placeholder="${esc(r.supplier)} 이메일 (기억됩니다)"
-        value="${esc(S.vendorEmails[r.supplier] || "")}" inputmode="email" autocapitalize="off" spellcheck="false">
+      <div class="rmail"><input type="text" placeholder="${esc(r.supplier)} 이메일 (여러 개는 쉼표로)"
+        value="${esc(S.vendorEmails[r.supplier] || "")}" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
         <button class="dlbtn send">메일 보내기</button></div>
-      <div class="setrow" style="margin-top:6px"><span style="text-align:right;flex:1"></span>
-        <button class="minibtn dl">엑셀만 받기</button></div>`;
+      <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)">여러 명에게 보내려면 쉼표로 구분 (담당자, 대표 등)</span>
+        <button class="minibtn pvbtn">👁 미리보기</button><button class="minibtn dl">엑셀만 받기</button></div>`;
     const inp = el.querySelector("input");
+    el.querySelector(".pvbtn").onclick = () => openPreview(r.buf, r.supplier + " 발주서");
     el.querySelector(".dl").onclick = () => download(r.buf, r.filename);
     inp.onchange = inp.onblur = async () => {
-      const v = inp.value.trim(); if (!v || v === S.vendorEmails[r.supplier]) return;
+      const v = inp.value.trim(); if (v === (S.vendorEmails[r.supplier] || "")) return;
       S.vendorEmails[r.supplier] = v; await DB.set("vendorEmails", S.vendorEmails);
     };
     const sendBtn = el.querySelector(".send");
     sendBtn.onclick = async () => {
-      const to = inp.value.trim();
-      if (!to) { inp.focus(); return; }
+      const list = parseEmails(inp.value);
+      if (!list.length) { inp.focus(); return; }
+      const bad = invalidEmails(list);
+      if (bad.length) { alert("이메일 형식이 이상해요:\n" + bad.join(", ")); inp.focus(); return; }
       sendBtn.disabled = true; sendBtn.textContent = "보내는 중…";
       try {
         await ensureGmail();
         const ymd = QO.todayStr().slice(2);
-        await GMAIL.send({ to, subject: `[랩노마드] ${ymd}_발주서 송부`,
+        await GMAIL.send({ to: list.join(", "), subject: `[랩노마드] ${ymd}_발주서 송부`,
           body: "안녕하세요 발주서 송부드립니다. 감사합니다!",
           attachments: [{ filename: r.filename, data: r.buf }] });
-        S.vendorEmails[r.supplier] = to; await DB.set("vendorEmails", S.vendorEmails);
-        sendBtn.textContent = "✓ 발송완료"; sendBtn.style.background = "var(--ok)";
+        S.vendorEmails[r.supplier] = inp.value.trim(); await DB.set("vendorEmails", S.vendorEmails);
+        sendBtn.textContent = list.length > 1 ? `✓ ${list.length}명 발송완료` : "✓ 발송완료";
+        sendBtn.style.background = "var(--ok)";
       } catch (e) { sendBtn.disabled = false; sendBtn.textContent = "메일 보내기"; alert("발송 실패: " + e.message); }
     };
     box.appendChild(el);
@@ -367,13 +455,13 @@ function showResultO(results, skipped) {
    ================================================================= */
 $("f-sab").addEventListener("change", async function () {
   if (this.files[0]) { S.sabBuf = await readFile(this.files[0]); S.sabName = this.files[0].name;
-    $("sab-name").textContent = "📄 " + this.files[0].name; $("drop-sab").classList.add("on"); refreshI(); }
+    $("sab-name").textContent = "📄 " + this.files[0].name; $("drop-sab").classList.add("on"); $("sab-preview").style.display="block"; refreshI(); }
 });
 bindDrop("drop-sab", async f => {
   S.sabBuf = await readFile(f[0]); S.sabName = f[0].name;
-  $("sab-name").textContent = "📄 " + f[0].name; $("drop-sab").classList.add("on"); refreshI();
+  $("sab-name").textContent = "📄 " + f[0].name; $("drop-sab").classList.add("on"); $("sab-preview").style.display="block"; refreshI();
 });
-$("f-rep").addEventListener("change", function () { addReps(this.files); this.value = ""; });
+$("f-rep").addEventListener("change", function () { const fs = [...this.files]; this.value = ""; addReps(fs); });
 bindDrop("drop-rep", f => addReps(f));
 
 async function addReps(files) {
@@ -390,7 +478,8 @@ function drawReps() {
     const el = document.createElement("div");
     el.className = "vrow on";
     el.innerHTML = `<span class="box">${CHK}</span><div class="vinfo"><b>${esc(QO.nameFromFilename(r.name))}</b>
-      <span>${esc(r.name)}</span></div><button class="vdel">✕</button>`;
+      <span>${esc(r.name)}</span></div><button class="pv" title="미리보기">${EYE}</button><button class="vdel">✕</button>`;
+    el.querySelector(".pv").onclick = e => { e.stopPropagation(); openPreview(r.data, QO.nameFromFilename(r.name) + " 회신"); };
     el.querySelector(".vdel").onclick = e => { e.stopPropagation(); S.reps.splice(i, 1); drawReps(); };
     box.appendChild(el);
   });
@@ -420,8 +509,10 @@ function showResultI(out, buf, filename) {
     <tr><th>업체</th><th>기입</th><th>미매칭</th><th>상태</th></tr>`;
   out.per.forEach(p => { h += `<tr><td>${esc(p[0])}</td><td class="num">${p[1]}</td><td class="num">${p[2]}</td><td>${esc(p[3])}</td></tr>`; });
   h += "</table></div></div>";
+
+  // (가) 회신 송장 수 ↔ 취합본 기입 수 대조
   if (out.gap === 0) {
-    h += `<div class="msg show ok" style="margin-top:0">✔ 송장 갯수 일치 — 회신 ${out.srcInvoice}건 = 취합본 ${out.writtenInvoice}건, 누락 없음</div>`;
+    h += `<div class="msg show ok" style="margin-top:0">✔ 송장 갯수 일치 — 회신 ${out.srcInvoice}건 = 취합본 ${out.writtenInvoice}건 모두 기입됨</div>`;
   } else if (out.gap > 0) {
     let d = "";
     for (const k in out.perSrc) d += `\n· ${k} 회신 ${out.perSrc[k]}건`;
@@ -429,25 +520,40 @@ function showResultI(out, buf, filename) {
   } else {
     h += `<div class="msg show err" style="margin-top:0">⚠ 취합본 기입(${out.writtenInvoice}건)이 회신 송장(${out.srcInvoice}건)보다 많습니다. 회신 파일 중복을 확인하세요.</div>`;
   }
+
+  // (나) 취합본 빈칸(누락) 점검 — 주문행인데 송장이 안 채워진 행
+  if (out.orderRows !== undefined) {
+    if (out.missingCount === 0) {
+      h += `<div class="msg show ok" style="margin-top:8px">✔ 취합본 빈칸 없음 — 주문 ${out.orderRows}행 전부 송장 기입 완료</div>`;
+    } else {
+      let lst = (out.missing || []).map(m => `\n· ${esc(m.label)}`).join("");
+      const more = out.missingCount - (out.missing || []).length;
+      if (more > 0) lst += `\n· … 외 ${more}건`;
+      h += `<div class="msg show err" style="margin-top:8px">⚠ 취합본 송장 빈칸 ${out.missingCount}건 / 주문 ${out.orderRows}행\n아래 주문은 업체 회신에 송장이 없어 비어 있습니다 — 회신 누락 여부를 확인하세요:${lst}</div>`;
+    }
+  }
   h += `<div class="rrow" style="margin-top:12px"><div class="rtop"><div class="vinfo"><b>송장 취합본</b>
     <span>${esc(filename)}</span></div><span class="cnt">${out.total}건</span></div>
-    <div class="rmail"><input type="email" id="inv-to" placeholder="받는 사람 이메일" inputmode="email" autocapitalize="off" spellcheck="false">
+    <div class="rmail"><input type="text" id="inv-to" placeholder="받는 사람 이메일 (여러 개는 쉼표로)" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button class="dlbtn" id="send-inv">메일 보내기</button></div>
-    <div class="setrow" style="margin-top:6px"><span style="flex:1"></span><button class="minibtn" id="dl-inv">엑셀만 받기</button></div></div>`;
+    <div class="setrow" style="margin-top:6px"><span style="flex:1"></span><button class="minibtn" id="pv-inv">👁 미리보기</button><button class="minibtn" id="dl-inv">엑셀만 받기</button></div></div>`;
   $("rlist-i").innerHTML = h;
+  $("pv-inv").onclick = () => openPreview(buf, "송장 취합본");
   $("dl-inv").onclick = () => download(buf, filename);
   DB.get("vendorEmails", {}).then(v => { /* 기본값 없음 */ });
   $("send-inv").onclick = async function () {
-    const to = $("inv-to").value.trim();
-    if (!to) { $("inv-to").focus(); return; }
+    const list = parseEmails($("inv-to").value);
+    if (!list.length) { $("inv-to").focus(); return; }
+    const bad = invalidEmails(list);
+    if (bad.length) { alert("이메일 형식이 이상해요:\n" + bad.join(", ")); $("inv-to").focus(); return; }
     this.disabled = true; this.textContent = "보내는 중…";
     try {
       await ensureGmail();
       const ymd = QO.todayStr().slice(2);
-      await GMAIL.send({ to, subject: `[랩노마드] ${ymd}_송장 취합본 송부`,
+      await GMAIL.send({ to: list.join(", "), subject: `[랩노마드] ${ymd}_송장 취합본 송부`,
         body: "안녕하세요 송장 취합본 송부드립니다. 감사합니다!",
         attachments: [{ filename, data: buf }] });
-      this.textContent = "✓ 발송완료"; this.style.background = "var(--ok)";
+      this.textContent = list.length > 1 ? `✓ ${list.length}명 발송완료` : "✓ 발송완료"; this.style.background = "var(--ok)";
     } catch (e) { this.disabled = false; this.textContent = "메일 보내기"; alert("발송 실패: " + e.message); }
   };
   $("result-i").style.display = "block";
@@ -755,7 +861,7 @@ $("mail-ok").onclick = async function () {
       msg("msg-o", "ok", "✔ 메일에서 가져왔어요: " + got[0].name);
     } else if (mailTarget === "sab") {
       S.sabBuf = got[0].data; S.sabName = got[0].name;
-      $("sab-name").textContent = "📧 " + got[0].name; $("drop-sab").classList.add("on"); refreshI();
+      $("sab-name").textContent = "📧 " + got[0].name; $("drop-sab").classList.add("on"); $("sab-preview").style.display="block"; refreshI();
     } else {
       for (const g of got) if (!S.reps.some(r => r.name === g.name)) S.reps.push(g);
       drawReps();

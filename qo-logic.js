@@ -464,9 +464,32 @@ function collectInvoices(sabangWb, replies, opts) {
   const srcInvoice = Object.values(perSrc).reduce((a, b) => a + b, 0);
   const writtenInvoice = Object.values(best.fills).filter(c => c[best.fm.INVOICE] !== undefined).length;
 
+  // 6) 취합본 빈칸(누락) 점검 — 주문행인데 송장이 안 채워진 행 찾기
+  //    (업체 회신에서 해당 주문의 송장이 빠졌는지 확인)
+  const bfm = best.fm, bhr = best.hr, bws = best.ws, bd = dims(bws);
+  const keyPresent = KEY_FIELDS.filter(f => bfm[f] !== undefined);
+  const labelFields = ["RECIPIENT", "PRODUCT", "ORDERER", "ADDR"].filter(f => bfm[f] !== undefined);
+  const missing = [];
+  let orderRows = 0;
+  for (let r = bhr + 1; r <= bd.rows; r++) {
+    // 주문행 판정: 핵심 식별항목 중 하나라도 값이 있으면 실제 주문행
+    const hasKey = keyPresent.some(f => !isBlank(getV(bws, r, bfm[f])));
+    if (!hasKey) continue;
+    orderRows++;
+    const invCell = getV(bws, r, bfm.INVOICE);   // 채운 뒤 값
+    if (isBlank(invCell)) {
+      const label = labelFields
+        .map(f => { const v = getV(bws, r, bfm[f]); return v == null ? "" : String(v).trim(); })
+        .filter(Boolean).join(" · ") || `${r}행`;
+      missing.push({ row: r, label });
+    }
+  }
+  const missingCount = missing.length;
+
   const per = best.per.concat(errors);
-  log(`대상 시트 '${best.ws.name}' · 총 ${best.total}건 기입 · 회신 ${srcInvoice} / 취합본 ${writtenInvoice}`);
-  return { total: best.total, per, srcInvoice, writtenInvoice, gap: srcInvoice - writtenInvoice, perSrc, sheet: best.ws.name };
+  log(`대상 시트 '${best.ws.name}' · 총 ${best.total}건 기입 · 회신 ${srcInvoice} / 취합본 ${writtenInvoice} · 주문행 ${orderRows} / 빈칸(누락) ${missingCount}`);
+  return { total: best.total, per, srcInvoice, writtenInvoice, gap: srcInvoice - writtenInvoice,
+    perSrc, sheet: best.ws.name, orderRows, missingCount, missing: missing.slice(0, 30) };
 }
 
 /* ---------------- 내용 미리보기 ---------------- */
@@ -495,6 +518,34 @@ function preview(wb, limit) {
   return { columns: cols, rows, total, keyIdx, sheet: ws.name };
 }
 
+/* ---------------- 범용 미리보기 (어떤 엑셀이든) ---------------- */
+function previewAny(wb, limit) {
+  limit = limit || 50;
+  // 데이터가 가장 많은 시트 선택 (양식/취합/결과 등 무엇이든)
+  let ws = null, best = -1;
+  for (const w of wb.worksheets) {
+    const d = dims(w);
+    const score = (d.rows || 0) * 1000 + (d.cols || 0);
+    if (score > best) { best = score; ws = w; }
+  }
+  if (!ws) return { columns: [], rows: [], total: 0, sheet: "", sheets: [] };
+  const hr = findHeaderRow(ws);
+  const d = dims(ws);
+  const cols = [];
+  for (let c = 1; c <= d.cols; c++) { const v = getV(ws, hr, c); cols.push(v === null ? "" : String(v).trim()); }
+  while (cols.length && !cols[cols.length - 1]) cols.pop();
+  const ncol = Math.max(cols.length, 1);
+  const rows = []; let total = 0;
+  for (let r = hr + 1; r <= d.rows; r++) {
+    const vals = []; let empty = true;
+    for (let c = 1; c <= ncol; c++) { const v = getV(ws, r, c); vals.push(v); if (!isBlank(v)) empty = false; }
+    if (empty) continue;
+    total++;
+    if (rows.length < limit) rows.push(vals.map(v => v === null || v === undefined ? "" : (v instanceof Date ? extractDate(v) : String(v))));
+  }
+  return { columns: cols, rows, total, sheet: ws.name, sheets: wb.worksheets.map(w => w.name) };
+}
+
 /* ---------------- 워크북 헬퍼 ---------------- */
 async function loadWorkbook(dataOrBuffer) {
   const wb = new ExcelJS.Workbook();
@@ -514,5 +565,5 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   pickOrderSheet, findBrandColumn, listBrands, extractDate, isCollectHeader,
   findDateColumns, defaultDateColumn, orderDateInfo, formatPhone, stripHyphen,
   valueTransformForHeader, nameFromFilename, normKey,
-  convert, collectInvoices, preview, loadWorkbook, saveWorkbook, todayStr, fmtDate };
+  convert, collectInvoices, preview, previewAny, loadWorkbook, saveWorkbook, todayStr, fmtDate };
 });
