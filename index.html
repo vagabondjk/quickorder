@@ -101,7 +101,8 @@
   .vinfo b{font-size:14px;font-weight:800;display:block}
   .vinfo span{font-size:11.5px;color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .vdel{background:none;border:none;color:var(--faint);font-size:16px;cursor:pointer;flex:none;padding:4px 6px}
-  .vrow .pv{background:none;border:none;font-size:16px;cursor:pointer;flex:none;padding:4px 6px}
+  button.pv{background:var(--card2);border:1px solid var(--line);color:var(--muted);font-family:inherit;
+    font-size:11px;font-weight:700;cursor:pointer;flex:none;padding:5px 10px;border-radius:7px}
   .empty{text-align:center;color:var(--faint);font-size:12.5px;padding:16px 8px;line-height:1.6}
 
   .vendorbox{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:10px}
@@ -111,6 +112,14 @@
     font-family:inherit;font-size:10.5px;font-weight:700;padding:4px 9px;border-radius:7px;cursor:pointer}
   .brands{display:flex;flex-wrap:wrap;gap:7px;padding:11px}
 
+  .cands{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:9px}
+  .candlbl{font-size:11px;color:var(--muted);font-weight:700}
+  .candhint{font-size:11px;color:var(--faint)}
+  .cand{font-size:11.5px;font-weight:600;font-family:inherit;cursor:pointer;
+    border:1.5px solid var(--line);background:var(--card);color:var(--ink);padding:5px 10px;border-radius:999px}
+  .cand.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
+  .cand.on::before{content:"✓ "}
+  .cand.ghost{border-style:dashed;color:var(--muted)}
   .rrow{border:1.5px solid var(--line);border-radius:12px;padding:12px;margin-bottom:9px}
   .rtop{display:flex;align-items:center;gap:10px}
   .rtop .cnt{font-size:12px;color:var(--muted);font-weight:700;flex:none}
@@ -175,7 +184,7 @@
 <div class="wrap">
   <header>
     <b>퀵오더</b><span class="sub">by JK</span>
-    <span class="verbadge" id="app-ver">v2.0</span>
+    <span class="verbadge" id="app-ver">v2.3</span>
     <span style="margin-left:auto"></span>
     <button class="chip" id="btn-settings">설정</button>
   </header>
@@ -255,7 +264,7 @@
         <b id="sab-name"></b>
         <input type="file" id="f-sab" accept=".xlsx,.xlsm">
       </label>
-      <button class="minibtn" id="sab-preview" style="display:none;margin-top:8px">👁 송장취합양식 미리보기</button>
+      <button class="minibtn" id="sab-preview" style="display:none;margin-top:8px">송장취합양식 미리보기</button>
     </div>
 
     <div class="card">
@@ -279,7 +288,7 @@
     </div>
   </div>
 
-  <p class="foot">퀵오더 <b>v2.0</b> · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
+  <p class="foot">퀵오더 <b>v2.3</b> · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
 </div>
 
 <!-- 메일 선택 모달 -->

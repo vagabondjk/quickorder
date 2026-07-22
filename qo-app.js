@@ -21,7 +21,7 @@ function parseEmails(str) {
   return out;
 }
 function invalidEmails(list) { return list.filter(e => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)); }
-const EYE = '👁';   // 미리보기 버튼 아이콘
+const EYE = '미리보기';   // 미리보기 버튼 라벨(텍스트)
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -109,7 +109,7 @@ const S = {
   orderWb: null, orderBuf: null, orderName: "",
   brands: [], dateAll: [], dateSel: [], dateHeader: null,
   pv: null, pvAll: false,
-  forms: [], brandVendor: {}, vendorEmails: {}, sel: {},
+  forms: [], brandVendor: {}, vendorEmails: {}, vendorSent: {}, sel: {},
   sabBuf: null, sabName: "", reps: [],
 };
 
@@ -277,6 +277,7 @@ async function loadForms() {
   S.forms = await DB.listForms();
   S.brandVendor = await DB.get("brandVendor", {});
   S.vendorEmails = await DB.get("vendorEmails", {});
+  S.vendorSent = await DB.get("vendorSent", {});
   drawForms(); buildVendorBrands(); refreshO();
 }
 function drawForms() {
@@ -419,12 +420,14 @@ function showResultO(results, skipped) {
     el.className = "rrow";
     el.innerHTML = `<div class="rtop"><div class="vinfo"><b>${esc(r.supplier)}</b><span>${esc(r.filename)}</span></div>
       <span class="cnt">${r.count}건</span></div>
+      <div class="cands"></div>
       <div class="rmail"><input type="text" placeholder="${esc(r.supplier)} 이메일 (여러 개는 쉼표로)"
         value="${esc(S.vendorEmails[r.supplier] || "")}" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
         <button class="dlbtn send">메일 보내기</button></div>
       <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)">여러 명에게 보내려면 쉼표로 구분 (담당자, 대표 등)</span>
-        <button class="minibtn pvbtn">👁 미리보기</button><button class="minibtn dl">엑셀만 받기</button></div>`;
+        <button class="minibtn pvbtn">미리보기</button><button class="minibtn dl">엑셀만 받기</button></div>`;
     const inp = el.querySelector("input");
+    fillRecipients(el.querySelector(".cands"), inp, r.supplier);
     el.querySelector(".pvbtn").onclick = () => openPreview(r.buf, r.supplier + " 발주서");
     el.querySelector(".dl").onclick = () => download(r.buf, r.filename);
     inp.onchange = inp.onblur = async () => {
@@ -445,6 +448,7 @@ function showResultO(results, skipped) {
           body: "안녕하세요 발주서 송부드립니다. 감사합니다!",
           attachments: [{ filename: r.filename, data: r.buf }] });
         S.vendorEmails[r.supplier] = inp.value.trim(); await DB.set("vendorEmails", S.vendorEmails);
+        await recordSent(r.supplier, list);      // 보낸 주소들을 이력에 기억
         sendBtn.textContent = list.length > 1 ? `✓ ${list.length}명 발송완료` : "✓ 발송완료";
         sendBtn.style.background = "var(--ok)";
       } catch (e) { sendBtn.disabled = false; sendBtn.textContent = "메일 보내기"; alert("발송 실패: " + e.message); }
@@ -458,6 +462,82 @@ function showResultO(results, skipped) {
   }
   $("result-o").style.display = "block";
   $("result-o").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/* 보낸 주소를 업체별 이력에 기억(최근 순, 중복 제거, 최대 12개) */
+async function recordSent(supplier, emails) {
+  const cur = (S.vendorSent[supplier] || []).slice();
+  for (const e of emails) {
+    const lc = e.toLowerCase();
+    const i = cur.findIndex(x => x.toLowerCase() === lc);
+    if (i >= 0) cur.splice(i, 1);
+    cur.unshift(e);
+  }
+  S.vendorSent[supplier] = cur.slice(0, 12);
+  await DB.set("vendorSent", S.vendorSent);
+}
+
+/* 받는사람 후보 칩: ⓐ마지막 발송(기본) ⓑ이전에 보낸 주소들 ⓒ메일에서 찾은 주소 → 클릭해서 선택 */
+async function fillRecipients(container, inp, supplier) {
+  if (!container) return;
+  container.innerHTML = "";
+  const chosenSet = () => new Set(parseEmails(inp.value).map(e => e.toLowerCase()));
+  const seen = new Set();
+  const lbl = document.createElement("span");
+  lbl.className = "candlbl"; lbl.textContent = "받는사람 후보:";
+  container.appendChild(lbl);
+
+  function refreshStates() {
+    const cs = chosenSet();
+    container.querySelectorAll(".cand").forEach(x => x.classList.toggle("on", cs.has((x.dataset.email || "").toLowerCase())));
+  }
+  function addChip(email) {
+    const lc = email.toLowerCase();
+    if (!lc || seen.has(lc)) return; seen.add(lc);
+    const c = document.createElement("button");
+    c.className = "cand" + (chosenSet().has(lc) ? " on" : "");
+    c.dataset.email = email; c.textContent = email;
+    c.onclick = () => {
+      const cur = parseEmails(inp.value);
+      const i = cur.findIndex(e => e.toLowerCase() === lc);
+      if (i >= 0) cur.splice(i, 1); else cur.push(email);
+      inp.value = cur.join(", ");
+      inp.dispatchEvent(new Event("change"));
+      refreshStates();
+    };
+    container.appendChild(c);
+  }
+  inp.addEventListener("input", refreshStates);
+
+  // ⓐ 마지막 발송(기본) + ⓑ 이전에 보냈던 주소들
+  parseEmails(S.vendorEmails[supplier] || "").forEach(addChip);
+  (S.vendorSent[supplier] || []).forEach(addChip);
+
+  // ⓒ 메일에서 업체명으로 찾은 주소
+  if (GMAIL.signedIn()) {
+    const hint = document.createElement("span");
+    hint.className = "candhint"; hint.textContent = "메일에서 찾는 중…";
+    container.appendChild(hint);
+    try {
+      const found = await GMAIL.searchAddresses({ query: supplier, max: 15 });
+      hint.remove();
+      found.slice(0, 8).forEach(f => addChip(f.email));
+    } catch (e) { hint.remove(); }
+    if (seen.size === 0) {
+      const s = document.createElement("span");
+      s.className = "candhint"; s.textContent = "추천 주소 없음 — 직접 입력하세요";
+      container.appendChild(s);
+    }
+  } else {
+    const b = document.createElement("button");
+    b.className = "cand ghost"; b.textContent = "＋ 메일에서 받는사람 찾기";
+    b.onclick = async () => {
+      b.textContent = "로그인 중…";
+      try { await ensureGmail(); } catch (e) { b.textContent = "＋ 메일에서 받는사람 찾기"; return; }
+      fillRecipients(container, inp, supplier);
+    };
+    container.appendChild(b);
+  }
 }
 
 /* =================================================================
@@ -543,7 +623,7 @@ function showResultI(out, buf, filename) {
     <span>${esc(filename)}</span></div><span class="cnt">${out.total}건</span></div>
     <div class="rmail"><input type="text" id="inv-to" placeholder="받는 사람 이메일 (여러 개는 쉼표로)" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button class="dlbtn" id="send-inv">메일 보내기</button></div>
-    <div class="setrow" style="margin-top:6px"><span style="flex:1"></span><button class="minibtn" id="pv-inv">👁 미리보기</button><button class="minibtn" id="dl-inv">엑셀만 받기</button></div></div>`;
+    <div class="setrow" style="margin-top:6px"><span style="flex:1"></span><button class="minibtn" id="pv-inv">미리보기</button><button class="minibtn" id="dl-inv">엑셀만 받기</button></div></div>`;
   $("rlist-i").innerHTML = h;
   $("pv-inv").onclick = () => openPreview(buf, "송장 취합본");
   $("dl-inv").onclick = () => download(buf, filename);

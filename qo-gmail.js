@@ -231,6 +231,39 @@ const GMAIL = (() => {
 
   async function profile() { return await api("/profile"); }
 
+  /* ---------- 업체명으로 메일 검색 → 받는사람 후보 주소 뽑기 ---------- */
+  function extractEmails(str) {
+    if (!str) return [];
+    const m = String(str).match(/[^\s<>,"();:]+@[^\s<>,"();:]+\.[^\s<>,"();:]+/g);
+    return m ? m.map(s => s.replace(/[.,;]+$/, "")) : [];
+  }
+  async function searchAddresses({ query, max = 15, days = 365 } = {}) {
+    if (!query) return [];
+    const q = `${query} newer_than:${days}d`;
+    let listed;
+    try { listed = await api(`/messages?q=${encodeURIComponent(q)}&maxResults=${max}`); }
+    catch (e) { return []; }
+    const ids = (listed.messages || []).map(m => m.id);
+    let self = "";
+    try { self = ((await profile()).emailAddress || "").toLowerCase(); } catch (e) {}
+    const tally = {};
+    await Promise.all(ids.map(async id => {
+      let msg;
+      try {
+        msg = await api(`/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Reply-To`);
+      } catch (e) { return; }
+      for (const h of ["From", "To", "Cc", "Reply-To"]) {
+        for (const addr of extractEmails(headerOf(msg, h))) {
+          const lc = addr.toLowerCase();
+          if (!lc || lc === self) continue;
+          if (/(no[-_.]?reply|mailer-daemon|postmaster|donotreply|notification)/i.test(lc)) continue;
+          tally[lc] = (tally[lc] || 0) + 1;
+        }
+      }
+    }));
+    return Object.entries(tally).sort((a, b) => b[1] - a[1]).map(([email, count]) => ({ email, count }));
+  }
+
   /* ---------- 구글 드라이브 (앱 전용 숨김 폴더 appDataFolder) ---------- */
   function driveErr(status, body) {
     let m = "";
@@ -277,5 +310,5 @@ const GMAIL = (() => {
   }
 
   return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, listMails, getAttachment, send, profile,
-           driveFind, driveDownload, driveUpload };
+           searchAddresses, driveFind, driveDownload, driveUpload };
 })();
