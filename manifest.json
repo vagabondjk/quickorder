@@ -1,6 +1,6 @@
 {
-  "name": "퀵오더 — 발주서·송장 자동화",
-  "short_name": "퀵오더",
+  "name": "퀵오더 웹 — 발주서·송장 자동화",
+  "short_name": "퀵오더 웹",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

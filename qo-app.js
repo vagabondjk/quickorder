@@ -21,6 +21,15 @@ function parseEmails(str) {
   return out;
 }
 function invalidEmails(list) { return list.filter(e => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)); }
+// "@dsp.com, onekglobal.co.kr" → ["dsp.com","onekglobal.co.kr"]
+function parseDomains(str) {
+  const out = [];
+  for (const raw of String(str || "").split(/[,;\s]+/)) {
+    const d = raw.trim().replace(/^@/, "").toLowerCase();
+    if (d && !out.includes(d)) out.push(d);
+  }
+  return out;
+}
 const EYE = '미리보기';   // 미리보기 버튼 라벨(텍스트)
 
 const $ = id => document.getElementById(id);
@@ -109,7 +118,8 @@ const S = {
   orderWb: null, orderBuf: null, orderName: "",
   brands: [], dateAll: [], dateSel: [], dateHeader: null,
   pv: null, pvAll: false,
-  forms: [], brandVendor: {}, vendorEmails: {}, vendorSent: {}, sel: {},
+  forms: [], brandVendor: {}, vendorEmails: {}, vendorSent: {}, vendorDomains: {}, sel: {},
+  invEmails: "", invSent: [],
   sabBuf: null, sabName: "", reps: [],
 };
 
@@ -278,6 +288,9 @@ async function loadForms() {
   S.brandVendor = await DB.get("brandVendor", {});
   S.vendorEmails = await DB.get("vendorEmails", {});
   S.vendorSent = await DB.get("vendorSent", {});
+  S.vendorDomains = await DB.get("vendorDomains", {});
+  S.invEmails = await DB.get("invEmails", "");
+  S.invSent = await DB.get("invSent", []);
   drawForms(); buildVendorBrands(); refreshO();
 }
 function drawForms() {
@@ -427,7 +440,9 @@ function showResultO(results, skipped) {
       <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)">여러 명에게 보내려면 쉼표로 구분 (담당자, 대표 등)</span>
         <button class="minibtn pvbtn">미리보기</button><button class="minibtn dl">엑셀만 받기</button></div>`;
     const inp = el.querySelector("input");
-    fillRecipients(el.querySelector(".cands"), inp, r.supplier);
+    fillRecipients(el.querySelector(".cands"), inp, {
+      saved: S.vendorEmails[r.supplier], history: S.vendorSent[r.supplier],
+      domains: parseDomains(S.vendorDomains[r.supplier]), query: r.supplier });
     el.querySelector(".pvbtn").onclick = () => openPreview(r.buf, r.supplier + " 발주서");
     el.querySelector(".dl").onclick = () => download(r.buf, r.filename);
     inp.onchange = inp.onblur = async () => {
@@ -464,22 +479,33 @@ function showResultO(results, skipped) {
   $("result-o").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-/* 보낸 주소를 업체별 이력에 기억(최근 순, 중복 제거, 최대 12개) */
-async function recordSent(supplier, emails) {
-  const cur = (S.vendorSent[supplier] || []).slice();
+/* 보낸 주소 목록을 최근 순·중복 제거로 병합(최대 12개) */
+function mergeRecent(arr, emails, cap) {
+  const cur = (arr || []).slice();
   for (const e of emails) {
-    const lc = e.toLowerCase();
-    const i = cur.findIndex(x => x.toLowerCase() === lc);
+    const i = cur.findIndex(x => x.toLowerCase() === e.toLowerCase());
     if (i >= 0) cur.splice(i, 1);
     cur.unshift(e);
   }
-  S.vendorSent[supplier] = cur.slice(0, 12);
+  return cur.slice(0, cap || 12);
+}
+/* 업체 발주서 발송 이력 저장 */
+async function recordSent(supplier, emails) {
+  S.vendorSent[supplier] = mergeRecent(S.vendorSent[supplier], emails);
   await DB.set("vendorSent", S.vendorSent);
 }
+/* 송장 취합본 발송 이력 저장 */
+async function recordSentInv(emails) {
+  S.invSent = mergeRecent(S.invSent, emails);
+  await DB.set("invSent", S.invSent);
+}
 
-/* 받는사람 후보 칩: ⓐ마지막 발송(기본) ⓑ이전에 보낸 주소들 ⓒ메일에서 찾은 주소 → 클릭해서 선택 */
-async function fillRecipients(container, inp, supplier) {
+/* 받는사람 후보 칩 (발주/송장 공용)
+   opts = { saved:"주소들", history:[주소...], domains:[도메인...], query:"메일검색어" }
+   ⓐ저장(기본) ⓑ이전 발송 ⓒ메일에서 찾은 주소(query+도메인 있을 때, 도메인 필터) → 클릭 선택 */
+async function fillRecipients(container, inp, opts) {
   if (!container) return;
+  opts = opts || {};
   container.innerHTML = "";
   const chosenSet = () => new Set(parseEmails(inp.value).map(e => e.toLowerCase()));
   const seen = new Set();
@@ -509,34 +535,49 @@ async function fillRecipients(container, inp, supplier) {
   }
   inp.addEventListener("input", refreshStates);
 
-  // ⓐ 마지막 발송(기본) + ⓑ 이전에 보냈던 주소들
-  parseEmails(S.vendorEmails[supplier] || "").forEach(addChip);
-  (S.vendorSent[supplier] || []).forEach(addChip);
+  const doms = opts.domains || [];
+  const inDom = e => { const d = (String(e).split("@")[1] || "").toLowerCase(); return doms.some(x => d === x || d.endsWith("." + x)); };
 
-  // ⓒ 메일에서 업체명으로 찾은 주소
-  if (GMAIL.signedIn()) {
-    const hint = document.createElement("span");
-    hint.className = "candhint"; hint.textContent = "메일에서 찾는 중…";
-    container.appendChild(hint);
-    try {
-      const found = await GMAIL.searchAddresses({ query: supplier, max: 15 });
-      hint.remove();
-      found.slice(0, 8).forEach(f => addChip(f.email));
-    } catch (e) { hint.remove(); }
-    if (seen.size === 0) {
+  // ⓐ 저장(기본) + ⓑ 이전에 보냈던 주소들 (항상 후보)
+  parseEmails(opts.saved || "").forEach(addChip);
+  (opts.history || []).forEach(addChip);
+
+  // ⓒ 메일에서 검색한 주소 — query가 있을 때만
+  if (opts.query) {
+    if (GMAIL.signedIn() && doms.length) {
+      const hint = document.createElement("span");
+      hint.className = "candhint"; hint.textContent = "메일에서 찾는 중…";
+      container.appendChild(hint);
+      try {
+        const found = await GMAIL.searchAddresses({ query: opts.query, max: 20 });
+        hint.remove();
+        found.map(f => f.email).filter(inDom).slice(0, 8).forEach(addChip);
+      } catch (e) { hint.remove(); }
+      if (seen.size === 0) {
+        const s = document.createElement("span");
+        s.className = "candhint"; s.textContent = "해당 도메인 주소를 못 찾음 — 직접 입력하세요";
+        container.appendChild(s);
+      }
+    } else if (!doms.length) {
       const s = document.createElement("span");
-      s.className = "candhint"; s.textContent = "추천 주소 없음 — 직접 입력하세요";
+      s.className = "candhint";
+      s.textContent = "설정에서 이 업체의 메일 도메인을 넣으면, 메일함에서 받는사람을 자동으로 찾아줍니다.";
       container.appendChild(s);
+    } else {
+      const b = document.createElement("button");
+      b.className = "cand ghost"; b.textContent = "＋ 메일에서 받는사람 찾기";
+      b.onclick = async () => {
+        b.textContent = "로그인 중…";
+        try { await ensureGmail(); } catch (e) { b.textContent = "＋ 메일에서 받는사람 찾기"; return; }
+        fillRecipients(container, inp, opts);
+      };
+      container.appendChild(b);
     }
-  } else {
-    const b = document.createElement("button");
-    b.className = "cand ghost"; b.textContent = "＋ 메일에서 받는사람 찾기";
-    b.onclick = async () => {
-      b.textContent = "로그인 중…";
-      try { await ensureGmail(); } catch (e) { b.textContent = "＋ 메일에서 받는사람 찾기"; return; }
-      fillRecipients(container, inp, supplier);
-    };
-    container.appendChild(b);
+  } else if (seen.size === 0) {
+    // 송장 취합본 등: 검색어 없음. 이력이 없으면 안내만.
+    const s = document.createElement("span");
+    s.className = "candhint"; s.textContent = "한 번 보내면 다음부터 여기서 골라 보낼 수 있어요.";
+    container.appendChild(s);
   }
 }
 
@@ -621,13 +662,16 @@ function showResultI(out, buf, filename) {
   }
   h += `<div class="rrow" style="margin-top:12px"><div class="rtop"><div class="vinfo"><b>송장 취합본</b>
     <span>${esc(filename)}</span></div><span class="cnt">${out.total}건</span></div>
-    <div class="rmail"><input type="text" id="inv-to" placeholder="받는 사람 이메일 (여러 개는 쉼표로)" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <div class="cands" id="inv-cands"></div>
+    <div class="rmail"><input type="text" id="inv-to" placeholder="받는 사람 이메일 (여러 개는 쉼표로)"
+      value="${esc(S.invEmails || "")}" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button class="dlbtn" id="send-inv">메일 보내기</button></div>
-    <div class="setrow" style="margin-top:6px"><span style="flex:1"></span><button class="minibtn" id="pv-inv">미리보기</button><button class="minibtn" id="dl-inv">엑셀만 받기</button></div></div>`;
+    <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)">여러 명에게 보내려면 쉼표로 구분 (담당자, 대표 등)</span><button class="minibtn" id="pv-inv">미리보기</button><button class="minibtn" id="dl-inv">엑셀만 받기</button></div></div>`;
   $("rlist-i").innerHTML = h;
   $("pv-inv").onclick = () => openPreview(buf, "송장 취합본");
   $("dl-inv").onclick = () => download(buf, filename);
-  DB.get("vendorEmails", {}).then(v => { /* 기본값 없음 */ });
+  // 받는사람 후보: 마지막 발송(기본) + 이전에 보낸 곳들 (송장은 업체명이 없어 메일검색은 생략)
+  fillRecipients($("inv-cands"), $("inv-to"), { saved: S.invEmails, history: S.invSent });
   $("send-inv").onclick = async function () {
     const list = parseEmails($("inv-to").value);
     if (!list.length) { $("inv-to").focus(); return; }
@@ -640,6 +684,8 @@ function showResultI(out, buf, filename) {
       await GMAIL.send({ to: list.join(", "), subject: `[랩노마드] ${ymd}_송장 취합본 송부`,
         body: "안녕하세요 송장 취합본 송부드립니다. 감사합니다!",
         attachments: [{ filename, data: buf }] });
+      S.invEmails = $("inv-to").value.trim(); await DB.set("invEmails", S.invEmails);
+      await recordSentInv(list);      // 보낸 곳 이력에 기억
       this.textContent = list.length > 1 ? `✓ ${list.length}명 발송완료` : "✓ 발송완료"; this.style.background = "var(--ok)";
     } catch (e) { this.disabled = false; this.textContent = "메일 보내기"; alert("발송 실패: " + e.message); }
   };
@@ -714,28 +760,35 @@ async function drawSettings() {
 
   const names = [...new Set([...Object.keys(S.vendorEmails), ...S.forms.map(f => f.name)])].sort();
   if (!names.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "저장된 업체가 없습니다."; box.appendChild(e); return; }
+  const istyle = "width:100%;box-sizing:border-box;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);border-radius:9px;padding:9px 10px;font-family:inherit;font-size:13px;outline:none";
   names.forEach(name => {
     const el = document.createElement("div");
     el.className = "mitem";
     el.innerHTML = `<div style="font-weight:700;font-size:13px">🏭 ${esc(name)}</div>
+      <div style="font-size:11px;color:var(--muted);margin:7px 0 3px">메일 도메인 <span style="color:var(--faint)">(여러 개는 쉼표)</span></div>
+      <input class="vdom" value="${esc(S.vendorDomains[name] || "")}" placeholder="예: onekglobal.co.kr"
+        inputmode="url" autocapitalize="off" spellcheck="false" style="${istyle}">
+      <div style="font-size:11px;color:var(--muted);margin:8px 0 3px">메일 주소 <span style="color:var(--faint)">(여러 개는 쉼표)</span></div>
+      <input class="vadr" type="text" value="${esc(S.vendorEmails[name] || "")}" placeholder="예: manager@onekglobal.co.kr"
+        inputmode="email" autocapitalize="off" spellcheck="false" style="${istyle}">
       <div style="display:flex;gap:7px;margin-top:8px">
-        <input type="email" value="${esc(S.vendorEmails[name] || "")}" placeholder="이메일 주소"
-          inputmode="email" autocapitalize="off" spellcheck="false"
-          style="flex:1;min-width:0;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);
-          border-radius:9px;padding:10px;font-family:inherit;font-size:13px;outline:none">
-        <button class="minibtn" style="padding:0 12px">저장</button>
-        <button class="minibtn" style="padding:0 12px;color:var(--danger)">삭제</button>
+        <button class="minibtn save" style="padding:0 14px">저장</button>
+        <button class="minibtn del" style="padding:0 14px;color:var(--danger)">삭제</button>
       </div>`;
-    const inp = el.querySelector("input"), btns = el.querySelectorAll("button");
-    btns[0].onclick = async () => {
-      S.vendorEmails[name] = inp.value.trim();
-      if (!S.vendorEmails[name]) delete S.vendorEmails[name];
+    const dom = el.querySelector(".vdom"), adr = el.querySelector(".vadr");
+    const saveBtn = el.querySelector(".save");
+    saveBtn.onclick = async () => {
+      S.vendorDomains[name] = dom.value.trim(); if (!S.vendorDomains[name]) delete S.vendorDomains[name];
+      S.vendorEmails[name] = adr.value.trim();  if (!S.vendorEmails[name]) delete S.vendorEmails[name];
+      await DB.set("vendorDomains", S.vendorDomains);
       await DB.set("vendorEmails", S.vendorEmails);
-      btns[0].textContent = "완료"; setTimeout(() => btns[0].textContent = "저장", 1200);
+      saveBtn.textContent = "완료"; setTimeout(() => saveBtn.textContent = "저장", 1200);
     };
-    btns[1].onclick = async () => {
-      if (!confirm(`${name} 의 저장된 메일을 지울까요?`)) return;
-      delete S.vendorEmails[name]; await DB.set("vendorEmails", S.vendorEmails); drawSettings();
+    el.querySelector(".del").onclick = async () => {
+      if (!confirm(`${name} 의 저장된 도메인·주소를 지울까요?`)) return;
+      delete S.vendorEmails[name]; delete S.vendorDomains[name];
+      await DB.set("vendorEmails", S.vendorEmails); await DB.set("vendorDomains", S.vendorDomains);
+      drawSettings();
     };
     box.appendChild(el);
   });
