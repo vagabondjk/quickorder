@@ -670,8 +670,15 @@ function showResultI(out, buf, filename) {
   $("rlist-i").innerHTML = h;
   $("pv-inv").onclick = () => openPreview(buf, "송장 취합본");
   $("dl-inv").onclick = () => download(buf, filename);
-  // 받는사람 후보: 마지막 발송(기본) + 이전에 보낸 곳들 (송장은 업체명이 없어 메일검색은 생략)
-  fillRecipients($("inv-cands"), $("inv-to"), { saved: S.invEmails, history: S.invSent });
+  // 받는사람 후보: 마지막 발송(기본) + 이전 이력 + '발주서 보내는 곳'(주문 메일 발신자) 주소
+  //  → 발주서 검색조건의 발신 도메인으로 메일을 찾아 그 발신자 주소를 후보로 띄움
+  (async () => {
+    let senders = [];
+    try { senders = ((await getOrderFilter()).senders || []).filter(Boolean); } catch (e) {}
+    const domains = senders.map(s => (s.includes("@") ? s.split("@")[1] : s).toLowerCase());
+    const query = senders.length ? "from:(" + senders.join(" OR ") + ")" : null;
+    fillRecipients($("inv-cands"), $("inv-to"), { saved: S.invEmails, history: S.invSent, domains, query });
+  })();
   $("send-inv").onclick = async function () {
     const list = parseEmails($("inv-to").value);
     if (!list.length) { $("inv-to").focus(); return; }
