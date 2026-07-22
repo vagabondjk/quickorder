@@ -64,19 +64,22 @@ const LOCK = (() => {
     if (MONTHS[ym] && h === MONTHS[ym]) return "month";
     return false;
   }
-  const unlockToken = ym => sha256Hex(deviceId() + SALT + ym + (MONTHS[ym] || ""));
+  const UNLOCK_MS = 7 * 24 * 60 * 60 * 1000;                 // 7일 유지
+  const signExp = exp => sha256Hex(deviceId() + SALT + "|exp|" + exp);
 
   async function isUnlocked() {
     if (!configured()) return true;
     try {
       const s = JSON.parse(localStorage.getItem("qo_lock") || "null");
-      if (!s || s.month !== currentYm()) return false;
-      return s.token === await unlockToken(s.month);
+      if (!s || !s.exp || Date.now() >= s.exp) return false;   // 없거나 7일 지남
+      if (s.token !== await signExp(s.exp)) return false;
+      await saveUnlock();          // 슬라이딩: 열 때마다 만료를 다시 7일 뒤로 연장
+      return true;
     } catch (e) { return false; }
   }
   async function saveUnlock() {
-    const ym = currentYm();
-    try { localStorage.setItem("qo_lock", JSON.stringify({ month: ym, token: await unlockToken(ym) })); } catch (e) {}
+    const exp = Date.now() + UNLOCK_MS;
+    try { localStorage.setItem("qo_lock", JSON.stringify({ exp, token: await signExp(exp) })); } catch (e) {}
   }
   function signOut() { try { localStorage.removeItem("qo_lock"); } catch (e) {} }
 
@@ -138,8 +141,7 @@ const LOCK = (() => {
         async function go() {
           if (busy) return; busy = true; btn.disabled = true; msg.textContent = "";
           const kind = await verify(input.value);
-          if (kind === "month") { await saveUnlock(); root.remove(); resolve(true); }
-          else if (kind === "master") { root.remove(); resolve(true); }
+          if (kind === "month" || kind === "master") { await saveUnlock(); root.remove(); resolve(true); }   // 7일 유지
           else { msg.textContent = "비밀번호가 올바르지 않습니다."; input.value = ""; input.focus(); busy = false; btn.disabled = false; }
         }
         btn.addEventListener("click", go);
