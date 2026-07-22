@@ -91,12 +91,16 @@ const DB = (() => {
       t.onerror = () => rej(t.error);
     });
   }
+  let afterWrite = () => {}, suspended = false;
+  const fire = () => { if (!suspended) { try { afterWrite(); } catch (e) {} } };
   return {
     listForms: () => tx("forms", "readonly", s => s.getAll()),
-    putForm: f => tx("forms", "readwrite", s => s.put(f)),
-    delForm: n => tx("forms", "readwrite", s => s.delete(n)),
+    putForm: async f => { const r = await tx("forms", "readwrite", s => s.put(f)); fire(); return r; },
+    delForm: async n => { const r = await tx("forms", "readwrite", s => s.delete(n)); fire(); return r; },
     get: async (k, dflt) => { const v = await tx("kv", "readonly", s => s.get(k)); return v && v.v !== undefined ? v.v : dflt; },
-    set: (k, v) => tx("kv", "readwrite", s => s.put({ k, v })),
+    set: async (k, v) => { const r = await tx("kv", "readwrite", s => s.put({ k, v })); fire(); return r; },
+    onChange(fn) { afterWrite = fn; },       // 데이터가 바뀔 때마다 호출 (자동 업로드용)
+    suspend(b) { suspended = b; },           // 복원 중 자동업로드 방지
   };
 })();
 
@@ -566,8 +570,18 @@ function showResultI(out, buf, filename) {
 /* =================================================================
    설정 (업체 메일 · 저장 데이터)
    ================================================================= */
-$("btn-settings").onclick = () => { drawSettings(); $("setmodal").classList.add("on"); };
+$("btn-settings").onclick = () => { drawSettings(); drawSyncStatus(); $("setmodal").classList.add("on"); };
 $("set-close").onclick = () => $("setmodal").classList.remove("on");
+$("sync-now").onclick = async function () {
+  this.disabled = true;
+  try {
+    await ensureGmail();                 // 로그인 보장(드라이브 권한 포함)
+    const r = await SYNC.syncDown();      // 원격이 최신이면 내려받고
+    if (r.changed) { await loadForms(); drawOrderFilter(); drawReplyFilter(); drawSettings(); }
+    await SYNC.syncUpNow();               // 이 기기 상태도 올려서 최신 유지
+  } catch (e) { S.syncState = "error"; S.syncDetail = e.message; drawSyncStatus(); }
+  this.disabled = false;
+};
 $("setmodal").onclick = e => { if (e.target === $("setmodal")) $("setmodal").classList.remove("on"); };
 $("set-add").onclick = async () => {
   const name = prompt("업체명"); if (!name) return;
@@ -674,6 +688,7 @@ async function ensureGmail() {
   // 토큰이 아예 없으면 로그인창(동의), 만료됐으면 조용히 갱신
   await GMAIL.signIn(!GMAIL.hasToken());
   updateGmailWho();
+  syncOnStart();          // 로그인 직후 다른 기기 데이터 내려받기
 }
 
 /* 발주서 검색조건 (PC 앱과 동일한 기본값) */
@@ -891,8 +906,45 @@ async function setOrderFromBuf(buf, name) {
   buildVendorBrands(); refreshO();
 }
 
+/* ---------------- 동기화 (구글 드라이브) ---------------- */
+// 데이터가 바뀔 때마다 자동 업로드(디바운스)
+DB.onChange(() => SYNC.pushSoon());
+// 동기화 상태를 설정화면 등에 반영
+SYNC.onStatus((state, detail) => { S.syncState = state; S.syncDetail = detail || ""; drawSyncStatus(); });
+function fmtAgo(ts) {
+  if (!ts) return "아직 없음";
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return "방금";
+  if (s < 3600) return Math.floor(s / 60) + "분 전";
+  if (s < 86400) return Math.floor(s / 3600) + "시간 전";
+  return Math.floor(s / 86400) + "일 전";
+}
+function drawSyncStatus() {
+  const el = $("sync-status"); if (!el) return;
+  const st = S.syncState;
+  let t;
+  if (st === "syncing") t = "🔄 " + (S.syncDetail || "동기화 중…");
+  else if (st === "error") t = "⚠ 동기화 오류: " + (S.syncDetail || "");
+  else if (st === "offline") t = "구글 로그인하면 자동 동기화됩니다";
+  else t = "✓ 동기화됨 · 마지막 " + fmtAgo(SYNC.lastTime());
+  el.textContent = t;
+}
+// 로그인돼 있으면 시작 시 내려받기 → 바뀌었으면 화면 갱신
+async function syncOnStart() {
+  try {
+    const r = await SYNC.syncDown();
+    if (r.changed) { await loadForms(); drawOrderFilter(); drawReplyFilter(); if ($("setmodal").classList.contains("on")) drawSettings(); }
+    // 클라우드에 백업이 아직 없고, 이 기기에 데이터가 있으면 최초 1회 올려서 씨딩
+    // (데이터 없는 기기는 올리지 않음 → 빈 상태로 다른 기기를 덮어쓰지 않게)
+    else if (r.hadRemote === false && S.forms.length) { await SYNC.syncUpNow(); }
+  } catch (e) {}
+  drawSyncStatus();
+}
+
 /* ---------------- 시작 ---------------- */
-loadForms().catch(e => { $("vlist").innerHTML = '<div class="empty">저장소를 열지 못했어요</div>'; });
+loadForms()
+  .then(() => syncOnStart())
+  .catch(e => { $("vlist").innerHTML = '<div class="empty">저장소를 열지 못했어요</div>'; });
 initGmail();
 drawReplyFilter();
 drawOrderFilter();

@@ -30,6 +30,13 @@
   header{display:flex;align-items:baseline;gap:9px;padding:6px 2px 16px}
   header b{font-size:24px;font-weight:800;letter-spacing:-.02em}
   header .sub{font-size:12px;color:var(--faint);font-weight:600}
+  .verbadge{font-size:11px;font-weight:800;color:#fff;background:var(--brand);
+    padding:3px 9px;border-radius:999px;letter-spacing:.02em}
+  .syncbox{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px 13px;margin-bottom:14px}
+  .syncrow{display:flex;align-items:center;gap:8px}
+  .syncrow b{font-size:13.5px;font-weight:800;flex:1}
+  .synctxt{font-size:12px;color:var(--muted);font-weight:600;margin-top:7px}
+  .synchint{font-size:11.5px;color:var(--faint);line-height:1.5;margin-top:6px}
   .chip{font-size:11px;color:var(--brand);background:var(--brand-soft);padding:4px 10px;
     border-radius:999px;font-weight:700;cursor:pointer;border:none;font-family:inherit}
   .chip+.chip{margin-left:6px}
@@ -167,7 +174,8 @@
 <body>
 <div class="wrap">
   <header>
-    <b>퀵오더</b><span class="sub">by JK · <span id="app-ver">v15</span></span>
+    <b>퀵오더</b><span class="sub">by JK</span>
+    <span class="verbadge" id="app-ver">v16</span>
     <span style="margin-left:auto"></span>
     <button class="chip" id="btn-settings">설정</button>
   </header>
@@ -271,7 +279,7 @@
     </div>
   </div>
 
-  <p class="foot">퀵오더 <b>v15</b> · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
+  <p class="foot">퀵오더 <b>v16</b> · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
 </div>
 
 <!-- 메일 선택 모달 -->
@@ -338,6 +346,14 @@
     <div class="grip"></div>
     <h3>설정</h3>
     <p class="sub2">이 기기에 저장된 정보입니다.</p>
+    <div class="syncbox">
+      <div class="syncrow">
+        <b>☁ 기기 간 동기화</b>
+        <button class="minibtn" id="sync-now">지금 동기화</button>
+      </div>
+      <div class="synctxt" id="sync-status">구글 로그인하면 자동 동기화됩니다</div>
+      <div class="synchint">업체 양식·브랜드·업체메일·검색조건이 <b>내 구글 계정</b>에 저장돼, 다른 기기에서 같은 계정으로 로그인하면 그대로 나타납니다.</div>
+    </div>
     <div class="mlist" id="setlist"></div>
     <div class="row">
       <button class="btn-cancel" id="set-close">닫기</button>
@@ -351,6 +367,7 @@
 <script src="qo-lock.js"></script>
 <script src="qo-logic.js"></script>
 <script src="qo-gmail.js"></script>
+<script src="qo-sync.js"></script>
 <script src="qo-app.js"></script>
 </body>
 </html>

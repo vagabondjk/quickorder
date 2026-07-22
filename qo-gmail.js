@@ -4,9 +4,9 @@
    =================================================================== */
 "use strict";
 const GMAIL = (() => {
-  const SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send";
+  const SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/drive.appdata";
   const API = "https://gmail.googleapis.com/gmail/v1/users/me";
-  const TKEY = "qo_gmail_token";     // 토큰을 기기에 보관 → 로그인 유지
+  const TKEY = "qo_gmail_token2";    // 토큰을 기기에 보관 → 로그인 유지 (드라이브 권한 추가로 키 변경 → 1회 재로그인)
   let tokenClient = null, accessToken = null, tokenExp = 0, clientId = null;
 
   // 저장해 둔 토큰 불러오기 (아직 유효하면 재로그인 불필요)
@@ -231,5 +231,51 @@ const GMAIL = (() => {
 
   async function profile() { return await api("/profile"); }
 
-  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, listMails, getAttachment, send, profile };
+  /* ---------- 구글 드라이브 (앱 전용 숨김 폴더 appDataFolder) ---------- */
+  function driveErr(status, body) {
+    let m = "";
+    try { m = (JSON.parse(body).error || {}).message || ""; } catch (e) {}
+    if (status === 403 && /has not been used|is disabled|Drive API/i.test(body || ""))
+      return new Error("구글 드라이브 API가 아직 켜져 있지 않습니다.\n구글 클라우드 콘솔에서 'Google Drive API'를 사용 설정하세요.");
+    if (status === 401 || status === 403)
+      return new Error("드라이브 접근 권한이 없습니다. 설정에서 구글을 다시 연결(재로그인)하고 권한을 허용하세요.");
+    return new Error("드라이브 오류: " + (m || ("HTTP " + status)));
+  }
+  async function driveFind(name) {
+    const t = await token();
+    const q = encodeURIComponent(`name='${name}'`);
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${q}&fields=files(id,modifiedTime)&orderBy=modifiedTime desc`,
+      { headers: { Authorization: "Bearer " + t } });
+    if (!r.ok) throw driveErr(r.status, await r.text());
+    const d = await r.json();
+    return (d.files && d.files[0]) ? d.files[0].id : null;
+  }
+  async function driveDownload(fileId) {
+    const t = await token();
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+      { headers: { Authorization: "Bearer " + t } });
+    if (!r.ok) throw driveErr(r.status, await r.text());
+    return await r.text();
+  }
+  async function driveUpload(name, content, fileId) {
+    const t = await token();
+    if (fileId) {
+      const r = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&fields=id`,
+        { method: "PATCH", headers: { Authorization: "Bearer " + t, "Content-Type": "application/json" }, body: content });
+      if (r.status === 404) return driveUpload(name, content, null);   // 원본이 지워졌으면 새로 생성
+      if (!r.ok) throw driveErr(r.status, await r.text());
+      return (await r.json()).id;
+    }
+    const boundary = "qoBd" + Math.random().toString(36).slice(2);
+    const meta = JSON.stringify({ name, parents: ["appDataFolder"] });
+    const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n` +
+                 `--${boundary}\r\nContent-Type: application/json\r\n\r\n${content}\r\n--${boundary}--`;
+    const r = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",
+      { method: "POST", headers: { Authorization: "Bearer " + t, "Content-Type": "multipart/related; boundary=" + boundary }, body });
+    if (!r.ok) throw driveErr(r.status, await r.text());
+    return (await r.json()).id;
+  }
+
+  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, listMails, getAttachment, send, profile,
+           driveFind, driveDownload, driveUpload };
 })();
