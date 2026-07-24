@@ -1116,7 +1116,7 @@ function showResultI(out, buf, filename) {
 /* =================================================================
    설정 (업체 메일 · 저장 데이터)
    ================================================================= */
-$("btn-settings").onclick = () => { drawSettings(); drawSyncStatus(); $("setmodal").classList.add("on"); };
+$("btn-settings").onclick = () => { drawSettings(); drawSyncStatus(); drawNotifyStatus(); $("setmodal").classList.add("on"); };
 $("set-close").onclick = () => $("setmodal").classList.remove("on");
 $("sync-now").onclick = async function () {
   this.disabled = true;
@@ -1480,6 +1480,83 @@ async function setOrderFromBuf(buf, name) {
   buildVendorBrands(); refreshO();
 }
 
+/* =================================================================
+   새 발주·송장 알림 (앱이 열려 있을 때 주기적으로 확인 → 알림)
+   ================================================================= */
+const NOTIFY_MS = 3 * 60 * 1000;   // 3분마다
+let notifyTimer = null;
+
+function fireNotify(title, body) {
+  try {
+    if (window.Notification && Notification.permission === "granted")
+      new Notification(title, { body, icon: "icon-192.png", tag: "qo-" + title });
+  } catch (e) {}
+}
+function showNotifyBanner(items) {
+  const el = $("notify-banner"); if (!el) return;
+  const first = items[0];
+  el.innerHTML = `${esc(first.title)}<small>${esc(first.body)}${items.length > 1 ? ` 외 ${items.length - 1}건` : ""} · 눌러서 보기</small>`;
+  el.classList.add("show");
+  el.onclick = () => { el.classList.remove("show"); if (first.tab) switchTab(first.tab); };
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("show"), 12000);
+}
+async function drawNotifyStatus() {
+  const on = await DB.get("notifyOn", false);
+  $("notify-toggle").textContent = on ? "끄기" : "켜기";
+  const perm = (window.Notification && Notification.permission) || "unsupported";
+  $("notify-status").textContent = !on ? "꺼져 있음"
+    : (perm === "granted" ? "✓ 켜짐 — 앱을 열어두면 새 발주·송장을 알려드려요"
+    : perm === "denied" ? "⚠ 브라우저 알림이 차단됨 — 앱 안 배너로만 표시됩니다"
+    : "켜짐 — 알림 권한을 허용하면 배너+알림 둘 다 떠요");
+}
+$("notify-toggle").onclick = async function () {
+  let on = await DB.get("notifyOn", false);
+  on = !on;
+  if (on && window.Notification && Notification.permission === "default") {
+    try { await Notification.requestPermission(); } catch (e) {}
+  }
+  await DB.set("notifyOn", on);
+  drawNotifyStatus();
+  if (on) { startNotify(); notifyTick(false); } else stopNotify();   // 켤 땐 조용히 기준선만
+};
+function startNotify() { if (!notifyTimer) notifyTimer = setInterval(() => notifyTick(false), NOTIFY_MS); }
+function stopNotify() { if (notifyTimer) { clearInterval(notifyTimer); notifyTimer = null; } }
+
+async function notifyTick(manual) {
+  if (!(await DB.get("notifyOn", false))) return;
+  if (!GMAIL.signedIn()) return;      // 로그인돼 있을 때만
+  const hits = [];
+  // ① 지정한 드라이브 발주 파일이 바뀌었나 (수정시각 비교)
+  try {
+    const df = await DB.get("driveOrderFile", null);
+    if (df && df.id) {
+      const info = await GMAIL.driveFileInfo(df.id);
+      const last = await DB.get("notifyDriveMTime", "");
+      if (info.modifiedTime) {
+        if (last && info.modifiedTime !== last)
+          hits.push({ title: "발주 내역 업데이트", body: `${df.name} 파일이 변경됐어요`, tab: "o", tag: "발주 내역 업데이트" });
+        await DB.set("notifyDriveMTime", info.modifiedTime);
+      }
+    }
+  } catch (e) {}
+  // ② 지정 업체에서 송장 회신 메일이 새로 왔나
+  try {
+    const f = await getReplyFilter();
+    const items = await GMAIL.listMails({ days: 2, senders: f.senders, keywords: f.keywords, exclude: f.exclude || [], union: true, scanText: true, max: 20 });
+    const seen = new Set(await DB.get("notifySeenMails", []));
+    const fresh = items.filter(m => !seen.has(m.id));
+    if (fresh.length) {
+      if (seen.size)   // 처음 켠 직후엔 기존 메일로 알림 폭탄 안 나게, 기준선만 잡음
+        hits.push({ title: "송장 회신 메일 도착", body: `${fresh.length}건 — ${fresh[0].subject || fresh[0].filename}`, tab: "i", tag: "송장 회신 메일 도착" });
+      const merged = [...new Set(items.map(m => m.id).concat([...seen]))].slice(0, 120);
+      await DB.set("notifySeenMails", merged);
+    }
+  } catch (e) {}
+  hits.forEach(h => fireNotify(h.title, h.body));
+  if (hits.length) showNotifyBanner(hits);
+  else if (manual) showNotifyBanner([{ title: "새 소식 없음", body: "지금은 변경·회신이 없어요", tab: "" }]);
+}
+
 /* ---------------- 동기화 (구글 드라이브) ---------------- */
 // 데이터가 바뀔 때마다 자동 업로드(디바운스)
 DB.onChange(() => SYNC.pushSoon());
@@ -1524,3 +1601,8 @@ drawReplyFilter();
 drawOrderFilter();
 drawDriveRecent();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+// 알림: 켜져 있으면 폴링 시작, 앱으로 돌아올 때마다 즉시 한 번 확인
+DB.get("notifyOn", false).then(on => { if (on) { startNotify(); setTimeout(() => notifyTick(false), 4000); } });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") DB.get("notifyOn", false).then(on => { if (on) notifyTick(false); });
+});

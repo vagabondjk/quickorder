@@ -91,6 +91,12 @@
     -webkit-overflow-scrolling:touch;padding-bottom:2px}
   .chips.open{flex-wrap:wrap;overflow-x:visible}
   .chips .brow{white-space:nowrap;flex:none;padding:6px 10px;font-size:12px}
+  .notifybanner{position:fixed;top:0;left:0;right:0;z-index:9999;display:none;
+    background:var(--brand);color:#fff;padding:12px 16px;font-size:13.5px;font-weight:700;
+    box-shadow:0 3px 12px rgba(0,0,0,.2);cursor:pointer;
+    padding-top:calc(12px + env(safe-area-inset-top))}
+  .notifybanner.show{display:block}
+  .notifybanner small{display:block;font-weight:500;opacity:.9;font-size:11.5px;margin-top:2px}
   .mailperiod{display:flex;gap:6px;margin:0 0 10px}
   .mailperiod button{flex:1;font-family:inherit;font-size:12.5px;font-weight:700;padding:8px 4px;
     border:1.5px solid var(--line);background:var(--card2);color:var(--muted);border-radius:9px;cursor:pointer}
@@ -223,10 +229,11 @@
 </style>
 </head>
 <body>
+<div id="notify-banner" class="notifybanner"></div>
 <div class="wrap">
   <header>
     <b>퀵오더 웹</b><span class="sub">by JK</span>
-    <span class="verbadge" id="app-ver">v4.6</span>
+    <span class="verbadge" id="app-ver">v4.7</span>
     <span style="margin-left:auto"></span>
     <button class="chip" id="btn-settings">설정</button>
   </header>
@@ -336,7 +343,7 @@
     </div>
   </div>
 
-  <p class="foot">퀵오더 웹 <b>v4.6</b> · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
+  <p class="foot">퀵오더 웹 <b>v4.7</b> · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
 </div>
 
 <!-- 메일 선택 모달 -->
@@ -447,6 +454,14 @@
       </div>
       <div class="synctxt" id="sync-status">구글 로그인하면 자동 동기화됩니다</div>
       <div class="synchint">업체 양식·브랜드·업체메일·검색조건이 <b>내 구글 계정</b>에 저장돼, 다른 기기에서 같은 계정으로 로그인하면 그대로 나타납니다.</div>
+    </div>
+    <div class="syncbox">
+      <div class="syncrow">
+        <b>🔔 새 발주·송장 알림</b>
+        <button class="minibtn" id="notify-toggle">켜기</button>
+      </div>
+      <div class="synctxt" id="notify-status"></div>
+      <div class="synchint">앱을 열어두면 몇 분마다 확인해서 <b>① 지정한 드라이브 발주파일이 바뀌거나 ② 업체가 송장 회신 메일을 보내면</b> 알려줍니다. (앱을 완전히 끄면 감지 안 됨)</div>
     </div>
     <div class="mlist" id="setlist"></div>
     <div class="row">
