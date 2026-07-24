@@ -184,7 +184,7 @@
 <div class="wrap">
   <header>
     <b>퀵오더 웹</b><span class="sub">by JK</span>
-    <span class="verbadge" id="app-ver">v3.0</span>
+    <span class="verbadge" id="app-ver">v3.3</span>
     <span style="margin-left:auto"></span>
     <button class="chip" id="btn-settings">설정</button>
   </header>
@@ -200,6 +200,8 @@
       <h2><span class="n">1</span>쇼핑몰 주문 파일</h2>
       <p class="hint">메일에서 발주서를 가져오거나 파일을 올려주세요.</p>
       <button class="go" id="mail-order" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 발주서 가져오기</button>
+      <button class="go" id="drive-order" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📁 구글 드라이브에서 발주서 가져오기</button>
+      <div class="setrow" id="drive-recent-row" style="display:none"><span id="drive-recent"></span><button class="minibtn" id="drive-again">다시 가져오기</button></div>
       <div class="setrow"><span id="gmail-who-o">메일 연결 확인 중…</span></div>
       <div class="setrow"><span id="order-filter">발주서 검색: onekglobal.co.kr · 키워드 랩노마드</span><button class="minibtn" id="order-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-order" style="margin-top:8px">
@@ -288,7 +290,7 @@
     </div>
   </div>
 
-  <p class="foot">퀵오더 웹 <b>v3.0</b> · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
+  <p class="foot">퀵오더 웹 <b>v3.3</b> · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
 </div>
 
 <!-- 메일 선택 모달 -->
@@ -346,6 +348,28 @@
       </div>
     </div>
     <div class="row" style="margin-top:10px"><button class="btn-go" id="filter-close">완료</button></div>
+  </div>
+</div>
+
+<!-- 드라이브 파일 선택 모달 -->
+<div class="modal" id="drvmodal">
+  <div class="sheet">
+    <div class="grip"></div>
+    <h3>구글 드라이브에서 발주서 가져오기</h3>
+    <p class="sub2">파일을 고르거나, 공유 링크를 붙여넣으세요. 항상 최신 내용으로 받아옵니다.</p>
+    <div class="fld"><label>파일 이름으로 찾기</label>
+      <div style="display:flex;gap:7px">
+        <input id="drv-q" placeholder="예: 발주서, 통합" spellcheck="false" autocapitalize="off">
+        <button class="minibtn" id="drv-search" style="padding:0 14px">검색</button>
+      </div></div>
+    <div class="mlist" id="drv-list" style="max-height:44vh;overflow:auto"></div>
+    <div class="fld" style="margin-top:8px"><label>또는 드라이브 공유 링크 붙여넣기</label>
+      <div style="display:flex;gap:7px">
+        <input id="drv-link" placeholder="https://drive.google.com/file/d/..." spellcheck="false" autocapitalize="off">
+        <button class="minibtn" id="drv-link-go" style="padding:0 14px">가져오기</button>
+      </div></div>
+    <div id="drv-msg" style="font-size:12px;color:var(--muted);margin-top:8px;white-space:pre-wrap"></div>
+    <div class="row"><button class="btn-cancel" id="drv-close">닫기</button></div>
   </div>
 </div>
 

@@ -7,7 +7,7 @@
 const SYNC = (() => {
   const FILE = "qo-backup.json";
   const KV_KEYS = ["brandVendor", "vendorEmails", "vendorSent", "vendorDomains",
-    "invEmails", "invSent",
+    "invEmails", "invSent", "driveOrderFile",
     "orderSenders", "orderKeywords", "orderExclude",
     "replySenders", "replyKeywords", "replyExclude"];
   const STAMP_KEY = "qo_sync_stamp";   // 이 기기가 마지막으로 반영/업로드한 시각

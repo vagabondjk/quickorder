@@ -185,8 +185,66 @@ async function setOrder(file) {
   } catch (e) { msg("msg-o", "err", "파일을 읽지 못했어요: " + e.message); }
 }
 
+/* --- 구글 드라이브에서 발주서 가져오기 (링크 붙여넣기 / 앱 내 검색·선택) --- */
+$("drive-order").onclick = () => openDrive();
+$("drv-close").onclick = () => $("drvmodal").classList.remove("on");
+$("drvmodal").onclick = e => { if (e.target === $("drvmodal")) $("drvmodal").classList.remove("on"); };
+$("drv-search").onclick = () => drvSearch($("drv-q").value);
+$("drv-q").addEventListener("keydown", e => { if (e.key === "Enter") drvSearch($("drv-q").value); });
+$("drv-link-go").onclick = async () => {
+  const id = GMAIL.driveIdFromLink($("drv-link").value);
+  if (!id) { $("drv-msg").textContent = "⚠ 링크에서 파일 ID를 찾지 못했어요. 드라이브 공유 링크를 그대로 붙여넣어 주세요."; return; }
+  await drvLoad(id);
+};
+$("drive-again").onclick = async () => { const f = await DB.get("driveOrderFile", null); if (f && f.id) await drvLoad(f.id); };
+
+async function openDrive() {
+  $("drv-msg").textContent = ""; $("drv-list").innerHTML = "";
+  $("drvmodal").classList.add("on");
+  try { await ensureGmail(); } catch (e) { $("drv-msg").textContent = "⚠ " + e.message; return; }
+  drvSearch("");                       // 처음엔 최근 수정 파일부터
+}
+async function drvSearch(q) {
+  const box = $("drv-list");
+  box.innerHTML = '<div class="empty">찾는 중…</div>';
+  try {
+    await ensureGmail();
+    const files = await GMAIL.driveSearch(q, 30);
+    if (!files.length) { box.innerHTML = '<div class="empty">엑셀/시트 파일을 찾지 못했어요.</div>'; return; }
+    box.innerHTML = "";
+    files.forEach(f => {
+      const el = document.createElement("div");
+      el.className = "mitem"; el.style.cursor = "pointer";
+      const isSheet = f.mimeType === "application/vnd.google-apps.spreadsheet";
+      const when = f.modifiedTime ? new Date(f.modifiedTime).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+      el.innerHTML = `<div style="font-weight:700;font-size:13px">${isSheet ? "📊" : "📄"} ${esc(f.name)}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">수정 ${esc(when)}</div>`;
+      el.onclick = () => drvLoad(f.id);
+      box.appendChild(el);
+    });
+  } catch (e) { box.innerHTML = ""; $("drv-msg").textContent = "⚠ " + e.message; }
+}
+async function drvLoad(fileId) {
+  $("drv-msg").textContent = "가져오는 중…";
+  try {
+    await ensureGmail();
+    const r = await GMAIL.driveFetchExcel(fileId);
+    await DB.set("driveOrderFile", { id: fileId, name: r.name });   // 다음에 한 번에 다시 받기
+    $("drvmodal").classList.remove("on");
+    await setOrderFromBuf(r.buf, r.name);
+    drawDriveRecent();
+    msg("msg-o", "ok", `✔ 드라이브에서 가져왔어요: ${r.name}`);
+  } catch (e) { $("drv-msg").textContent = "⚠ " + e.message; }
+}
+async function drawDriveRecent() {
+  const f = await DB.get("driveOrderFile", null);
+  const row = $("drive-recent-row");
+  if (f && f.id) { $("drive-recent").textContent = "드라이브 최근 파일: " + f.name; row.style.display = "flex"; }
+  else row.style.display = "none";
+}
+
 /* --- 날짜 --- */
-$("dt-col").onchange = function () { loadDates(this.value); };
+$("dt-col").onchange = function () { loadDates(this.value).then(drawPreview); };
 async function loadDates(header) {
   $("date-wrap").style.display = "block";
   $("dt-info").textContent = "· 읽는 중…";
@@ -244,18 +302,23 @@ function drawDateChips() {
 
 /* --- 내용 확인 --- */
 $("pv-toggle").onclick = function () { S.pvAll = !S.pvAll; this.textContent = S.pvAll ? "주요 열만 보기" : "전체 열 보기"; renderPreview(); };
+const PV_DAYS = 3;   // 미리보기는 최근 수집일 3일치만 (과거 주문까지 다 보이지 않게)
 async function drawPreview() {
   $("prev-wrap").style.display = "block";
   $("pv-cnt").textContent = "· 읽는 중…";
   const wb = await QO.loadWorkbook(S.orderBuf.slice(0));
-  S.pv = QO.preview(wb); S.pvAll = false;
+  const recent = (S.dateAll || []).slice(0, PV_DAYS).map(d => d.date);   // dateAll은 최신순 정렬
+  S.pv = QO.preview(wb, 2000, { dates: recent.length ? recent : null, dateHeader: S.dateHeader });
+  S.pvAll = false;
   $("pv-toggle").textContent = "전체 열 보기";
   renderPreview();
 }
 function renderPreview() {
   const pv = S.pv; if (!pv) return;
   const idx = (S.pvAll || !pv.keyIdx.length) ? pv.columns.map((_, i) => i) : pv.keyIdx;
-  $("pv-cnt").textContent = `· 전체 ${pv.total}건 · 열 ${idx.length}/${pv.columns.length}`;
+  $("pv-cnt").textContent = pv.filtered
+    ? `· 최근 ${PV_DAYS}일 ${pv.total}건 (파일 전체 ${pv.totalAll}건) · 열 ${idx.length}/${pv.columns.length}`
+    : `· 전체 ${pv.total}건 · 열 ${idx.length}/${pv.columns.length}`;
   let h = "<tr>" + idx.map(i => `<th>${esc(pv.columns[i] || "열" + (i + 1))}</th>`).join("") + "</tr>";
   pv.rows.forEach(row => {
     h += "<tr>" + idx.map(i => {
@@ -265,8 +328,10 @@ function renderPreview() {
     }).join("") + "</tr>";
   });
   $("pv-table").innerHTML = h;
-  $("pv-foot").textContent = pv.total > pv.rows.length
-    ? `앞 ${pv.rows.length}건만 표시 · 전체 ${pv.total}건 모두 변환됩니다` : `전체 ${pv.total}건 표시`;
+  const shown = pv.total > pv.rows.length ? `앞 ${pv.rows.length}건만 표시 · ${pv.total}건 중` : `${pv.total}건 표시`;
+  $("pv-foot").textContent = pv.filtered
+    ? `${shown} — 미리보기는 최근 ${PV_DAYS}일치만 보여줍니다 (변환은 위에서 고른 날짜 기준)`
+    : `${shown} — 전체가 변환됩니다`;
 }
 
 /* --- 업체 양식 --- */
@@ -402,7 +467,6 @@ $("run-o").onclick = async function () {
   try {
     const picked = S.forms.filter(f => f.checked);
     const results = [], skipped = [];
-    const shop = QO.nameFromFilename(S.orderName);
     for (const f of picked) {
       const sel = S.sel[f.name] || [];
       if (S.brands.length && !sel.length) { skipped.push(f.name + "(브랜드 미선택)"); continue; }
@@ -414,20 +478,68 @@ $("run-o").onclick = async function () {
       });
       const out = await QO.saveWorkbook(tplWb);
       results.push({ supplier: f.name, count: r.count, buf: out,
-        filename: `${QO.todayStr()}_${shop}_${f.name}_발주양식.xlsx` });
+        // 파일명 고정: 오늘날짜_랩노마드_업체명_발주서.xlsx
+        // ※ 사용자가 별도로 요청하지 않는 한 이 형식을 바꾸지 말 것
+        filename: `${QO.todayStr()}_랩노마드_${f.name}_발주서.xlsx` });
       // 학습 저장
       if (S.brands.length && sel.length) sel.forEach(b => { S.brandVendor[b] = f.name; });
     }
     if (!results.length) throw new Error("변환된 업체가 없습니다. " + (skipped.length ? `(${skipped.join(", ")})` : ""));
     await DB.set("brandVendor", S.brandVendor);
-    showResultO(results, skipped);
-    msg("msg-o", "ok", "✔ 변환 완료! " + results.map(r => `${r.supplier}=${r.count}건`).join("; "));
+
+    // --- 건수 검증: 원본 주문 수 == 업체별 변환 합계 (미배정 주문이 조용히 빠지는 것 방지) ---
+    const srcWb = await QO.loadWorkbook(S.orderBuf.slice(0));
+    const src = QO.countOrders(srcWb, { dates: S.dateSel.length ? S.dateSel : null, dateHeader: S.dateHeader });
+    const converted = results.reduce((a, r) => a + r.count, 0);
+    const hasBrands = S.brands.length > 0;
+    // 브랜드가 있으면 주문이 업체별로 나뉨(합계=원본). 브랜드 열이 없으면 업체마다 전량 복사.
+    const expected = hasBrands ? src.total : src.total * results.length;
+    // 어느 업체에도 배정되지 않은 브랜드 찾기 (= 발주서에서 빠진 주문)
+    const assigned = new Set();
+    picked.forEach(f => (S.sel[f.name] || []).forEach(b => assigned.add(String(b).trim())));
+    const unassigned = [];
+    if (hasBrands) {
+      for (const b in src.byBrand)
+        if (!assigned.has(b)) unassigned.push({ brand: b || "(브랜드 없음)", count: src.byBrand[b] });
+    }
+    unassigned.sort((x, y) => y.count - x.count);
+    const verify = { srcTotal: src.total, converted, expected, diff: expected - converted, unassigned, hasBrands };
+
+    showResultO(results, skipped, verify);
+    msg("msg-o", verify.diff === 0 ? "ok" : "warn",
+      (verify.diff === 0 ? "✔ 변환 완료! 건수 일치 " : "⚠ 변환 완료 (건수 불일치 확인) ")
+      + `주문 ${src.total}건 → ` + results.map(r => `${r.supplier}=${r.count}건`).join("; "));
   } catch (e) { msg("msg-o", "err", "변환 실패: " + e.message); }
   finally { busy("run-o", "run-o-lbl", false, "발주서 변환하기"); refreshO(); }
 };
 
-function showResultO(results, skipped) {
+function showResultO(results, skipped, verify) {
   const box = $("rlist-o"); box.innerHTML = "";
+
+  // --- 건수 검증: 쇼핑몰 주문 수 == 업체 발주서 합계 ---
+  if (verify) {
+    const d = document.createElement("div");
+    const detail = results.map(r => `${r.supplier} ${r.count}`).join(" + ");
+    if (verify.diff === 0) {
+      d.className = "msg show ok";
+      d.textContent = verify.hasBrands
+        ? `✔ 건수 일치 — 주문 ${verify.srcTotal}건 = ${detail} (합계 ${verify.converted}건)`
+        : `✔ 건수 일치 — 주문 ${verify.srcTotal}건이 업체별로 전량 반영됨 (${detail})`;
+    } else if (verify.diff > 0) {
+      let t = `⚠ 건수 불일치 — 주문 ${verify.srcTotal}건 중 발주서에 ${verify.converted}건만 들어갔습니다 (${verify.diff}건 누락)\n${detail}`;
+      if (verify.unassigned.length) {
+        t += "\n\n아래 브랜드가 어느 업체에도 배정되지 않아 발주서에서 빠졌습니다:";
+        verify.unassigned.forEach(u => { t += `\n· ${u.brand} — ${u.count}건`; });
+        t += "\n\n해당 브랜드를 업체에 체크한 뒤 다시 변환하세요.";
+      }
+      d.className = "msg show err"; d.textContent = t;
+    } else {
+      d.className = "msg show err";
+      d.textContent = `⚠ 발주서 합계(${verify.converted}건)가 주문 수(${verify.srcTotal}건)보다 많습니다. 같은 브랜드가 여러 업체에 중복 배정됐는지 확인하세요.\n${detail}`;
+    }
+    box.appendChild(d);
+  }
+
   results.forEach(r => {
     const el = document.createElement("div");
     el.className = "rrow";
@@ -1126,4 +1238,5 @@ loadForms()
 initGmail();
 drawReplyFilter();
 drawOrderFilter();
+drawDriveRecent();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});

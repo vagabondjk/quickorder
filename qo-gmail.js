@@ -4,10 +4,11 @@
    =================================================================== */
 "use strict";
 const GMAIL = (() => {
-  const SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/drive.appdata";
+  const SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send " +
+                 "https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.readonly";
   const API = "https://gmail.googleapis.com/gmail/v1/users/me";
-  const TKEY = "qo_gmail_token2";    // 토큰을 기기에 보관 → 로그인 유지 (드라이브 권한 추가로 키 변경 → 1회 재로그인)
-  const GKEY = "qo_gmail_granted";   // 권한 승인 이력(토큰 만료 후 동의창 반복 방지)
+  const TKEY = "qo_gmail_token3";    // 토큰을 기기에 보관 → 로그인 유지 (드라이브 권한 추가로 키 변경 → 1회 재로그인)
+  const GKEY = "qo_gmail_granted3";   // 권한 승인 이력(토큰 만료 후 동의창 반복 방지)
   let tokenClient = null, accessToken = null, tokenExp = 0, clientId = null;
 
   // 저장해 둔 토큰 불러오기 (아직 유효하면 재로그인 불필요)
@@ -314,6 +315,52 @@ const GMAIL = (() => {
     if (!r.ok) throw driveErr(r.status, await r.text());
     return await r.text();
   }
+  /* ---------- 드라이브: 내 파일 읽기(발주서 끌어오기) ---------- */
+  const DRIVE = "https://www.googleapis.com/drive/v3";
+  const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  const GSHEET_MIME = "application/vnd.google-apps.spreadsheet";
+  async function driveApiGet(path) {
+    const t = await token();
+    const r = await fetch(DRIVE + path, { headers: { Authorization: "Bearer " + t } });
+    if (!r.ok) throw driveErr(r.status, await r.text());
+    return await r.json();
+  }
+  // 공유링크/ID 문자열에서 파일 ID 뽑기
+  function driveIdFromLink(s) {
+    s = String(s || "").trim();
+    const m = s.match(/\/d\/([a-zA-Z0-9_-]{10,})/) || s.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+    if (m) return m[1];
+    if (/^[a-zA-Z0-9_-]{10,}$/.test(s)) return s;
+    return null;
+  }
+  async function driveFileInfo(fileId) {
+    return await driveApiGet(`/files/${encodeURIComponent(fileId)}?fields=id,name,mimeType,modifiedTime&supportsAllDrives=true`);
+  }
+  // 엑셀/시트 파일 검색 (이름으로, 최근 수정순)
+  async function driveSearch(q, max = 30) {
+    const types = `(mimeType='${XLSX_MIME}' or mimeType='${GSHEET_MIME}' or mimeType='application/vnd.ms-excel')`;
+    let qq = `${types} and trashed=false`;
+    if (q && q.trim()) qq += ` and name contains '${q.trim().replace(/'/g, "\\'")}'`;
+    const d = await driveApiGet(`/files?q=${encodeURIComponent(qq)}` +
+      `&fields=files(id,name,mimeType,modifiedTime)&orderBy=modifiedTime desc&pageSize=${max}` +
+      `&supportsAllDrives=true&includeItemsFromAllDrives=true`);
+    return d.files || [];
+  }
+  // 파일을 엑셀 바이너리로 받기 (구글시트면 xlsx로 변환해서)
+  async function driveFetchExcel(fileId) {
+    const info = await driveFileInfo(fileId);
+    const t = await token();
+    const url = info.mimeType === GSHEET_MIME
+      ? `${DRIVE}/files/${encodeURIComponent(fileId)}/export?mimeType=${encodeURIComponent(XLSX_MIME)}`
+      : `${DRIVE}/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
+    const r = await fetch(url, { headers: { Authorization: "Bearer " + t } });
+    if (!r.ok) throw driveErr(r.status, await r.text());
+    const buf = await r.arrayBuffer();
+    let name = info.name || "drive";
+    if (!/\.xls[xm]$/i.test(name)) name += ".xlsx";
+    return { buf, name, modifiedTime: info.modifiedTime };
+  }
+
   async function driveUpload(name, content, fileId) {
     const t = await token();
     if (fileId) {
@@ -334,5 +381,6 @@ const GMAIL = (() => {
   }
 
   return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, listMails, getAttachment, send, profile,
-           searchAddresses, driveFind, driveDownload, driveUpload, refreshQuiet, granted };
+           searchAddresses, driveFind, driveDownload, driveUpload, refreshQuiet, granted,
+           driveIdFromLink, driveFileInfo, driveSearch, driveFetchExcel };
 })();
