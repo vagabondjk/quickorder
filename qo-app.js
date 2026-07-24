@@ -402,20 +402,24 @@ $("drive-order").onclick = () => openDrivePicker({
     msg("msg-o", "ok", `✔ 드라이브에서 가져왔어요: ${r.name}`);
   },
 });
-$("drive-again").onclick = async () => {
+// 지정한 사방넷 발주서를 한 번에(폴더 탐색 없이) 최신본으로 가져와 바로 변환 프로세스로
+$("drive-again").onclick = async function () {
   const f = await DB.get("driveOrderFile", null); if (!f || !f.id) return;
-  msg("msg-o", "", "가져오는 중…");
+  this.disabled = true; const orig = this.innerHTML; this.textContent = "가져오는 중…";
+  msg("msg-o", "", "");
   try {
+    await ensureGmail();
     const r = await GMAIL.driveFetchExcel(f.id);
-    await setOrderFromBuf(r.buf, r.name);
-    msg("msg-o", "ok", `✔ 최신본으로 다시 가져왔어요: ${r.name}`);
+    await setOrderFromBuf(r.buf, r.name);          // ← 이후는 업로드와 동일한 변환 프로세스
+    msg("msg-o", "ok", `✔ 최신본을 가져왔어요: ${r.name} · 아래에서 날짜 고르고 변환하세요`);
   } catch (e) { msg("msg-o", "err", "가져오기 실패: " + e.message); }
+  finally { this.disabled = false; this.innerHTML = orig; }
 };
 async function drawDriveRecent() {
   const f = await DB.get("driveOrderFile", null);
-  const row = $("drive-recent-row");
-  if (f && f.id) { $("drive-recent").textContent = "드라이브 최근 파일: " + f.name; row.style.display = "flex"; }
-  else row.style.display = "none";
+  const btn = $("drive-again");
+  if (f && f.id) { $("drive-recent").textContent = f.name; btn.style.display = "block"; }
+  else btn.style.display = "none";
 }
 
 /* --- ② 업체 양식 (여러 개 선택 가능) --- */
@@ -1243,6 +1247,7 @@ async function ensureGmail() {
   }
   if (!gmailReady) throw new Error("구글 로그인 라이브러리를 불러오지 못했어요.\n인터넷/광고차단을 확인하고 새로고침 해보세요.");
   await GMAIL.token();    // 클릭 맥락에서 팝업 → 이미 승인했으면 잠깐 떴다 자동으로 닫힘
+  GMAIL.profile().catch(() => {});   // 계정 이메일을 힌트로 저장(다음 재로그인 때 계정선택 생략)
   updateGmailWho();
   syncOnStart();          // 로그인 직후 다른 기기 데이터 내려받기
 }
@@ -1410,10 +1415,15 @@ async function loadMail() {
     list.innerHTML = "";
     mailItems.forEach((m, i) => {
       const frm = m.from.includes("<") ? m.from.split("<").pop().replace(">", "") : m.from;
+      const isToday = m.ts && new Date(m.ts).toDateString() === new Date().toDateString();
       const el = document.createElement("div");
       el.className = "mitem";
-      el.innerHTML = `<div style="font-weight:700;font-size:13px;word-break:break-all">📄 ${esc(m.filename)}</div>
-        <div style="font-size:11.5px;color:var(--muted);margin-top:3px">${esc(m.date)} · ${esc(m.subject || "(제목 없음)")}</div>
+      el.innerHTML = `<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+          <span style="font-weight:800;font-size:14px;color:var(--brand)">🕑 ${esc(m.date)}</span>
+          ${isToday ? `<span style="font-size:11px;font-weight:800;color:#fff;background:#e8384f;padding:2px 8px;border-radius:999px">금일 수신</span>` : ""}
+        </div>
+        <div style="font-weight:700;font-size:13px;word-break:break-all">📄 ${esc(m.filename)}</div>
+        <div style="font-size:11.5px;color:var(--muted);margin-top:3px">${esc(m.subject || "(제목 없음)")}</div>
         <div style="font-size:11px;color:var(--faint);margin-top:1px">${esc(frm)}</div>
         ${m.body && m.body.trim() ? `<div style="font-size:11.5px;color:var(--muted);margin-top:7px;padding-top:7px;border-top:1px dashed var(--line);white-space:pre-wrap;max-height:80px;overflow:auto">${esc(m.body.trim())}</div>` : ""}`;
       el.onclick = () => {
@@ -1483,6 +1493,8 @@ async function setOrderFromBuf(buf, name) {
 /* =================================================================
    새 발주·송장 알림 (앱이 열려 있을 때 주기적으로 확인 → 알림)
    ================================================================= */
+const notifyEnabled = () => { try { return localStorage.getItem("qo_notifyOn") === "1"; } catch (e) { return false; } };
+const setNotifyEnabled = v => { try { localStorage.setItem("qo_notifyOn", v ? "1" : "0"); } catch (e) {} };
 const NOTIFY_MS = 3 * 60 * 1000;   // 3분마다
 let notifyTimer = null;
 
@@ -1500,8 +1512,8 @@ function showNotifyBanner(items) {
   el.onclick = () => { el.classList.remove("show"); if (first.tab) switchTab(first.tab); };
   clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("show"), 12000);
 }
-async function drawNotifyStatus() {
-  const on = await DB.get("notifyOn", false);
+function drawNotifyStatus() {
+  const on = notifyEnabled();
   $("notify-toggle").textContent = on ? "끄기" : "켜기";
   const perm = (window.Notification && Notification.permission) || "unsupported";
   $("notify-status").textContent = !on ? "꺼져 있음"
@@ -1510,20 +1522,25 @@ async function drawNotifyStatus() {
     : "켜짐 — 알림 권한을 허용하면 배너+알림 둘 다 떠요");
 }
 $("notify-toggle").onclick = async function () {
-  let on = await DB.get("notifyOn", false);
-  on = !on;
-  if (on && window.Notification && Notification.permission === "default") {
-    try { await Notification.requestPermission(); } catch (e) {}
-  }
-  await DB.set("notifyOn", on);
-  drawNotifyStatus();
-  if (on) { startNotify(); notifyTick(false); } else stopNotify();   // 켤 땐 조용히 기준선만
+  if (this._busy) return; this._busy = true;          // 더블탭/중복실행 방지
+  try {
+    const on = !notifyEnabled();                        // 현재값 반대로
+    setNotifyEnabled(on);                               // 먼저 저장(동기) → 화면 즉시 반영
+    drawNotifyStatus();
+    if (on) {
+      if (window.Notification && Notification.permission === "default") {
+        try { await Notification.requestPermission(); } catch (e) {}
+        drawNotifyStatus();
+      }
+      startNotify(); notifyTick(false);
+    } else { stopNotify(); }
+  } finally { setTimeout(() => { this._busy = false; }, 400); }
 };
 function startNotify() { if (!notifyTimer) notifyTimer = setInterval(() => notifyTick(false), NOTIFY_MS); }
 function stopNotify() { if (notifyTimer) { clearInterval(notifyTimer); notifyTimer = null; } }
 
 async function notifyTick(manual) {
-  if (!(await DB.get("notifyOn", false))) return;
+  if (!notifyEnabled()) return;
   if (!GMAIL.signedIn()) return;      // 로그인돼 있을 때만
   const hits = [];
   // ① 지정한 드라이브 발주 파일이 바뀌었나 (수정시각 비교)
@@ -1602,7 +1619,7 @@ drawOrderFilter();
 drawDriveRecent();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 // 알림: 켜져 있으면 폴링 시작, 앱으로 돌아올 때마다 즉시 한 번 확인
-DB.get("notifyOn", false).then(on => { if (on) { startNotify(); setTimeout(() => notifyTick(false), 4000); } });
+if (notifyEnabled()) { startNotify(); setTimeout(() => notifyTick(false), 4000); }
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") DB.get("notifyOn", false).then(on => { if (on) notifyTick(false); });
+  if (document.visibilityState === "visible" && notifyEnabled()) notifyTick(false);
 });

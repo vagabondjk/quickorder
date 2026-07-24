@@ -233,7 +233,7 @@
 <div class="wrap">
   <header>
     <b>퀵오더 웹</b><span class="sub">by JK</span>
-    <span class="verbadge" id="app-ver">v4.7</span>
+    <span class="verbadge" id="app-ver">v5.0</span>
     <span style="margin-left:auto"></span>
     <button class="chip" id="btn-settings">설정</button>
   </header>
@@ -247,10 +247,10 @@
   <div class="pane on" id="pane-o">
     <div class="card">
       <h2><span class="n">1</span>쇼핑몰 주문 파일</h2>
-      <p class="hint">메일에서 발주서를 가져오거나 파일을 올려주세요.</p>
+      <p class="hint">지정한 사방넷 발주서를 바로 가져오거나, 메일·드라이브·파일에서 불러오세요.</p>
+      <button class="go" id="drive-again" style="display:none;margin:0 0 8px;font-size:15px;padding:14px;background:var(--ok);color:#fff">📥 <span id="drive-recent">발주서</span> 바로 가져오기 (최신)</button>
       <button class="go" id="mail-order" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 발주서 가져오기</button>
-      <button class="go" id="drive-order" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📁 구글 드라이브에서 발주서 가져오기</button>
-      <div class="setrow" id="drive-recent-row" style="display:none"><span id="drive-recent"></span><button class="minibtn" id="drive-again">다시 가져오기</button></div>
+      <button class="go" id="drive-order" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📁 드라이브에서 발주서 선택 (폴더 탐색)</button>
       <div class="setrow"><span id="gmail-who-o">메일 연결 확인 중…</span></div>
       <div class="setrow"><span id="order-filter">발주서 검색: onekglobal.co.kr · 키워드 랩노마드</span><button class="minibtn" id="order-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-order" style="margin-top:8px">
@@ -343,7 +343,7 @@
     </div>
   </div>
 
-  <p class="foot">퀵오더 웹 <b>v4.7</b> · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
+  <p class="foot">퀵오더 웹 <b>v5.0</b> · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
 </div>
 
 <!-- 메일 선택 모달 -->

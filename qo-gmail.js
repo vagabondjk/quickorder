@@ -9,6 +9,7 @@ const GMAIL = (() => {
   const API = "https://gmail.googleapis.com/gmail/v1/users/me";
   const TKEY = "qo_gmail_token4";    // 토큰을 기기에 보관 → 로그인 유지 (드라이브 권한 추가로 키 변경 → 1회 재로그인)
   const GKEY = "qo_gmail_granted4";   // 권한 승인 이력(토큰 만료 후 동의창 반복 방지)
+  const HKEY = "qo_gmail_hint";       // 계정 이메일 힌트(재로그인 시 계정 선택 건너뛰기)
   let tokenClient = null, accessToken = null, tokenExp = 0, clientId = null;
 
   // 저장해 둔 토큰 불러오기 (아직 유효하면 재로그인 불필요)
@@ -86,7 +87,11 @@ const GMAIL = (() => {
         res(accessToken);
       };
       try { tokenClient.error_callback = e => rej(new Error((e && (e.message || e.type)) || "로그인 취소")); } catch (e) {}
-      try { tokenClient.requestAccessToken({ prompt: mode === undefined ? "" : mode }); }
+      // hint(계정 이메일)를 주면 계정 선택 단계를 건너뛰고, 세션이 살아있으면 화면 없이 조용히 통과
+      const hint = (function () { try { return localStorage.getItem(HKEY) || ""; } catch (e) { return ""; } })();
+      const cfg = { prompt: mode === undefined ? "" : mode };
+      if (hint) cfg.hint = hint;
+      try { tokenClient.requestAccessToken(cfg); }
       catch (e) { rej(e); }
     });
   }
@@ -197,6 +202,7 @@ const GMAIL = (() => {
         const att = p.body && p.body.attachmentId;
         if (!att) continue;
         const rec = { id: msg.id, attachmentId: att, filename: fn, subject, from, date,
+                      ts: Number(msg.internalDate) || 0,
                       body: (body === null ? (body = bodyText(msg)) : body).slice(0, 500) };
         if (fromOk) { fromHits.push(rec); continue; }
         let nameOk = keywords.length ? keywords.some(k => fn.includes(k)) : false;
@@ -250,7 +256,12 @@ const GMAIL = (() => {
     });
   }
 
-  async function profile() { return await api("/profile"); }
+  async function profile() {
+    const p = await api("/profile");
+    // 로그인한 계정 이메일을 힌트로 저장 → 다음 재로그인 때 계정 선택 안 뜨게
+    try { if (p && p.emailAddress) localStorage.setItem(HKEY, p.emailAddress); } catch (e) {}
+    return p;
+  }
 
   /* ---------- 업체명으로 메일 검색 → 받는사람 후보 주소 뽑기 ---------- */
   function extractEmails(str) {
