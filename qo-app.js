@@ -391,6 +391,7 @@ async function drvPick(files) {
 }
 
 /* --- ① 쇼핑몰 주문 파일 --- */
+// 폴더 탐색으로 골라서 바로 변환 (고른 파일은 '바로 가져오기' 대상으로도 자동 지정)
 $("drive-order").onclick = () => openDrivePicker({
   key: "order", title: "드라이브에서 발주서 가져오기", multiple: false,
   onPick: async files => {
@@ -402,7 +403,26 @@ $("drive-order").onclick = () => openDrivePicker({
     msg("msg-o", "ok", `✔ 드라이브에서 가져왔어요: ${r.name}`);
   },
 });
-// 지정한 사방넷 발주서를 한 번에(폴더 탐색 없이) 최신본으로 가져와 바로 변환 프로세스로
+// '바로 가져올 파일' 지정/변경 — 가져오지 않고 대상만 지정
+function pickOrderPin() {
+  openDrivePicker({
+    key: "order", title: "바로 가져올 발주서 파일 지정", multiple: false,
+    onPick: async files => {
+      const f = files[0];
+      await DB.set("driveOrderFile", { id: f.id, name: f.name });
+      drawDriveRecent();
+      msg("msg-o", "ok", `✔ 바로 가져올 발주서로 지정했어요: ${f.name}`);
+    },
+  });
+}
+$("order-pin-set").onclick = pickOrderPin;
+$("order-pin-change").onclick = pickOrderPin;
+$("order-pin-clear").onclick = async () => {
+  await DB.set("driveOrderFile", null);
+  drawDriveRecent();
+  msg("msg-o", "ok", "지정을 해제했어요.");
+};
+// 지정한 발주서를 한 번에(폴더 탐색 없이) 최신본으로 가져와 바로 변환 프로세스로
 $("drive-again").onclick = async function () {
   const f = await DB.get("driveOrderFile", null); if (!f || !f.id) return;
   this.disabled = true; const orig = this.innerHTML; this.textContent = "가져오는 중…";
@@ -417,9 +437,11 @@ $("drive-again").onclick = async function () {
 };
 async function drawDriveRecent() {
   const f = await DB.get("driveOrderFile", null);
-  const btn = $("drive-again");
-  if (f && f.id) { $("drive-recent").textContent = f.name; btn.style.display = "block"; }
-  else btn.style.display = "none";
+  const has = !!(f && f.id);
+  $("drive-again").style.display = has ? "block" : "none";
+  $("order-pinrow").style.display = has ? "flex" : "none";
+  $("order-pin-set").style.display = has ? "none" : "block";
+  if (has) { $("drive-recent").textContent = f.name; $("order-pinname").textContent = f.name; }
 }
 
 /* --- ② 업체 양식 (여러 개 선택 가능) --- */
@@ -438,17 +460,65 @@ $("drive-tpl").onclick = () => openDrivePicker({
 });
 
 /* --- ③ 송장취합양식 (하나) --- */
+// 드라이브에서 송장취합양식을 받아 화면에 세팅 (되쓰기 위해 출처 기억)
+async function loadSabFromDrive(fileId) {
+  const r = await GMAIL.driveFetchExcel(fileId);
+  S.sabBuf = r.buf; S.sabName = r.name;
+  S.sabDrive = { id: fileId, name: r.name };   // 드라이브 출처 기억 → 결과를 이 파일에 되쓰기
+  $("sab-name").textContent = "📁 " + r.name + " (드라이브)";
+  $("drop-sab").classList.add("on"); $("sab-preview").style.display = "block";
+  refreshI();
+  return r;
+}
+// 폴더 탐색으로 골라 가져오기 (고른 파일은 '바로 가져오기' 대상으로도 자동 지정)
 $("drive-sab").onclick = () => openDrivePicker({
   key: "sab", title: "드라이브에서 송장취합양식 가져오기", multiple: false,
   onPick: async files => {
-    const r = await GMAIL.driveFetchExcel(files[0].id);
-    S.sabBuf = r.buf; S.sabName = r.name;
-    S.sabDrive = { id: files[0].id, name: r.name };   // 드라이브 출처 기억 → 결과를 이 파일에 되쓰기
-    $("sab-name").textContent = "📁 " + r.name + " (드라이브)";
-    $("drop-sab").classList.add("on"); $("sab-preview").style.display = "block";
-    refreshI(); msg("msg-i", "ok", `✔ 드라이브에서 송장취합양식을 가져왔어요: ${r.name}`);
+    const r = await loadSabFromDrive(files[0].id);
+    await DB.set("driveSabFile", { id: files[0].id, name: r.name });
+    drawSabRecent();
+    msg("msg-i", "ok", `✔ 드라이브에서 송장취합양식을 가져왔어요: ${r.name}`);
   },
 });
+// '바로 가져올 파일' 지정/변경 — 가져오지 않고 대상만 지정
+function pickSabPin() {
+  openDrivePicker({
+    key: "sab", title: "바로 가져올 송장취합양식 파일 지정", multiple: false,
+    onPick: async files => {
+      const f = files[0];
+      await DB.set("driveSabFile", { id: f.id, name: f.name });
+      drawSabRecent();
+      msg("msg-i", "ok", `✔ 바로 가져올 송장취합양식으로 지정했어요: ${f.name}`);
+    },
+  });
+}
+$("sab-pin-set").onclick = pickSabPin;
+$("sab-pin-change").onclick = pickSabPin;
+$("sab-pin-clear").onclick = async () => {
+  await DB.set("driveSabFile", null);
+  drawSabRecent();
+  msg("msg-i", "ok", "지정을 해제했어요.");
+};
+// 지정한 송장취합양식을 한 번에 최신본으로 가져오기
+$("sab-again").onclick = async function () {
+  const f = await DB.get("driveSabFile", null); if (!f || !f.id) return;
+  this.disabled = true; const orig = this.innerHTML; this.textContent = "가져오는 중…";
+  msg("msg-i", "", "");
+  try {
+    await ensureGmail();
+    const r = await loadSabFromDrive(f.id);
+    msg("msg-i", "ok", `✔ 최신본을 가져왔어요: ${r.name}`);
+  } catch (e) { msg("msg-i", "err", "가져오기 실패: " + e.message); }
+  finally { this.disabled = false; this.innerHTML = orig; }
+};
+async function drawSabRecent() {
+  const f = await DB.get("driveSabFile", null);
+  const has = !!(f && f.id);
+  $("sab-again").style.display = has ? "block" : "none";
+  $("sab-pinrow").style.display = has ? "flex" : "none";
+  $("sab-pin-set").style.display = has ? "none" : "block";
+  if (has) { $("sab-recent").textContent = f.name; $("sab-pinname").textContent = f.name; }
+}
 
 /* --- ④ 업체 회신 송장 (여러 개 선택 가능) --- */
 $("drive-rep").onclick = () => openDrivePicker({
@@ -1617,9 +1687,48 @@ initGmail();
 drawReplyFilter();
 drawOrderFilter();
 drawDriveRecent();
+drawSabRecent();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 // 알림: 켜져 있으면 폴링 시작, 앱으로 돌아올 때마다 즉시 한 번 확인
 if (notifyEnabled()) { startNotify(); setTimeout(() => notifyTick(false), 4000); }
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && notifyEnabled()) notifyTick(false);
 });
+
+/* ---- 당겨서 새로고침 ---- 화면 맨 위에서 아래로 당기면 새로고침한다.
+   새로고침하면 메일·PC·드라이브로 불러온 파일(메모리 상태)이 전부 초기화된다.
+   (드라이브 '바로 가져오기' 지정·업체 양식 등 저장된 설정은 유지) */
+(function () {
+  const ptr = $("ptr"), txt = $("ptr-txt");
+  if (!ptr) return;
+  const MAX = 80, TRIG = 60;
+  let startY = 0, pulling = false, dist = 0;
+  const atTop = () => (window.scrollY || document.documentElement.scrollTop || 0) <= 0;
+  window.addEventListener("touchstart", e => {
+    if (e.touches.length === 1 && atTop()) { startY = e.touches[0].clientY; pulling = true; dist = 0; }
+    else pulling = false;
+  }, { passive: true });
+  window.addEventListener("touchmove", e => {
+    if (!pulling) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy <= 0 || !atTop()) { dist = 0; ptr.style.transition = "none"; ptr.style.height = "0px"; if (dy <= 0) pulling = false; return; }
+    dist = Math.min(dy * 0.5, MAX);
+    ptr.style.transition = "none";
+    ptr.style.height = dist + "px";
+    txt.textContent = dist >= TRIG ? "↑ 놓으면 새로고침" : "↓ 당겨서 새로고침";
+    if (dy > 6 && e.cancelable) e.preventDefault();   // 네이티브 바운스 억제
+  }, { passive: false });
+  function end() {
+    if (!pulling) return;
+    pulling = false;
+    ptr.style.transition = "height .12s ease";
+    if (dist >= TRIG) {
+      ptr.classList.add("spin");
+      ptr.style.height = MAX + "px";
+      txt.textContent = "새로고침 중…";
+      setTimeout(() => location.reload(), 150);
+    } else { ptr.style.height = "0px"; }
+  }
+  window.addEventListener("touchend", end, { passive: true });
+  window.addEventListener("touchcancel", end, { passive: true });
+})();
