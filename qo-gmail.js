@@ -5,10 +5,10 @@
 "use strict";
 const GMAIL = (() => {
   const SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send " +
-                 "https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.readonly";
+                 "https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive";  // drive = 읽기+쓰기(되쓰기용)
   const API = "https://gmail.googleapis.com/gmail/v1/users/me";
-  const TKEY = "qo_gmail_token3";    // 토큰을 기기에 보관 → 로그인 유지 (드라이브 권한 추가로 키 변경 → 1회 재로그인)
-  const GKEY = "qo_gmail_granted3";   // 권한 승인 이력(토큰 만료 후 동의창 반복 방지)
+  const TKEY = "qo_gmail_token4";    // 토큰을 기기에 보관 → 로그인 유지 (드라이브 권한 추가로 키 변경 → 1회 재로그인)
+  const GKEY = "qo_gmail_granted4";   // 권한 승인 이력(토큰 만료 후 동의창 반복 방지)
   let tokenClient = null, accessToken = null, tokenExp = 0, clientId = null;
 
   // 저장해 둔 토큰 불러오기 (아직 유효하면 재로그인 불필요)
@@ -392,6 +392,18 @@ const GMAIL = (() => {
     return { buf, name, modifiedTime: info.modifiedTime };
   }
 
+  /* 드라이브의 기존 파일에 '그대로 덮어쓰기'(내용 갱신) — 송장취합 결과를 원본 양식에 되쓰기 */
+  async function driveUpdateFile(fileId, arrayBuffer) {
+    const t = await token();
+    const r = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(fileId)}?uploadType=media&supportsAllDrives=true&fields=id,name,modifiedTime`, {
+      method: "PATCH",
+      headers: { Authorization: "Bearer " + t, "Content-Type": XLSX_MIME },
+      body: arrayBuffer,
+    });
+    if (!r.ok) throw driveErr(r.status, await r.text());
+    return await r.json();
+  }
+
   async function driveUpload(name, content, fileId) {
     const t = await token();
     if (fileId) {
@@ -413,5 +425,5 @@ const GMAIL = (() => {
 
   return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, listMails, getAttachment, send, profile,
            searchAddresses, driveFind, driveDownload, driveUpload, granted,
-           driveIdFromLink, driveFileInfo, driveSearch, driveFetchExcel, driveListFolder, driveListShared, driveAncestors, needLogin };
+           driveIdFromLink, driveFileInfo, driveSearch, driveFetchExcel, driveListFolder, driveListShared, driveAncestors, driveUpdateFile, needLogin };
 })();

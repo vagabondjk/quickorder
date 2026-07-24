@@ -21,6 +21,11 @@ function parseEmails(str) {
   return out;
 }
 function invalidEmails(list) { return list.filter(e => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)); }
+// 업체명 정리: 끝에 붙은 "발주양식/발주서/양식" 제거 → "디에스피_발주양식" → "디에스피"
+function cleanVendor(n) {
+  const s = String(n == null ? "" : n).replace(/[_\s]*(발주\s*양식|발주\s*서|양식)\s*$/g, "").trim();
+  return s || String(n == null ? "" : n).trim();
+}
 // "@dsp.com, onekglobal.co.kr" → ["dsp.com","onekglobal.co.kr"]
 function parseDomains(str) {
   const out = [];
@@ -121,7 +126,7 @@ const S = {
   pv: null, pvAll: false,
   forms: [], brandVendor: {}, vendorEmails: {}, vendorSent: {}, vendorDomains: {}, sel: {},
   invEmails: "", invSent: [],
-  sabBuf: null, sabName: "", reps: [],
+  sabBuf: null, sabName: "", sabDrive: null, reps: [],
 };
 
 function msg(el, kind, text) { const m = $(el); m.className = "msg" + (kind ? " show " + kind : ""); m.textContent = text; }
@@ -434,9 +439,10 @@ $("drive-sab").onclick = () => openDrivePicker({
   onPick: async files => {
     const r = await GMAIL.driveFetchExcel(files[0].id);
     S.sabBuf = r.buf; S.sabName = r.name;
-    $("sab-name").textContent = "📁 " + r.name;
+    S.sabDrive = { id: files[0].id, name: r.name };   // 드라이브 출처 기억 → 결과를 이 파일에 되쓰기
+    $("sab-name").textContent = "📁 " + r.name + " (드라이브)";
     $("drop-sab").classList.add("on"); $("sab-preview").style.display = "block";
-    refreshI(); msg("msg-i", "ok", `✔ 송장취합양식을 가져왔어요: ${r.name}`);
+    refreshI(); msg("msg-i", "ok", `✔ 드라이브에서 송장취합양식을 가져왔어요: ${r.name}`);
   },
 });
 
@@ -724,7 +730,7 @@ $("run-o").onclick = async function () {
       results.push({ supplier: f.name, count: r.count, buf: out,
         // 파일명 고정: 오늘날짜_랩노마드_업체명_발주서.xlsx
         // ※ 사용자가 별도로 요청하지 않는 한 이 형식을 바꾸지 말 것
-        filename: `${QO.todayStr()}_랩노마드_${f.name}_발주서.xlsx` });
+        filename: `${QO.todayStr()}_랩노마드_${cleanVendor(f.name)}_발주양식.xlsx` });
       // 학습 저장
       if (S.brands.length && sel.length) sel.forEach(b => { S.brandVendor[b] = f.name; });
     }
@@ -787,7 +793,7 @@ function showResultO(results, skipped, verify) {
   results.forEach(r => {
     const el = document.createElement("div");
     el.className = "rrow";
-    el.innerHTML = `<div class="rtop"><div class="vinfo"><b>${esc(r.supplier)}</b><span>${esc(r.filename)}</span></div>
+    el.innerHTML = `<div class="rtop"><div class="vinfo"><b>${esc(cleanVendor(r.supplier))}</b><span>${esc(r.filename)}</span></div>
       <span class="cnt">${r.count}건</span></div>
       <div class="cands"></div>
       <div class="rmail"><input type="text" placeholder="${esc(r.supplier)} 이메일 (여러 개는 쉼표로)"
@@ -942,11 +948,11 @@ async function fillRecipients(container, inp, opts) {
    ② 송장 취합
    ================================================================= */
 $("f-sab").addEventListener("change", async function () {
-  if (this.files[0]) { S.sabBuf = await readFile(this.files[0]); S.sabName = this.files[0].name;
+  if (this.files[0]) { S.sabBuf = await readFile(this.files[0]); S.sabName = this.files[0].name; S.sabDrive = null;
     $("sab-name").textContent = "📄 " + this.files[0].name; $("drop-sab").classList.add("on"); $("sab-preview").style.display="block"; refreshI(); }
 });
 bindDrop("drop-sab", async f => {
-  S.sabBuf = await readFile(f[0]); S.sabName = f[0].name;
+  S.sabBuf = await readFile(f[0]); S.sabName = f[0].name; S.sabDrive = null;
   $("sab-name").textContent = "📄 " + f[0].name; $("drop-sab").classList.add("on"); $("sab-preview").style.display="block"; refreshI();
 });
 $("f-rep").addEventListener("change", function () { const fs = [...this.files]; this.value = ""; addReps(fs); });
@@ -1056,11 +1062,27 @@ function showResultI(out, buf, filename) {
     <div class="rmail"><input type="text" id="inv-to" placeholder="받는 사람 이메일 (여러 개는 쉼표로)"
       value="${esc(S.invEmails || "")}" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button class="dlbtn" id="send-inv">메일 보내기</button></div>
-    <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)">여러 명에게 보내려면 쉼표로 구분 (담당자, 대표 등)</span><button class="minibtn" id="share-inv">📤 카톡·공유</button><button class="minibtn" id="pv-inv">미리보기</button><button class="minibtn" id="dl-inv">엑셀만 받기</button></div></div>`;
+    <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)">여러 명에게 보내려면 쉼표로 구분 (담당자, 대표 등)</span><button class="minibtn" id="share-inv">📤 카톡·공유</button><button class="minibtn" id="pv-inv">미리보기</button><button class="minibtn" id="dl-inv">엑셀만 받기</button></div>
+    ${S.sabDrive ? `<button class="go" id="drv-writeback" style="margin-top:10px;font-size:14px;padding:12px;background:var(--ok);color:#fff">📥 드라이브 양식(${esc(S.sabDrive.name)})에 그대로 기입</button>
+      <div id="drv-wb-msg" style="font-size:11.5px;color:var(--muted);margin-top:6px;text-align:center"></div>` : ""}</div>`;
   $("rlist-i").innerHTML = h;
   $("pv-inv").onclick = () => openPreview(buf, "송장 취합본");
   $("dl-inv").onclick = () => download(buf, filename);
   $("share-inv").onclick = () => shareFile(buf, filename);
+  // 드라이브에서 불러온 양식이면 → 그 원본 파일에 결과를 그대로 되쓰기
+  if (S.sabDrive && $("drv-writeback")) {
+    $("drv-writeback").onclick = async function () {
+      this.disabled = true; const orig = this.textContent; this.textContent = "드라이브에 기입 중…";
+      $("drv-wb-msg").textContent = "";
+      try {
+        await ensureGmail();
+        const info = await GMAIL.driveUpdateFile(S.sabDrive.id, buf.slice ? buf.slice(0) : buf);
+        this.textContent = "✔ 드라이브 양식에 기입 완료";
+        const when = info.modifiedTime ? new Date(info.modifiedTime).toLocaleString("ko-KR") : "";
+        $("drv-wb-msg").textContent = `${S.sabDrive.name} 파일이 갱신되었습니다${when ? " · " + when : ""}. (드라이브에서 바로 확인하세요)`;
+      } catch (e) { this.disabled = false; this.textContent = orig; $("drv-wb-msg").textContent = "⚠ 기입 실패: " + e.message; }
+    };
+  }
   // 받는사람 후보: 마지막 발송(기본) + 이전 이력 + '발주서 보내는 곳'(주문 메일 발신자) 주소
   //  → 발주서 검색조건의 발신 도메인으로 메일을 찾아 그 발신자 주소를 후보로 띄움
   (async () => {
@@ -1338,6 +1360,15 @@ let mailItems = [], mailSel = [], mailMulti = false, mailTarget = null;
 $("mail-cancel").onclick = () => mailModal.classList.remove("on");
 mailModal.onclick = e => { if (e.target === mailModal) mailModal.classList.remove("on"); };
 
+let mailDays = 1;   // 기본: 오늘
+// 기간 버튼
+document.querySelectorAll("#mail-period button").forEach(b => {
+  b.onclick = () => {
+    mailDays = Number(b.dataset.d) || 1;
+    document.querySelectorAll("#mail-period button").forEach(x => x.classList.toggle("on", x === b));
+    if (mailModal.classList.contains("on")) loadMail();   // 열려 있으면 즉시 다시 검색
+  };
+});
 async function openMail(target) {
   mailTarget = target;                       // 'order' | 'sab' | 'rep'
   mailMulti = (target === "rep");
@@ -1348,23 +1379,31 @@ async function openMail(target) {
   $("mail-ok").textContent = mailMulti ? "선택 항목 가져오기" : "이 파일 가져오기";
   const titles = { order: "메일에서 발주서 가져오기", sab: "메일에서 송장취합양식 가져오기", rep: "메일에서 회신 송장 가져오기" };
   $("mail-title").textContent = titles[target];
+  document.querySelectorAll("#mail-period button")
+    .forEach(x => x.classList.toggle("on", Number(x.dataset.d) === mailDays));
+  await loadMail();
+}
+async function loadMail() {
+  const target = mailTarget;
+  const dayTxt = mailDays === 1 ? "오늘" : `최근 ${mailDays}일`;
   const list = $("mail-list");
-  list.innerHTML = '<div class="empty">메일함을 확인하고 있어요…<br><span id="mail-prog"></span></div>';
-  $("mail-sub").textContent = "최근 7일 메일 확인 중…";
+  mailSel = []; $("mail-ok").disabled = true;
+  list.innerHTML = `<div class="empty">${dayTxt} 메일함을 확인하고 있어요…<br><span id="mail-prog"></span></div>`;
+  $("mail-sub").textContent = `${dayTxt} 메일 확인 중…`;
   try {
     let opt;
     if (target === "rep") {
       const f = await getReplyFilter();
-      opt = { days: 7, senders: f.senders, keywords: f.keywords, exclude: f.exclude || [], union: true, scanText: true };
+      opt = { days: mailDays, senders: f.senders, keywords: f.keywords, exclude: f.exclude || [], union: true, scanText: true };
     } else {
       // 발주서/사방넷: 저장된 발신자·키워드·제외어로 선별 (PC 앱과 동일)
       const f = await getOrderFilter();
-      opt = { days: 7, senders: f.senders, keywords: f.keywords, exclude: f.exclude, union: false, scanText: true };
+      opt = { days: mailDays, senders: f.senders, keywords: f.keywords, exclude: f.exclude, union: false, scanText: true };
     }
     opt.onProgress = (i, n) => { const p = $("mail-prog"); if (p) p.textContent = `${i} / ${n}`; };
     mailItems = await GMAIL.listMails(opt);
     if (!mailItems.length) {
-      list.innerHTML = '<div class="empty">최근 7일간 해당 엑셀 첨부를 찾지 못했어요.</div>';
+      list.innerHTML = `<div class="empty">${dayTxt}간 해당 엑셀 첨부를 찾지 못했어요.<br>위에서 기간을 늘려보세요.</div>`;
       $("mail-sub").textContent = "결과 없음"; return;
     }
     $("mail-sub").textContent = (mailMulti ? "여러 개 선택 가능 · " : "하나 선택 · ") + mailItems.length + "건";
@@ -1413,6 +1452,7 @@ $("mail-ok").onclick = async function () {
       msg("msg-o", "ok", "✔ 메일에서 가져왔어요: " + got[0].name);
     } else if (mailTarget === "sab") {
       S.sabBuf = got[0].data; S.sabName = got[0].name;
+      S.sabDrive = null;
       $("sab-name").textContent = "📧 " + got[0].name; $("drop-sab").classList.add("on"); $("sab-preview").style.display="block"; refreshI();
     } else {
       for (const g of got) if (!S.reps.some(r => r.name === g.name)) S.reps.push(g);
