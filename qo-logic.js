@@ -76,7 +76,7 @@ function canonField(h) {
   if (s.includes("주문번호") || s.includes("결제번호") || s.includes("배송번호")) return null;
   if (s.includes("우편번호")) return "ZIP";
   if (s.includes("수량")) return "QTY";
-  if (s.includes("옵션")) return null;
+  if (s.includes("옵션")) return "OPTION";
   if (s.includes("주소")) return "ADDR";
   if (s.includes("상품명")) return "PRODUCT";
   if (s.includes("상품") && !s.includes("번호")) return "PRODUCT";
@@ -397,7 +397,8 @@ function collectInvoices(sabangWb, replies, opts) {
       const car = fm.CARRIER !== undefined ? getV(ws, r, fm.CARRIER) : null;
       if (isBlank(inv) && isBlank(car)) continue;
       const vals = {}; idf.forEach(f => { vals[f] = getV(ws, r, fm[f]); });
-      rows.push({ car, inv, vals });
+      const opt = fm.OPTION !== undefined ? getV(ws, r, fm.OPTION) : null;
+      rows.push({ car, inv, vals, opt });
     }
     loaded.push({ supplier, fm, rows });
   }
@@ -414,38 +415,68 @@ function collectInvoices(sabangWb, replies, opts) {
   if (!cands.length) throw new Error("송장취합양식에서 대상 시트(택배사/운송장 열)를 찾지 못했습니다.");
 
   // 3) 가장 많이 매칭되는 시트 선택
+  const normInv = v => String(v == null ? "" : v).replace(/[^0-9a-zA-Z]/g, "").toLowerCase();
+  const SEP = "";   // 키 필드 구분자(연결 시 경계 뭉개짐 방지)
   function matchSheet(c) {
     const { ws, hr, fm } = c, d = dims(ws);
-    const used = new Set(), fills = {}, per = [];
-    let total = 0;
+    const used = new Set(), fills = {}, per = [], ambiguous = [];
+    let total = 0, already = 0;
+    // 이미 채워진 송장값(중복 회신='이미 취합됨' 감지용)
+    const existing = new Set();
+    for (let r = hr + 1; r <= d.rows; r++) { const iv = getV(ws, r, fm.INVOICE); if (!isBlank(iv)) existing.add(normInv(iv)); }
     for (const rp of loaded) {
       const common = KEY_FIELDS.filter(f => rp.fm[f] !== undefined && fm[f] !== undefined);
       if (!common.length) { per.push([rp.supplier, 0, 0, "공통 식별항목 없음"]); continue; }
+      const useOpt = rp.fm.OPTION !== undefined && fm.OPTION !== undefined;   // 옵션으로 세부 구분 가능?
+      // 빈칸(송장 없는) 행만 후보로 인덱싱
       const index = new Map();
       for (let r = hr + 1; r <= d.rows; r++) {
-        const key = common.map(f => normKey(getV(ws, r, fm[f]))).join("");
-        if (common.every((f, i) => key.split("")[i] === "")) continue;
+        if (!isBlank(getV(ws, r, fm.INVOICE))) continue;   // 이미 송장 있는 행 제외 → 덮어쓰기 방지
+        const parts = common.map(f => normKey(getV(ws, r, fm[f])));
+        if (parts.every(x => x === "")) continue;
+        const key = parts.join(SEP);
         if (!index.has(key)) index.set(key, []);
-        index.get(key).push(r);
+        index.get(key).push({ row: r, opt: useOpt ? normKey(getV(ws, r, fm.OPTION)) : "" });
       }
-      let vf = 0, vu = 0;
+      let vf = 0, vu = 0, dup = 0;
       for (const row of rp.rows) {
         const parts = common.map(f => normKey(row.vals[f]));
         if (parts.every(x => x === "")) continue;
-        const key = parts.join("");
-        let trow = null;
-        for (const rr of (index.get(key) || [])) if (!used.has(rr)) { trow = rr; break; }
-        if (trow === null) { vu++; continue; }
-        used.add(trow);
-        if (!fills[trow]) fills[trow] = {};
-        if (!isBlank(row.car)) fills[trow][fm.CARRIER] = row.car;
-        if (!isBlank(row.inv)) fills[trow][fm.INVOICE] = row.inv;
+        const key = parts.join(SEP);
+        const cands = (index.get(key) || []).filter(x => !used.has(x.row));
+        if (!cands.length) {
+          if (!isBlank(row.inv) && existing.has(normInv(row.inv))) dup++;   // 이미 취합됨(중복 회신)
+          else vu++;                                                        // 진짜 미매칭
+          continue;
+        }
+        let pick;
+        if (cands.length === 1) { pick = cands[0]; }
+        else {
+          // 후보 여럿 → 옵션으로 유일하게 좁혀지면 그걸로
+          const ro = useOpt ? normKey(row.opt) : "";
+          const narrowed = (useOpt && ro) ? cands.filter(x => x.opt === ro) : [];
+          if (narrowed.length === 1) { pick = narrowed[0]; }
+          else {
+            pick = (narrowed.length ? narrowed : cands)[0];
+            // 유일하게 못 가림 → '확인 필요'로 기록(조용히 오배정 방지)
+            ambiguous.push({
+              supplier: rp.supplier, inv: row.inv == null ? "" : String(row.inv),
+              label: common.map(f => row.vals[f]).filter(v => !isBlank(v)).map(String).join(" · "),
+              option: (useOpt && row.opt != null) ? String(row.opt) : "",
+              count: cands.length,
+            });
+          }
+        }
+        used.add(pick.row);
+        if (!fills[pick.row]) fills[pick.row] = {};
+        if (!isBlank(row.car)) fills[pick.row][fm.CARRIER] = row.car;
+        if (!isBlank(row.inv)) fills[pick.row][fm.INVOICE] = row.inv;
         vf++;
       }
-      total += vf;
-      per.push([rp.supplier, vf, vu, "OK"]);
+      total += vf; already += dup;
+      per.push([rp.supplier, vf, vu, dup ? ("이미취합 " + dup + "건") : "OK"]);
     }
-    return { total, per, fills, ...c };
+    return { total, per, fills, already, ambiguous, ...c };
   }
   let best = null;
   for (const c of cands) { const r = matchSheet(c); if (!best || r.total > best.total) best = r; }
@@ -468,7 +499,7 @@ function collectInvoices(sabangWb, replies, opts) {
   //    (업체 회신에서 해당 주문의 송장이 빠졌는지 확인)
   const bfm = best.fm, bhr = best.hr, bws = best.ws, bd = dims(bws);
   const keyPresent = KEY_FIELDS.filter(f => bfm[f] !== undefined);
-  const labelFields = ["RECIPIENT", "PRODUCT", "ORDERER", "ADDR"].filter(f => bfm[f] !== undefined);
+  const cellStr = (r, f) => { const v = getV(bws, r, bfm[f]); return v == null ? "" : String(v).trim(); };
   const missing = [];
   let orderRows = 0;
   for (let r = bhr + 1; r <= bd.rows; r++) {
@@ -478,18 +509,24 @@ function collectInvoices(sabangWb, replies, opts) {
     orderRows++;
     const invCell = getV(bws, r, bfm.INVOICE);   // 채운 뒤 값
     if (isBlank(invCell)) {
-      const label = labelFields
-        .map(f => { const v = getV(bws, r, bfm[f]); return v == null ? "" : String(v).trim(); })
-        .filter(Boolean).join(" · ") || `${r}행`;
-      missing.push({ row: r, label });
+      const item = { row: r };
+      // 항목별로 담아 UI에서 표로 보여줄 수 있게
+      ["RECIPIENT", "PRODUCT", "OPTION", "QTY", "ORDERER", "ADDR"].forEach(f => {
+        if (bfm[f] !== undefined) item[f] = cellStr(r, f);
+      });
+      item.label = ["RECIPIENT", "PRODUCT", "ORDERER", "ADDR"]
+        .map(f => item[f]).filter(Boolean).join(" · ") || `${r}행`;
+      missing.push(item);
     }
   }
   const missingCount = missing.length;
 
+  const already = best.already || 0;
   const per = best.per.concat(errors);
   log(`대상 시트 '${best.ws.name}' · 총 ${best.total}건 기입 · 회신 ${srcInvoice} / 취합본 ${writtenInvoice} · 주문행 ${orderRows} / 빈칸(누락) ${missingCount}`);
-  return { total: best.total, per, srcInvoice, writtenInvoice, gap: srcInvoice - writtenInvoice,
-    perSrc, sheet: best.ws.name, orderRows, missingCount, missing: missing.slice(0, 30) };
+  return { total: best.total, per, srcInvoice, writtenInvoice, gap: srcInvoice - writtenInvoice - already, already,
+    perSrc, sheet: best.ws.name, orderRows, missingCount, missing: missing.slice(0, 500),
+    ambiguous: best.ambiguous || [] };
 }
 
 /* ---------------- 내용 미리보기 ---------------- */

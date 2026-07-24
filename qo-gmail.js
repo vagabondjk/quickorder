@@ -7,6 +7,7 @@ const GMAIL = (() => {
   const SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/drive.appdata";
   const API = "https://gmail.googleapis.com/gmail/v1/users/me";
   const TKEY = "qo_gmail_token2";    // 토큰을 기기에 보관 → 로그인 유지 (드라이브 권한 추가로 키 변경 → 1회 재로그인)
+  const GKEY = "qo_gmail_granted";   // 권한 승인 이력(토큰 만료 후 동의창 반복 방지)
   let tokenClient = null, accessToken = null, tokenExp = 0, clientId = null;
 
   // 저장해 둔 토큰 불러오기 (아직 유효하면 재로그인 불필요)
@@ -17,9 +18,20 @@ const GMAIL = (() => {
     } catch (e) {}
   })();
   function saveToken() {
-    try { localStorage.setItem(TKEY, JSON.stringify({ token: accessToken, exp: tokenExp })); } catch (e) {}
+    try {
+      localStorage.setItem(TKEY, JSON.stringify({ token: accessToken, exp: tokenExp }));
+      localStorage.setItem(GKEY, "1");   // 승인 이력 기록(토큰 만료돼도 유지)
+    } catch (e) {}
   }
-  function clearToken() { try { localStorage.removeItem(TKEY); } catch (e) {} }
+  // 이 기기에서 한 번이라도 구글 권한을 승인했는지 (동의창 반복 방지용)
+  function granted() { try { return localStorage.getItem(GKEY) === "1"; } catch (e) { return false; } }
+  function clearToken() { try { localStorage.removeItem(TKEY); localStorage.removeItem(GKEY); } catch (e) {} }
+  function withTimeout(p, ms) {
+    return new Promise((res, rej) => {
+      const t = setTimeout(() => rej(new Error("timeout")), ms);
+      p.then(v => { clearTimeout(t); res(v); }, e => { clearTimeout(t); rej(e); });
+    });
+  }
 
   /* ---------- 인증 ---------- */
   function gsiLoaded() {
@@ -56,7 +68,8 @@ const GMAIL = (() => {
     return ensureInit();
   }
 
-  function signIn(interactive = true) {
+  // mode: "" = 조용한 갱신(화면 안 뜸) / "select_account" = 계정 선택 / "consent" = 최초 동의
+  function signIn(mode) {
     return new Promise(async (res, rej) => {
       if (!clientId) return rej(new Error("클라이언트 ID가 없습니다. 설정에서 입력·저장하세요."));
       if (!ensureInit()) {
@@ -68,17 +81,28 @@ const GMAIL = (() => {
         if (resp.error) return rej(new Error(resp.error_description || resp.error));
         accessToken = resp.access_token;
         tokenExp = Date.now() + (Number(resp.expires_in || 3600) - 60) * 1000;
-        saveToken();                       // 기기에 저장 → 다음에 재로그인 안 해도 됨
+        saveToken();                       // 기기에 저장 + 승인이력 기록
         res(accessToken);
       };
-      // 처음 한 번만 동의창(consent), 이후에는 조용히(prompt:"") 갱신
-      try { tokenClient.requestAccessToken({ prompt: interactive ? "consent" : "" }); }
+      try { tokenClient.error_callback = e => rej(new Error((e && (e.message || e.type)) || "로그인 취소")); } catch (e) {}
+      try { tokenClient.requestAccessToken({ prompt: mode === undefined ? "" : mode }); }
       catch (e) { rej(e); }
     });
   }
-  async function token() {
+  /* 토큰 얻기: 유효하면 그대로, 만료면 '조용한 갱신' 먼저 → 안 되면 계정선택
+     (예전엔 만료될 때마다 consent(동의창)를 띄워서 매번 로그인하라고 나왔음) */
+  async function token(allowInteractive = true) {
     if (signedIn()) return accessToken;
-    return await signIn(!accessToken);   // 처음엔 동의창, 이후엔 조용히 갱신
+    if (granted()) {
+      try { return await withTimeout(signIn(""), 8000); } catch (e) {}   // 조용히 갱신 시도
+    }
+    if (!allowInteractive) throw new Error("구글 로그인이 필요합니다.");
+    return await signIn(granted() ? "select_account" : "consent");
+  }
+  /* 화면 뒤에서 미리 갱신 (앱 열 때/포그라운드 복귀 시) — 사용 중 만료로 로그인창 뜨는 것 방지 */
+  async function refreshQuiet() {
+    if (signedIn() || !granted() || !clientId) return false;
+    try { await withTimeout(signIn(""), 8000); return true; } catch (e) { return false; }
   }
   function signOut() {
     if (accessToken && window.google) try { google.accounts.oauth2.revoke(accessToken, () => {}); } catch (e) {}
@@ -310,5 +334,5 @@ const GMAIL = (() => {
   }
 
   return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, listMails, getAttachment, send, profile,
-           searchAddresses, driveFind, driveDownload, driveUpload };
+           searchAddresses, driveFind, driveDownload, driveUpload, refreshQuiet, granted };
 })();

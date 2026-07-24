@@ -635,30 +635,61 @@ $("run-i").onclick = async function () {
   finally { busy("run-i", "run-i-lbl", false, "송장 취합하기"); refreshI(); }
 };
 
+/* 취합본 빈칸(누락) 주문을 읽기 쉬운 표로 */
+function missingTable(rows, total) {
+  if (!rows.length) return "";
+  const COLS = [["RECIPIENT", "수취인"], ["PRODUCT", "상품"], ["OPTION", "옵션"], ["QTY", "수량"], ["ORDERER", "주문자"], ["ADDR", "주소"]];
+  let use = COLS.filter(([k]) => rows.some(r => r[k] != null && String(r[k]).trim() !== ""));
+  if (!use.length) use = [["label", "주문"]];
+  let h = `<div class="tblbox" style="margin-top:8px"><div class="tblscroll"><table class="pv"><tr><th>#</th>${use.map(c => `<th>${esc(c[1])}</th>`).join("")}</tr>`;
+  rows.forEach((r, i) => {
+    h += `<tr><td class="num">${i + 1}</td>` + use.map(c => {
+      const v = r[c[0]] == null ? "" : String(r[c[0]]);
+      const num = /^[0-9,.\-]+$/.test(v) && v !== "";
+      return `<td${num ? ' class="num"' : ""}>${esc(v)}</td>`;
+    }).join("") + "</tr>";
+  });
+  h += "</table></div>";
+  if (total > rows.length) h += `<div class="pvfoot">앞 ${rows.length}건만 표시 · 전체 ${total}건</div>`;
+  return h + "</div>";
+}
+
 function showResultI(out, buf, filename) {
   let h = `<div class="tblbox" style="margin-bottom:12px"><div class="tblscroll"><table class="pv">
     <tr><th>업체</th><th>기입</th><th>미매칭</th><th>상태</th></tr>`;
   out.per.forEach(p => { h += `<tr><td>${esc(p[0])}</td><td class="num">${p[1]}</td><td class="num">${p[2]}</td><td>${esc(p[3])}</td></tr>`; });
   h += "</table></div></div>";
 
-  // (가) 회신 송장 수 ↔ 취합본 기입 수 대조
+  // (가) 회신 송장 처리 결과 대조
+  const already = out.already || 0;
+  const alreadyNote = already ? ` · 이미 취합된 송장 ${already}건은 건너뜀(덮어쓰기 안 함)` : "";
   if (out.gap === 0) {
-    h += `<div class="msg show ok" style="margin-top:0">✔ 송장 갯수 일치 — 회신 ${out.srcInvoice}건 = 취합본 ${out.writtenInvoice}건 모두 기입됨</div>`;
+    h += `<div class="msg show ok" style="margin-top:0">✔ 회신 송장 ${out.srcInvoice}건 모두 처리됨 — 신규 기입 <b>${out.writtenInvoice}건</b>${alreadyNote}</div>`;
   } else if (out.gap > 0) {
-    let d = "";
-    for (const k in out.perSrc) d += `\n· ${k} 회신 ${out.perSrc[k]}건`;
-    h += `<div class="msg show err" style="margin-top:0">⚠ 송장 누락 ${out.gap}건\n회신 양식 ${out.srcInvoice}건 중 취합본에 ${out.writtenInvoice}건만 기입되었습니다.${d}\n\n회신본의 수취인·주소·상품명이 원본과 달라졌는지 확인하세요.</div>`;
+    h += `<div class="msg show err" style="margin-top:0">⚠ 회신 송장 <b>${out.gap}건</b>이 취합본의 주문과 매칭되지 않았습니다\n(신규 기입 ${out.writtenInvoice}건${already ? ` · 이미취합 ${already}건` : ""} / 회신 ${out.srcInvoice}건)\n\n회신본의 수취인·주소·상품명이 취합본과 다른지 확인하세요.</div>`;
   } else {
     h += `<div class="msg show err" style="margin-top:0">⚠ 취합본 기입(${out.writtenInvoice}건)이 회신 송장(${out.srcInvoice}건)보다 많습니다. 회신 파일 중복을 확인하세요.</div>`;
   }
 
-  // (나) 취합본 빈칸(누락) 점검 — 주문행인데 송장이 안 채워진 행
+  // (나) 취합본 빈칸(누락) 점검 — 주문행인데 송장이 안 채워진 행 → 표로 보여줌
   if (out.orderRows !== undefined) {
     if (out.missingCount === 0) {
       h += `<div class="msg show ok" style="margin-top:8px">✔ 취합본 빈칸 없음 — 주문 ${out.orderRows}행 전부 송장 기입 완료</div>`;
     } else {
-      h += `<div class="msg show err" style="margin-top:8px">⚠ 취합본 송장 빈칸 <b>${out.missingCount}건</b> / 주문 ${out.orderRows}행 — 회신 누락 여부를 확인하세요</div>`;
+      h += `<div class="msg show err" style="margin-top:8px">⚠ 취합본 송장 빈칸 <b>${out.missingCount}건</b> / 주문 ${out.orderRows}행 — 아래 주문은 업체 회신에 송장이 없습니다</div>`;
+      h += missingTable(out.missing || [], out.missingCount);
     }
+  }
+
+  // (다) 모호 매칭 — 동일 정보 주문이 여러 개라 어느 행에 넣을지 자동 확정 못한 경우(확인 필요)
+  const amb = out.ambiguous || [];
+  if (amb.length) {
+    h += `<div class="msg show warn" style="margin-top:8px">⚠ 확인 필요 <b>${amb.length}건</b> — 아래는 <b>똑같은 정보(수취인·상품·옵션·수량)의 주문이 2건 이상</b>이라, 어느 주문에 넣을지 자동으로 확정하지 못했습니다. 송장이 올바른 주문에 들어갔는지 확인하세요.</div>`;
+    h += `<div class="tblbox" style="margin-top:8px"><div class="tblscroll"><table class="pv"><tr><th>업체</th><th>주문</th><th>옵션</th><th>송장</th><th>동일건</th></tr>`;
+    amb.forEach(a => {
+      h += `<tr><td>${esc(a.supplier || "")}</td><td>${esc(a.label || "")}</td><td>${esc(a.option || "")}</td><td>${esc(a.inv || "")}</td><td class="num">${a.count || ""}</td></tr>`;
+    });
+    h += "</table></div></div>";
   }
   h += `<div class="rrow" style="margin-top:12px"><div class="rtop"><div class="vinfo"><b>송장 취합본</b>
     <span>${esc(filename)}</span></div><span class="cnt">${out.total}건</span></div>
@@ -812,8 +843,15 @@ async function initGmail() {
   if (cid) {
     gmailReady = await GMAIL.waitReady();  // GSI 로드까지 기다렸다 준비
     updateGmailWho();
+    // 만료된 로그인은 화면 뒤에서 미리 조용히 갱신 → 쓰다가 로그인창 뜨는 것 방지
+    if (await GMAIL.refreshQuiet()) { updateGmailWho(); syncOnStart(); }
   }
 }
+// 앱으로 돌아올 때도 조용히 갱신 (백그라운드에 오래 있다 온 경우)
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && gmailReady)
+    GMAIL.refreshQuiet().then(ok => { if (ok) updateGmailWho(); });
+});
 function updateGmailWho() {
   const txt = !gmailReady ? "⚠ 메일 연결 준비 안 됨 (설정에서 연결하세요)"
     : GMAIL.signedIn() ? "✓ 구글 메일 연결됨" : "구글 계정 연결 필요 (버튼을 누르면 로그인)";
@@ -825,8 +863,8 @@ async function ensureGmail() {
   if (!gmailReady) { GMAIL.init(cid); gmailReady = await GMAIL.waitReady(); updateGmailWho(); }
   if (!gmailReady) throw new Error("구글 로그인 라이브러리를 불러오지 못했어요.\n인터넷/광고차단을 확인하고 새로고침 해보세요.");
   if (GMAIL.signedIn()) { updateGmailWho(); return; }   // 저장된 로그인 유효 → 그대로 사용
-  // 토큰이 아예 없으면 로그인창(동의), 만료됐으면 조용히 갱신
-  await GMAIL.signIn(!GMAIL.hasToken());
+  // 만료됐으면 '조용한 갱신' 먼저 시도 → 안 되면 계정선택 (동의창 반복 방지)
+  await GMAIL.token();
   updateGmailWho();
   syncOnStart();          // 로그인 직후 다른 기기 데이터 내려받기
 }

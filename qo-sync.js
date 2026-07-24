@@ -48,17 +48,32 @@ const SYNC = (() => {
     };
   }
 
+  /* 원격 내용을 이 기기에 반영 — '병합' 방식.
+     한쪽 기기에서 실수로 지워도 다른 기기 것이 사라지지 않고, 오히려 복구된다.
+     (예전엔 로컬을 통째로 지우고 원격으로 덮어써서, 한쪽 삭제가 양쪽 삭제가 됐음) */
   async function applyBundle(obj) {
+    const remoteNames = new Set((obj.forms || []).map(f => f.name));
+    const localBefore = await DB.listForms();
+    const extraLocal = localBefore.some(f => !remoteNames.has(f.name));   // 이 기기에만 있는 양식
     DB.suspend(true);
     try {
-      const cur = await DB.listForms();
-      for (const f of cur) await DB.delForm(f.name);
+      // 업체 양식: 추가·갱신만 (원격에 없다고 로컬 것을 지우지 않음)
       for (const f of (obj.forms || []))
         await DB.putForm({ name: f.name, file: f.file, checked: f.checked !== false, data: bufFromB64(f.data) });
-      for (const k in (obj.kv || {})) await DB.set(k, obj.kv[k]);
+      // 설정: 객체형(업체메일·브랜드·도메인 등)은 병합, 배열/문자열은 교체
+      for (const k in (obj.kv || {})) {
+        const remote = obj.kv[k];
+        if (remote && typeof remote === "object" && !Array.isArray(remote)) {
+          const local = await DB.get(k, {});
+          await DB.set(k, Object.assign({}, local, remote));
+        } else {
+          await DB.set(k, remote);
+        }
+      }
     } finally { DB.suspend(false); }
     setStamp(obj.updatedAt || Date.now());
     markTime();
+    return { needPush: extraLocal };   // 이 기기에만 있던 게 있으면 클라우드에도 올려 합침
   }
 
   /* 내려받기: 원격이 더 최신이면 적용. 반환 {changed} */
@@ -71,7 +86,9 @@ const SYNC = (() => {
       const txt = await GMAIL.driveDownload(fileId);
       const obj = JSON.parse(txt);
       if ((obj.updatedAt || 0) > getStamp()) {
-        await applyBundle(obj);
+        const r = await applyBundle(obj);
+        // 이 기기에만 있던 양식이 있으면 클라우드에도 올려 양쪽을 합집합으로 맞춘다
+        if (r && r.needPush) { try { await syncUpNow(); } catch (e) {} }
         status("ok");
         return { changed: true, hadRemote: true };
       }
