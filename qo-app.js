@@ -441,7 +441,7 @@ async function drawDriveRecent() {
   $("drive-again").style.display = has ? "block" : "none";
   $("order-pinrow").style.display = has ? "flex" : "none";
   $("order-pin-set").style.display = has ? "none" : "block";
-  if (has) { $("drive-recent").textContent = f.name; $("order-pinname").textContent = f.name; }
+  if (has) { $("order-pinname").textContent = f.name; }
 }
 
 /* --- ② 업체 양식 (여러 개 선택 가능) --- */
@@ -517,7 +517,7 @@ async function drawSabRecent() {
   $("sab-again").style.display = has ? "block" : "none";
   $("sab-pinrow").style.display = has ? "flex" : "none";
   $("sab-pin-set").style.display = has ? "none" : "block";
-  if (has) { $("sab-recent").textContent = f.name; $("sab-pinname").textContent = f.name; }
+  if (has) { $("sab-pinname").textContent = f.name; }
 }
 
 /* --- ④ 업체 회신 송장 (여러 개 선택 가능) --- */
