@@ -207,21 +207,47 @@ $("drv-link-go").onclick = async () => {
 };
 $("drv-done").onclick = async () => { if (DRV.sel.size) await drvPick([...DRV.sel.values()]); };
 
-/* opts: { title, sub, multiple, onPick(files) } — files: [{id,name,mimeType}] */
+/* opts: { key, title, sub, multiple, onPick(files) } — files: [{id,name,mimeType}]
+   key: 용도별 기본 폴더 저장용 (order/tpl/sab/rep) → 다음부터 그 폴더가 바로 열림 */
 async function openDrivePicker(opts) {
   DRV.multiple = !!opts.multiple; DRV.onPick = opts.onPick; DRV.sel = new Map();
+  DRV.key = opts.key || "";
   $("drv-title").textContent = opts.title || "구글 드라이브에서 가져오기";
   $("drv-sub").textContent = opts.sub || (opts.multiple
-    ? "폴더를 열고 파일을 여러 개 고를 수 있어요." : "폴더를 열어 파일을 고르세요.");
+    ? "폴더 안에서 파일을 여러 개 고를 수 있어요." : "폴더 안에서 파일을 고르세요.");
   $("drv-done").style.display = opts.multiple ? "" : "none";
   $("drv-done").textContent = "선택 완료";
   $("drv-msg").textContent = ""; $("drv-q").value = ""; $("drv-link").value = "";
   $("drv-list").innerHTML = "";
   $("drvmodal").classList.add("on");
   try { await ensureGmail(); } catch (e) { $("drv-msg").textContent = "⚠ " + e.message; return; }
-  DRV.path = [{ id: "root", name: "내 드라이브" }];
-  drvOpen("root");
+  // 저장해 둔 기본 폴더가 있으면 바로 그 폴더를 연다
+  const saved = DRV.key ? (await DB.get("driveFolders", {}))[DRV.key] : null;
+  if (saved && saved.id) {
+    DRV.path = [{ id: "root", name: "내 드라이브" }, { id: saved.id, name: saved.name }];
+    drvOpen(saved.id);
+  } else {
+    DRV.path = [{ id: "root", name: "내 드라이브" }];
+    drvOpen("root");
+  }
+  drvFolderInfo();
 }
+async function drvFolderInfo() {
+  const saved = DRV.key ? (await DB.get("driveFolders", {}))[DRV.key] : null;
+  $("drv-folder-info").textContent = saved && saved.id
+    ? `기본 폴더: ${saved.name}`
+    : "기본 폴더 없음 — 폴더를 연 뒤 [기본 폴더로]를 누르면 다음부터 바로 열립니다";
+}
+$("drv-setfolder").onclick = async () => {
+  if (!DRV.key) return;
+  const cur = DRV.path[DRV.path.length - 1];
+  if (!cur || cur.id === "root") { $("drv-msg").textContent = "⚠ 폴더를 하나 열고 눌러주세요 (내 드라이브 최상위는 지정 불가)"; return; }
+  const all = await DB.get("driveFolders", {});
+  all[DRV.key] = { id: cur.id, name: cur.name };
+  await DB.set("driveFolders", all);
+  drvFolderInfo();
+  $("drv-msg").textContent = `✔ 기본 폴더로 저장했어요: ${cur.name}`;
+};
 function drvCrumb() {
   const c = $("drv-crumb"); c.innerHTML = "";
   DRV.path.forEach((p, i) => {
@@ -279,7 +305,7 @@ async function drvPick(files) {
 
 /* --- ① 쇼핑몰 주문 파일 --- */
 $("drive-order").onclick = () => openDrivePicker({
-  title: "드라이브에서 발주서 가져오기", multiple: false,
+  key: "order", title: "드라이브에서 발주서 가져오기", multiple: false,
   onPick: async files => {
     const f = files[0];
     const r = await GMAIL.driveFetchExcel(f.id);
@@ -307,7 +333,7 @@ async function drawDriveRecent() {
 
 /* --- ② 업체 양식 (여러 개 선택 가능) --- */
 $("drive-tpl").onclick = () => openDrivePicker({
-  title: "드라이브에서 업체 양식 가져오기", multiple: true,
+  key: "tpl", title: "드라이브에서 업체 양식 가져오기", multiple: true,
   onPick: async files => {
     let n = 0;
     for (const f of files) {
@@ -322,7 +348,7 @@ $("drive-tpl").onclick = () => openDrivePicker({
 
 /* --- ③ 송장취합양식 (하나) --- */
 $("drive-sab").onclick = () => openDrivePicker({
-  title: "드라이브에서 송장취합양식 가져오기", multiple: false,
+  key: "sab", title: "드라이브에서 송장취합양식 가져오기", multiple: false,
   onPick: async files => {
     const r = await GMAIL.driveFetchExcel(files[0].id);
     S.sabBuf = r.buf; S.sabName = r.name;
@@ -334,7 +360,7 @@ $("drive-sab").onclick = () => openDrivePicker({
 
 /* --- ④ 업체 회신 송장 (여러 개 선택 가능) --- */
 $("drive-rep").onclick = () => openDrivePicker({
-  title: "드라이브에서 회신 송장 가져오기", multiple: true,
+  key: "rep", title: "드라이브에서 회신 송장 가져오기", multiple: true,
   onPick: async files => {
     let n = 0;
     for (const f of files) {
