@@ -30,6 +30,7 @@ function parseDomains(str) {
   }
   return out;
 }
+const DT_SHOW = 3;   // 날짜 칩은 최근 3개만 보이고 나머지는 "더보기"
 const EYE = '미리보기';   // 미리보기 버튼 라벨(텍스트)
 
 const $ = id => document.getElementById(id);
@@ -185,63 +186,166 @@ async function setOrder(file) {
   } catch (e) { msg("msg-o", "err", "파일을 읽지 못했어요: " + e.message); }
 }
 
-/* --- 구글 드라이브에서 발주서 가져오기 (링크 붙여넣기 / 앱 내 검색·선택) --- */
-$("drive-order").onclick = () => openDrive();
+/* =================================================================
+   구글 드라이브 파일 선택기 (폴더 탐색 + 검색 + 링크) — 발주서/업체양식/송장양식/회신 공용
+   ================================================================= */
+const DRV = { multiple: false, onPick: null, path: [], sel: new Map() };
+const GSHEET = "application/vnd.google-apps.spreadsheet";
+const GFOLDER = "application/vnd.google-apps.folder";
+
 $("drv-close").onclick = () => $("drvmodal").classList.remove("on");
 $("drvmodal").onclick = e => { if (e.target === $("drvmodal")) $("drvmodal").classList.remove("on"); };
 $("drv-search").onclick = () => drvSearch($("drv-q").value);
 $("drv-q").addEventListener("keydown", e => { if (e.key === "Enter") drvSearch($("drv-q").value); });
 $("drv-link-go").onclick = async () => {
   const id = GMAIL.driveIdFromLink($("drv-link").value);
-  if (!id) { $("drv-msg").textContent = "⚠ 링크에서 파일 ID를 찾지 못했어요. 드라이브 공유 링크를 그대로 붙여넣어 주세요."; return; }
-  await drvLoad(id);
+  if (!id) { $("drv-msg").textContent = "⚠ 링크에서 파일 ID를 못 찾았어요. 드라이브 공유 링크를 그대로 붙여넣어 주세요."; return; }
+  try {
+    const info = await GMAIL.driveFileInfo(id);
+    await drvPick([{ id, name: info.name, mimeType: info.mimeType }]);
+  } catch (e) { $("drv-msg").textContent = "⚠ " + e.message; }
 };
-$("drive-again").onclick = async () => { const f = await DB.get("driveOrderFile", null); if (f && f.id) await drvLoad(f.id); };
+$("drv-done").onclick = async () => { if (DRV.sel.size) await drvPick([...DRV.sel.values()]); };
 
-async function openDrive() {
-  $("drv-msg").textContent = ""; $("drv-list").innerHTML = "";
+/* opts: { title, sub, multiple, onPick(files) } — files: [{id,name,mimeType}] */
+async function openDrivePicker(opts) {
+  DRV.multiple = !!opts.multiple; DRV.onPick = opts.onPick; DRV.sel = new Map();
+  $("drv-title").textContent = opts.title || "구글 드라이브에서 가져오기";
+  $("drv-sub").textContent = opts.sub || (opts.multiple
+    ? "폴더를 열고 파일을 여러 개 고를 수 있어요." : "폴더를 열어 파일을 고르세요.");
+  $("drv-done").style.display = opts.multiple ? "" : "none";
+  $("drv-done").textContent = "선택 완료";
+  $("drv-msg").textContent = ""; $("drv-q").value = ""; $("drv-link").value = "";
+  $("drv-list").innerHTML = "";
   $("drvmodal").classList.add("on");
   try { await ensureGmail(); } catch (e) { $("drv-msg").textContent = "⚠ " + e.message; return; }
-  drvSearch("");                       // 처음엔 최근 수정 파일부터
+  DRV.path = [{ id: "root", name: "내 드라이브" }];
+  drvOpen("root");
 }
-async function drvSearch(q) {
-  const box = $("drv-list");
-  box.innerHTML = '<div class="empty">찾는 중…</div>';
+function drvCrumb() {
+  const c = $("drv-crumb"); c.innerHTML = "";
+  DRV.path.forEach((p, i) => {
+    if (i) c.appendChild(document.createTextNode(" › "));
+    const b = document.createElement("b"); b.textContent = p.name;
+    b.onclick = () => { DRV.path = DRV.path.slice(0, i + 1); drvOpen(p.id, true); };
+    c.appendChild(b);
+  });
+}
+async function drvOpen(folderId, keepPath) {
+  drvCrumb();
+  const box = $("drv-list"); box.innerHTML = '<div class="empty">불러오는 중…</div>';
   try {
-    await ensureGmail();
-    const files = await GMAIL.driveSearch(q, 30);
-    if (!files.length) { box.innerHTML = '<div class="empty">엑셀/시트 파일을 찾지 못했어요.</div>'; return; }
-    box.innerHTML = "";
-    files.forEach(f => {
-      const el = document.createElement("div");
-      el.className = "mitem"; el.style.cursor = "pointer";
-      const isSheet = f.mimeType === "application/vnd.google-apps.spreadsheet";
-      const when = f.modifiedTime ? new Date(f.modifiedTime).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
-      el.innerHTML = `<div style="font-weight:700;font-size:13px">${isSheet ? "📊" : "📄"} ${esc(f.name)}</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:3px">수정 ${esc(when)}</div>`;
-      el.onclick = () => drvLoad(f.id);
-      box.appendChild(el);
-    });
+    const items = await GMAIL.driveListFolder(folderId, 200);
+    drvRender(items, true);
   } catch (e) { box.innerHTML = ""; $("drv-msg").textContent = "⚠ " + e.message; }
 }
-async function drvLoad(fileId) {
+async function drvSearch(q) {
+  if (!q || !q.trim()) { DRV.path = [{ id: "root", name: "내 드라이브" }]; return drvOpen("root"); }
+  const box = $("drv-list"); box.innerHTML = '<div class="empty">찾는 중…</div>';
+  $("drv-crumb").innerHTML = `<span>검색: “${esc(q)}”</span>`;
+  try { drvRender(await GMAIL.driveSearch(q, 50), false); }
+  catch (e) { box.innerHTML = ""; $("drv-msg").textContent = "⚠ " + e.message; }
+}
+function drvRender(items, allowFolders) {
+  const box = $("drv-list"); box.innerHTML = "";
+  if (!items.length) { box.innerHTML = '<div class="empty">엑셀/시트 파일이 없어요.</div>'; return; }
+  items.forEach(f => {
+    const folder = f.mimeType === GFOLDER;
+    if (folder && !allowFolders) return;
+    const el = document.createElement("div");
+    el.className = "drvrow" + (DRV.sel.has(f.id) ? " on" : "");
+    const when = f.modifiedTime ? new Date(f.modifiedTime).toLocaleString("ko-KR",
+      { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+    el.innerHTML = `<span class="ic">${folder ? "📁" : (f.mimeType === GSHEET ? "📊" : "📄")}</span>
+      <span class="nm"><b>${esc(f.name)}</b><span>${folder ? "폴더" : "수정 " + esc(when)}</span></span>`;
+    el.onclick = () => {
+      if (folder) { DRV.path.push({ id: f.id, name: f.name }); return drvOpen(f.id); }
+      if (DRV.multiple) {
+        if (DRV.sel.has(f.id)) DRV.sel.delete(f.id); else DRV.sel.set(f.id, f);
+        el.classList.toggle("on", DRV.sel.has(f.id));
+        $("drv-done").textContent = DRV.sel.size ? `선택 완료 (${DRV.sel.size}개)` : "선택 완료";
+      } else drvPick([f]);
+    };
+    box.appendChild(el);
+  });
+}
+async function drvPick(files) {
   $("drv-msg").textContent = "가져오는 중…";
   try {
-    await ensureGmail();
-    const r = await GMAIL.driveFetchExcel(fileId);
-    await DB.set("driveOrderFile", { id: fileId, name: r.name });   // 다음에 한 번에 다시 받기
+    if (DRV.onPick) await DRV.onPick(files);
     $("drvmodal").classList.remove("on");
+  } catch (e) { $("drv-msg").textContent = "⚠ " + e.message; }
+}
+
+/* --- ① 쇼핑몰 주문 파일 --- */
+$("drive-order").onclick = () => openDrivePicker({
+  title: "드라이브에서 발주서 가져오기", multiple: false,
+  onPick: async files => {
+    const f = files[0];
+    const r = await GMAIL.driveFetchExcel(f.id);
+    await DB.set("driveOrderFile", { id: f.id, name: r.name });
     await setOrderFromBuf(r.buf, r.name);
     drawDriveRecent();
     msg("msg-o", "ok", `✔ 드라이브에서 가져왔어요: ${r.name}`);
-  } catch (e) { $("drv-msg").textContent = "⚠ " + e.message; }
-}
+  },
+});
+$("drive-again").onclick = async () => {
+  const f = await DB.get("driveOrderFile", null); if (!f || !f.id) return;
+  msg("msg-o", "", "가져오는 중…");
+  try {
+    const r = await GMAIL.driveFetchExcel(f.id);
+    await setOrderFromBuf(r.buf, r.name);
+    msg("msg-o", "ok", `✔ 최신본으로 다시 가져왔어요: ${r.name}`);
+  } catch (e) { msg("msg-o", "err", "가져오기 실패: " + e.message); }
+};
 async function drawDriveRecent() {
   const f = await DB.get("driveOrderFile", null);
   const row = $("drive-recent-row");
   if (f && f.id) { $("drive-recent").textContent = "드라이브 최근 파일: " + f.name; row.style.display = "flex"; }
   else row.style.display = "none";
 }
+
+/* --- ② 업체 양식 (여러 개 선택 가능) --- */
+$("drive-tpl").onclick = () => openDrivePicker({
+  title: "드라이브에서 업체 양식 가져오기", multiple: true,
+  onPick: async files => {
+    let n = 0;
+    for (const f of files) {
+      const r = await GMAIL.driveFetchExcel(f.id);
+      await DB.putForm({ name: QO.nameFromFilename(r.name), file: r.name, data: r.buf, checked: true });
+      n++;
+    }
+    await loadForms();
+    msg("msg-o", "ok", `✔ 드라이브에서 업체 양식 ${n}개를 저장했어요.`);
+  },
+});
+
+/* --- ③ 송장취합양식 (하나) --- */
+$("drive-sab").onclick = () => openDrivePicker({
+  title: "드라이브에서 송장취합양식 가져오기", multiple: false,
+  onPick: async files => {
+    const r = await GMAIL.driveFetchExcel(files[0].id);
+    S.sabBuf = r.buf; S.sabName = r.name;
+    $("sab-name").textContent = "📁 " + r.name;
+    $("drop-sab").classList.add("on"); $("sab-preview").style.display = "block";
+    refreshI(); msg("msg-i", "ok", `✔ 송장취합양식을 가져왔어요: ${r.name}`);
+  },
+});
+
+/* --- ④ 업체 회신 송장 (여러 개 선택 가능) --- */
+$("drive-rep").onclick = () => openDrivePicker({
+  title: "드라이브에서 회신 송장 가져오기", multiple: true,
+  onPick: async files => {
+    let n = 0;
+    for (const f of files) {
+      const r = await GMAIL.driveFetchExcel(f.id);
+      if (S.reps.some(x => x.name === r.name)) continue;
+      S.reps.push({ name: r.name, data: r.buf }); n++;
+    }
+    drawReps(); refreshI();
+    msg("msg-i", "ok", `✔ 드라이브에서 회신 송장 ${n}개를 가져왔어요.`);
+  },
+});
 
 /* --- 날짜 --- */
 $("dt-col").onchange = function () { loadDates(this.value).then(drawPreview); };
@@ -274,17 +378,31 @@ async function loadDates(header) {
   all.className = "brow"; all.style.borderStyle = "dashed";
   all.onclick = () => { S.dateSel = S.dateSel.length === list.length ? [] : list.map(d => d.date); drawDateChips(); };
   box.appendChild(all);
-  list.forEach(d => {
+  list.forEach((d, i) => {
     const el = document.createElement("span");
-    el.className = "brow"; el.dataset.d = d.date;
+    el.className = "brow" + (i >= DT_SHOW ? " dt-more" : "");   // 최근 3개만 기본 표시
+    el.dataset.d = d.date;
     el.innerHTML = `<span class="box">${CHK}</span>${esc(d.label)} (${d.count}건)`;
     el.onclick = () => {
-      const i = S.dateSel.indexOf(d.date);
-      if (i >= 0) S.dateSel.splice(i, 1); else S.dateSel.push(d.date);
+      const j = S.dateSel.indexOf(d.date);
+      if (j >= 0) S.dateSel.splice(j, 1); else S.dateSel.push(d.date);
       drawDateChips();
     };
     box.appendChild(el);
   });
+  // 더보기/접기 (날짜가 많을 때 한 줄만 보이게)
+  S.dtOpen = false;
+  if (list.length > DT_SHOW) {
+    const more = document.createElement("button");
+    more.className = "minibtn"; more.id = "dt-more-btn";
+    more.onclick = () => {
+      S.dtOpen = !S.dtOpen;
+      box.querySelectorAll(".dt-more").forEach(x => x.classList.toggle("show", S.dtOpen));
+      more.textContent = S.dtOpen ? "접기" : `+ 더보기 (${list.length - DT_SHOW}개)`;
+    };
+    more.textContent = `+ 더보기 (${list.length - DT_SHOW}개)`;
+    box.appendChild(more);
+  }
   drawDateChips();
 }
 function drawDateChips() {
@@ -297,18 +415,17 @@ function drawDateChips() {
   $("dt-foot").textContent = S.dateSel.length
     ? `선택한 ${S.dateSel.length}개 날짜 · 총 ${cnt}건만 변환됩니다`
     : "⚠ 날짜를 하나 이상 선택하세요";
+  renderPreview();     // 체크한 날짜에 맞춰 '내용 확인'도 즉시 갱신
   refreshO();
 }
 
 /* --- 내용 확인 --- */
 $("pv-toggle").onclick = function () { S.pvAll = !S.pvAll; this.textContent = S.pvAll ? "주요 열만 보기" : "전체 열 보기"; renderPreview(); };
-const PV_DAYS = 3;   // 미리보기는 최근 수집일 3일치만 (과거 주문까지 다 보이지 않게)
 async function drawPreview() {
   $("prev-wrap").style.display = "block";
   $("pv-cnt").textContent = "· 읽는 중…";
   const wb = await QO.loadWorkbook(S.orderBuf.slice(0));
-  const recent = (S.dateAll || []).slice(0, PV_DAYS).map(d => d.date);   // dateAll은 최신순 정렬
-  S.pv = QO.preview(wb, 2000, { dates: recent.length ? recent : null, dateHeader: S.dateHeader });
+  S.pv = QO.preview(wb, 5000, { dateHeader: S.dateHeader });   // 전체를 읽되, 화면에선 체크한 날짜만 표시
   S.pvAll = false;
   $("pv-toggle").textContent = "전체 열 보기";
   renderPreview();
@@ -316,11 +433,15 @@ async function drawPreview() {
 function renderPreview() {
   const pv = S.pv; if (!pv) return;
   const idx = (S.pvAll || !pv.keyIdx.length) ? pv.columns.map((_, i) => i) : pv.keyIdx;
-  $("pv-cnt").textContent = pv.filtered
-    ? `· 최근 ${PV_DAYS}일 ${pv.total}건 (파일 전체 ${pv.totalAll}건) · 열 ${idx.length}/${pv.columns.length}`
-    : `· 전체 ${pv.total}건 · 열 ${idx.length}/${pv.columns.length}`;
+  // 체크한 수집일자에 해당하는 행만 표시 (선택이 없으면 전부)
+  const selSet = S.dateSel && S.dateSel.length ? new Set(S.dateSel) : null;
+  const hasDates = pv.rowDates && pv.rowDates.some(x => x);
+  const view = (selSet && hasDates) ? pv.rows.filter((_, i) => selSet.has(pv.rowDates[i])) : pv.rows;
+  $("pv-cnt").textContent = (selSet && hasDates)
+    ? `· 선택한 ${S.dateSel.length}개 날짜 ${view.length}건 (파일 전체 ${pv.total}건) · 열 ${idx.length}/${pv.columns.length}`
+    : `· 전체 ${view.length}건 · 열 ${idx.length}/${pv.columns.length}`;
   let h = "<tr>" + idx.map(i => `<th>${esc(pv.columns[i] || "열" + (i + 1))}</th>`).join("") + "</tr>";
-  pv.rows.forEach(row => {
+  view.forEach(row => {
     h += "<tr>" + idx.map(i => {
       const v = row[i] == null ? "" : row[i];
       const num = /^[0-9,.\-]+$/.test(v) && v !== "";
@@ -328,10 +449,9 @@ function renderPreview() {
     }).join("") + "</tr>";
   });
   $("pv-table").innerHTML = h;
-  const shown = pv.total > pv.rows.length ? `앞 ${pv.rows.length}건만 표시 · ${pv.total}건 중` : `${pv.total}건 표시`;
-  $("pv-foot").textContent = pv.filtered
-    ? `${shown} — 미리보기는 최근 ${PV_DAYS}일치만 보여줍니다 (변환은 위에서 고른 날짜 기준)`
-    : `${shown} — 전체가 변환됩니다`;
+  $("pv-foot").textContent = (selSet && hasDates)
+    ? `체크한 날짜의 주문 ${view.length}건 — 이 내용이 그대로 변환됩니다`
+    : `전체 ${view.length}건 표시`;
 }
 
 /* --- 업체 양식 --- */

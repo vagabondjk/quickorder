@@ -81,6 +81,18 @@
   .pvfoot{font-size:11.5px;color:var(--faint);text-align:center;padding:8px 4px 0}
 
   .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:2px}
+  .drvcrumb{font-size:11.5px;color:var(--muted);font-weight:600;margin-bottom:8px;
+    display:flex;flex-wrap:wrap;gap:3px;align-items:center}
+  .drvcrumb b{color:var(--brand);cursor:pointer;font-weight:700}
+  .drvrow{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--line);
+    border-radius:10px;margin-bottom:6px;cursor:pointer;background:var(--card)}
+  .drvrow.on{border-color:var(--brand);background:var(--brand-soft)}
+  .drvrow .ic{font-size:17px;flex:none}
+  .drvrow .nm{flex:1;min-width:0}
+  .drvrow .nm b{display:block;font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .drvrow .nm span{display:block;font-size:11px;color:var(--muted)}
+  .brow.dt-more{display:none}
+  .brow.dt-more.show{display:inline-flex}
   .brow{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;
     border:1.5px solid var(--line);background:var(--card);font-size:12.5px;font-weight:600;cursor:pointer;user-select:none}
   .brow.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
@@ -184,7 +196,7 @@
 <div class="wrap">
   <header>
     <b>퀵오더 웹</b><span class="sub">by JK</span>
-    <span class="verbadge" id="app-ver">v3.3</span>
+    <span class="verbadge" id="app-ver">v3.4</span>
     <span style="margin-left:auto"></span>
     <button class="chip" id="btn-settings">설정</button>
   </header>
@@ -233,6 +245,7 @@
       <h2><span class="n">2</span>업체 양식 (발주서)</h2>
       <p class="hint">한 번 올려두면 이 기기에 저장되어 다음부터 체크만 하면 됩니다.</p>
       <div class="vlist" id="vlist"><div class="empty">불러오는 중…</div></div>
+      <button class="go" id="drive-tpl" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📁 드라이브에서 업체 양식 가져오기</button>
       <label class="drop" id="drop-tpl" style="margin-top:10px;padding:14px">
         ＋ 업체 양식 추가
         <input type="file" id="f-tpl" accept=".xlsx,.xlsm" multiple>
@@ -261,6 +274,7 @@
       <h2><span class="n">1</span>송장취합양식</h2>
       <p class="hint">송장을 채워 넣을 양식 파일입니다.</p>
       <button class="go" id="mail-sab" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 송장취합양식 가져오기</button>
+      <button class="go" id="drive-sab" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📁 드라이브에서 송장취합양식 가져오기</button>
       <label class="drop" id="drop-sab">
         송장취합양식 선택 (또는 끌어다 놓기)
         <b id="sab-name"></b>
@@ -273,6 +287,7 @@
       <h2><span class="n">2</span>업체 회신 송장</h2>
       <p class="hint">업체들이 택배사·운송장번호를 채워 보낸 파일. 여러 개 가능합니다.</p>
       <button class="go" id="mail-rep" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 회신 송장 가져오기</button>
+      <button class="go" id="drive-rep" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📁 드라이브에서 회신 송장 가져오기</button>
       <div class="setrow"><span id="reply-filter">회신 검색조건: 송장, 운송장, 회신</span><button class="minibtn" id="reply-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-rep" style="padding:14px;margin-top:8px">
         ＋ 회신 송장 파일 추가
@@ -290,7 +305,7 @@
     </div>
   </div>
 
-  <p class="foot">퀵오더 웹 <b>v3.3</b> · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
+  <p class="foot">퀵오더 웹 <b>v3.4</b> · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
 </div>
 
 <!-- 메일 선택 모달 -->
@@ -355,21 +370,25 @@
 <div class="modal" id="drvmodal">
   <div class="sheet">
     <div class="grip"></div>
-    <h3>구글 드라이브에서 발주서 가져오기</h3>
-    <p class="sub2">파일을 고르거나, 공유 링크를 붙여넣으세요. 항상 최신 내용으로 받아옵니다.</p>
-    <div class="fld"><label>파일 이름으로 찾기</label>
+    <h3 id="drv-title">구글 드라이브에서 가져오기</h3>
+    <p class="sub2" id="drv-sub">폴더를 열어 파일을 고르세요. 항상 최신 내용으로 받아옵니다.</p>
+    <div id="drv-crumb" class="drvcrumb"></div>
+    <div class="fld">
       <div style="display:flex;gap:7px">
-        <input id="drv-q" placeholder="예: 발주서, 통합" spellcheck="false" autocapitalize="off">
+        <input id="drv-q" placeholder="파일 이름 검색 (드라이브 전체)" spellcheck="false" autocapitalize="off">
         <button class="minibtn" id="drv-search" style="padding:0 14px">검색</button>
       </div></div>
-    <div class="mlist" id="drv-list" style="max-height:44vh;overflow:auto"></div>
-    <div class="fld" style="margin-top:8px"><label>또는 드라이브 공유 링크 붙여넣기</label>
+    <div class="mlist" id="drv-list" style="max-height:40vh;overflow:auto"></div>
+    <div class="fld" style="margin-top:8px">
       <div style="display:flex;gap:7px">
-        <input id="drv-link" placeholder="https://drive.google.com/file/d/..." spellcheck="false" autocapitalize="off">
+        <input id="drv-link" placeholder="또는 공유 링크 붙여넣기" spellcheck="false" autocapitalize="off">
         <button class="minibtn" id="drv-link-go" style="padding:0 14px">가져오기</button>
       </div></div>
     <div id="drv-msg" style="font-size:12px;color:var(--muted);margin-top:8px;white-space:pre-wrap"></div>
-    <div class="row"><button class="btn-cancel" id="drv-close">닫기</button></div>
+    <div class="row">
+      <button class="btn-cancel" id="drv-close">닫기</button>
+      <button class="btn-go" id="drv-done" style="display:none">선택 완료</button>
+    </div>
   </div>
 </div>
 

@@ -562,40 +562,38 @@ function collectInvoices(sabangWb, replies, opts) {
 /* ---------------- 내용 미리보기 ---------------- */
 function preview(wb, limit, opts) {
   opts = opts || {};
-  limit = limit || 2000;
+  limit = limit || 5000;
   const ws = pickOrderSheet(wb);
   const hr = findHeaderRow(ws);
   const d = dims(ws);
   const cols = [];
   for (let c = 1; c <= d.cols; c++) { const v = getV(ws, hr, c); cols.push(v === null ? "" : String(v).trim()); }
   while (cols.length && !cols[cols.length - 1]) cols.pop();
-  if (!cols.length) return { columns: [], rows: [], total: 0, totalAll: 0, keyIdx: [], sheet: ws.name, filtered: false };
+  if (!cols.length) return { columns: [], rows: [], rowDates: [], total: 0, keyIdx: [], sheet: ws.name };
   const KEY = new Set(["RECIPIENT","PRODUCT","QTY","ADDR","ORDERER"]);
   const keyIdx = [];
   cols.forEach((h, i) => { if (KEY.has(canonField(h))) keyIdx.push(i); });
   const bcol = findBrandColumn(ws, hr);
   if (bcol && bcol - 1 < cols.length && !keyIdx.includes(bcol - 1)) keyIdx.unshift(bcol - 1);
 
-  // 날짜 필터: 최근 N일치만 보기 (미리보기 전용 — 변환은 별도 선택 날짜 기준)
-  const dateSet = opts.dates && opts.dates.length ? new Set(opts.dates.map(String)) : null;
+  // 각 행의 날짜(수집일자 등)를 함께 돌려줘서, 화면에서 체크한 날짜만 즉시 걸러 보여줄 수 있게 함
   let dcol = null;
-  if (dateSet) {
-    const cands = findDateColumns(ws, hr);
-    if (opts.dateHeader) { for (const [c, h] of cands) if (h === opts.dateHeader) { dcol = c; break; } }
-    if (!dcol) dcol = defaultDateColumn(ws, hr)[0];
-  }
+  const cands = findDateColumns(ws, hr);
+  if (opts.dateHeader) { for (const [c, h] of cands) if (h === opts.dateHeader) { dcol = c; break; } }
+  if (!dcol) dcol = defaultDateColumn(ws, hr)[0];
 
-  const rows = []; let total = 0, totalAll = 0;
+  const rows = [], rowDates = []; let total = 0;
   for (let r = hr + 1; r <= d.rows; r++) {
     const vals = []; let empty = true;
     for (let c = 1; c <= cols.length; c++) { const v = getV(ws, r, c); vals.push(v); if (!isBlank(v)) empty = false; }
     if (empty) continue;
-    totalAll++;
-    if (dcol && dateSet) { const dv = extractDate(getV(ws, r, dcol)); if (!dateSet.has(dv)) continue; }
     total++;
-    if (rows.length < limit) rows.push(vals.map(v => v === null || v === undefined ? "" : (v instanceof Date ? extractDate(v) : String(v))));
+    if (rows.length < limit) {
+      rows.push(vals.map(v => v === null || v === undefined ? "" : (v instanceof Date ? extractDate(v) : String(v))));
+      rowDates.push(dcol ? extractDate(getV(ws, r, dcol)) : "");
+    }
   }
-  return { columns: cols, rows, total, totalAll, keyIdx, sheet: ws.name, filtered: !!(dcol && dateSet) };
+  return { columns: cols, rows, rowDates, total, keyIdx, sheet: ws.name };
 }
 
 /* ---------------- 범용 미리보기 (어떤 엑셀이든) ---------------- */

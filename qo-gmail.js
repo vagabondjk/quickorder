@@ -346,6 +346,18 @@ const GMAIL = (() => {
       `&supportsAllDrives=true&includeItemsFromAllDrives=true`);
     return d.files || [];
   }
+  // 폴더 안의 하위폴더 + 엑셀/시트 파일 목록 (폴더 먼저, 이름순)
+  const FOLDER_MIME = "application/vnd.google-apps.folder";
+  async function driveListFolder(folderId, max = 200) {
+    const types = `(mimeType='${FOLDER_MIME}' or mimeType='${XLSX_MIME}' or mimeType='${GSHEET_MIME}' or mimeType='application/vnd.ms-excel')`;
+    const qq = `'${folderId || "root"}' in parents and trashed=false and ${types}`;
+    const d = await driveApiGet(`/files?q=${encodeURIComponent(qq)}` +
+      `&fields=files(id,name,mimeType,modifiedTime)&orderBy=folder,name&pageSize=${max}` +
+      `&supportsAllDrives=true&includeItemsFromAllDrives=true`);
+    return d.files || [];
+  }
+  const isFolder = f => f && f.mimeType === FOLDER_MIME;
+
   // 파일을 엑셀 바이너리로 받기 (구글시트면 xlsx로 변환해서)
   async function driveFetchExcel(fileId) {
     const info = await driveFileInfo(fileId);
