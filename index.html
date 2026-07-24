@@ -75,14 +75,29 @@
   .tblscroll{overflow-x:auto;-webkit-overflow-scrolling:touch;max-height:320px;overflow-y:auto}
   table.pv{border-collapse:collapse;width:100%;font-size:12px}
   table.pv th,table.pv td{text-align:left;padding:8px 10px;white-space:nowrap;border-bottom:1px solid var(--line)}
-  table.pv th{font-size:10.5px;color:var(--muted);font-weight:700;background:var(--card2);position:sticky;top:0;z-index:1}
+  /* 헤더 행 틀고정(위) */
+  table.pv th{font-size:10.5px;color:var(--muted);font-weight:700;background:var(--card2);position:sticky;top:0;z-index:2}
+  /* 첫 열 틀고정(왼쪽) — 가로 스크롤해도 첫 항목이 남음 */
+  table.pv th:first-child,table.pv td:first-child{position:sticky;left:0;z-index:1;
+    box-shadow:1px 0 0 var(--line)}
+  table.pv td:first-child{background:var(--card)}
+  table.pv th:first-child{z-index:3;background:var(--card2)}
   table.pv td{max-width:180px;overflow:hidden;text-overflow:ellipsis}
   table.pv td.num{font-variant-numeric:tabular-nums;text-align:right}
   .pvfoot{font-size:11.5px;color:var(--faint);text-align:center;padding:8px 4px 0}
+  .tblscroll.collapsed{max-height:132px}
 
-  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:2px}
-  .drvcrumb{font-size:11.5px;color:var(--muted);font-weight:600;margin-bottom:8px;
+  .chips{display:flex;flex-wrap:nowrap;overflow-x:auto;gap:6px;margin-top:2px;
+    -webkit-overflow-scrolling:touch;padding-bottom:2px}
+  .chips.open{flex-wrap:wrap;overflow-x:visible}
+  .chips .brow{white-space:nowrap;flex:none;padding:6px 10px;font-size:12px}
+  .drvbar{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .drvcrumb{font-size:11.5px;color:var(--muted);font-weight:600;flex:1;min-width:0;
     display:flex;flex-wrap:wrap;gap:3px;align-items:center}
+  .drvlist{min-height:230px;max-height:46vh;overflow:auto;border:1px solid var(--line);
+    border-radius:10px;padding:8px;background:var(--card2)}
+  .drvadv{margin-top:10px;font-size:11.5px;color:var(--muted)}
+  .drvadv summary{cursor:pointer;font-weight:700;padding:4px 0}
   .drvcrumb b{color:var(--brand);cursor:pointer;font-weight:700}
   .drvrow{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--line);
     border-radius:10px;margin-bottom:6px;cursor:pointer;background:var(--card)}
@@ -105,14 +120,25 @@
   .on>.box svg,.on .box svg{opacity:1}
   .on>.box,.vrow.on .box,.brow.on .box,.rrow.on .box{background:var(--brand);border-color:var(--brand)}
 
-  .vlist{display:flex;flex-direction:column;gap:8px}
-  .vrow{display:flex;align-items:center;gap:11px;border:1.5px solid var(--line);border-radius:12px;
-    padding:12px;cursor:pointer;user-select:none}
+  /* 업체 양식·회신 목록: 한 줄에 2~4개씩 들어가는 압축 카드 */
+  .vlist,#replist{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:8px}
+  .vrow{display:block;border:1.5px solid var(--line);border-radius:11px;
+    padding:9px 10px;cursor:pointer;user-select:none}
   .vrow.on{border-color:var(--brand);background:var(--brand-soft)}
+  .vtop{display:flex;align-items:center;gap:6px}
+  .vtop b{flex:1;min-width:0;font-size:12.5px;font-weight:800;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .vtop .box{width:17px;height:17px;border-radius:5px}
+  .vfile{display:block;font-size:10px;color:var(--muted);margin:3px 0 6px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .vbtns{display:flex;gap:4px}
+  .vbtns button{flex:1;min-width:0;font-size:10px;font-weight:700;font-family:inherit;
+    padding:5px 2px;border-radius:6px;border:1px solid var(--line);
+    background:var(--card2);color:var(--muted);cursor:pointer}
   .vinfo{flex:1;min-width:0}
   .vinfo b{font-size:14px;font-weight:800;display:block}
   .vinfo span{font-size:11.5px;color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .vdel{background:none;border:none;color:var(--faint);font-size:16px;cursor:pointer;flex:none;padding:4px 6px}
+  .vdel{background:none;border:none;color:var(--faint);font-size:14px;cursor:pointer;flex:none;padding:0 2px;line-height:1}
   button.pv{background:var(--card2);border:1px solid var(--line);color:var(--muted);font-family:inherit;
     font-size:11px;font-weight:700;cursor:pointer;flex:none;padding:5px 10px;border-radius:7px}
   .empty{text-align:center;color:var(--faint);font-size:12.5px;padding:16px 8px;line-height:1.6}
@@ -196,7 +222,7 @@
 <div class="wrap">
   <header>
     <b>퀵오더 웹</b><span class="sub">by JK</span>
-    <span class="verbadge" id="app-ver">v3.5</span>
+    <span class="verbadge" id="app-ver">v4.2</span>
     <span style="margin-left:auto"></span>
     <button class="chip" id="btn-settings">설정</button>
   </header>
@@ -236,8 +262,9 @@
           <div><b>내용 확인</b> <span id="pv-cnt"></span></div>
           <button class="minibtn" id="pv-toggle">전체 열 보기</button>
         </div>
-        <div class="tblbox"><div class="tblscroll"><table class="pv" id="pv-table"></table></div></div>
+        <div class="tblbox"><div class="tblscroll collapsed" id="pv-scroll"><table class="pv" id="pv-table"></table></div></div>
         <div class="pvfoot" id="pv-foot"></div>
+        <div style="text-align:center;margin-top:6px"><button class="minibtn" id="pv-more">+ 더보기</button></div>
       </div>
     </div>
 
@@ -305,7 +332,7 @@
     </div>
   </div>
 
-  <p class="foot">퀵오더 웹 <b>v3.5</b> · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
+  <p class="foot">퀵오더 웹 <b>v4.2</b> · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
 </div>
 
 <!-- 메일 선택 모달 -->
@@ -328,8 +355,8 @@
     <div class="grip"></div>
     <h3 id="pv-modal-title">미리보기</h3>
     <p class="sub2" id="pv-modal-sub"></p>
-    <div style="overflow:auto;flex:1">
-      <div class="tblbox"><div class="tblscroll" style="max-height:none"><table class="pv" id="pv-modal-table"></table></div></div>
+    <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+      <div class="tblbox" style="flex:1;min-height:0"><div class="tblscroll" id="pv-modal-scroll" style="max-height:100%;height:100%"><table class="pv" id="pv-modal-table"></table></div></div>
       <div class="pvfoot" id="pv-modal-foot"></div>
     </div>
     <div class="row" style="margin-top:10px"><button class="btn-go" id="pv-modal-close">닫기</button></div>
@@ -372,20 +399,24 @@
     <div class="grip"></div>
     <h3 id="drv-title">구글 드라이브에서 가져오기</h3>
     <p class="sub2" id="drv-sub">폴더를 열어 파일을 고르세요. 항상 최신 내용으로 받아옵니다.</p>
-    <div id="drv-crumb" class="drvcrumb"></div>
-    <div class="fld">
-      <div style="display:flex;gap:7px">
-        <input id="drv-q" placeholder="파일 이름 검색 (드라이브 전체)" spellcheck="false" autocapitalize="off">
-        <button class="minibtn" id="drv-search" style="padding:0 14px">검색</button>
-      </div></div>
-    <div class="mlist" id="drv-list" style="max-height:40vh;overflow:auto"></div>
-    <div class="fld" style="margin-top:8px">
-      <div style="display:flex;gap:7px">
-        <input id="drv-link" placeholder="또는 공유 링크 붙여넣기" spellcheck="false" autocapitalize="off">
-        <button class="minibtn" id="drv-link-go" style="padding:0 14px">가져오기</button>
-      </div></div>
+    <div class="drvbar">
+      <button class="minibtn" id="drv-up">⬆ 상위</button>
+      <div id="drv-crumb" class="drvcrumb"></div>
+    </div>
+    <div class="mlist drvlist" id="drv-list"></div>
     <div class="setrow"><span id="drv-folder-info">기본 폴더가 없습니다 — 폴더를 열고 오른쪽 버튼을 누르면 다음부터 바로 열립니다.</span>
       <button class="minibtn" id="drv-setfolder">📌 기본 폴더로</button></div>
+    <details class="drvadv">
+      <summary>이름으로 검색 · 공유 링크로 가져오기</summary>
+      <div style="display:flex;gap:7px;margin-top:8px">
+        <input id="drv-q" placeholder="파일 이름 검색 (드라이브 전체)" spellcheck="false" autocapitalize="off">
+        <button class="minibtn" id="drv-search" style="padding:0 14px">검색</button>
+      </div>
+      <div style="display:flex;gap:7px;margin-top:7px">
+        <input id="drv-link" placeholder="공유 링크 붙여넣기" spellcheck="false" autocapitalize="off">
+        <button class="minibtn" id="drv-link-go" style="padding:0 14px">가져오기</button>
+      </div>
+    </details>
     <div id="drv-msg" style="font-size:12px;color:var(--muted);margin-top:8px;white-space:pre-wrap"></div>
     <div class="row">
       <button class="btn-cancel" id="drv-close">닫기</button>

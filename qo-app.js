@@ -137,6 +137,21 @@ function download(buf, filename) {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
+/* 파일을 '공유하기'(휴대폰 기본 공유 시트 → 카카오톡 등 선택). 안 되면 다운로드로 폴백. */
+async function shareFile(buf, filename) {
+  try {
+    const file = new File([buf.slice ? buf.slice(0) : buf], filename,
+      { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: filename });
+      return true;
+    }
+  } catch (e) { if (e && e.name === "AbortError") return false; }  // 사용자가 취소
+  // 공유 미지원(주로 PC) → 다운로드 후 안내
+  download(buf, filename);
+  alert("이 브라우저는 파일 바로 공유를 지원하지 않아 다운로드했어요.\n저장된 파일을 카카오톡 대화창에 첨부해 보내주세요.\n(휴대폰에서는 '공유' 버튼으로 카카오톡에 바로 보낼 수 있습니다)");
+  return false;
+}
 function bindDrop(id, cb) {
   const el = $(id);
   ["dragover", "dragenter"].forEach(e => el.addEventListener(e, ev => { ev.preventDefault(); el.classList.add("hi"); }));
@@ -220,12 +235,50 @@ async function openDrivePicker(opts) {
   $("drv-msg").textContent = ""; $("drv-q").value = ""; $("drv-link").value = "";
   $("drv-list").innerHTML = "";
   $("drvmodal").classList.add("on");
-  try { await ensureGmail(); } catch (e) { $("drv-msg").textContent = "⚠ " + e.message; return; }
-  // 저장해 둔 기본 폴더가 있으면 바로 그 폴더를 연다
-  const saved = DRV.key ? (await DB.get("driveFolders", {}))[DRV.key] : null;
-  if (saved && saved.id) {
-    DRV.path = [{ id: "root", name: "내 드라이브" }, { id: saved.id, name: saved.name }];
-    drvOpen(saved.id);
+  drvFolderInfo();
+  // 로그인 안 돼 있으면: 조용한 갱신(팝업 없음) 시도 → 실패하면 '로그인' 버튼을 보여준다.
+  // (자동으로 팝업을 띄우면 브라우저가 "Failed to open popup window"로 막아버림)
+  if (GMAIL.needLogin()) { drvNeedLogin(); return; }   // 자동 팝업 금지 → 버튼으로 유도
+  drvStart();
+}
+/* 로그인 필요 화면 — 버튼을 '직접 클릭'해야 팝업이 안 막힘 */
+function drvNeedLogin() {
+  const box = $("drv-list"); box.innerHTML = "";
+  const d = document.createElement("div"); d.className = "empty";
+  d.innerHTML = "구글 드라이브를 보려면 로그인이 필요합니다.<br>아래 버튼을 눌러주세요.<br><br>";
+  const b = document.createElement("button");
+  b.className = "btn-go"; b.style.cssText = "width:auto;padding:11px 20px;font-size:14px";
+  b.textContent = "구글 로그인";
+  b.onclick = () => {                    // 직접 클릭 → 팝업 차단 안 됨(중간에 await 없음)
+    $("drv-msg").textContent = "로그인 창을 여는 중…";
+    GMAIL.signIn("select_account")
+      .then(() => { $("drv-msg").textContent = ""; updateGmailWho(); drvStart(); })
+      .catch(e => {
+        const m = e.message || "";
+        $("drv-msg").textContent = /popup/i.test(m)
+          ? "⚠ 브라우저가 로그인 창(팝업)을 막았습니다.\n주소창 오른쪽의 '팝업 차단됨' 아이콘을 눌러 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요."
+          : "⚠ " + m;
+      });
+  };
+  d.appendChild(b); box.appendChild(d);
+}
+/* 시작 위치: ①고정한 기본 폴더 → ②마지막에 본 폴더 → ③내 드라이브 최상위 */
+async function drvStart() {
+  const all = DRV.key ? await DB.get("driveFolders", {}) : {};
+  const pinned = DRV.key ? all[DRV.key] : null;
+  const last = DRV.key ? all[DRV.key + ":last"] : null;
+  const go = (pinned && pinned.id) ? pinned : (last && last.id ? last : null);
+  if (go) {
+    // 실제 드라이브 상위 폴더들을 따라 경로를 만든다 → '상위' 버튼이 제대로 동작
+    DRV.path = [{ id: "root", name: "내 드라이브" }, { id: go.id, name: go.name }];
+    drvOpen(go.id);
+    GMAIL.driveAncestors(go.id).then(chain => {
+      if (chain && chain.length) {
+        DRV.path = [{ id: "root", name: "내 드라이브" }].concat(chain);
+        drvCrumb();
+        $("drv-up").style.display = DRV.path.length > 1 ? "" : "none";
+      }
+    }).catch(() => {});
   } else {
     DRV.path = [{ id: "root", name: "내 드라이브" }];
     drvOpen("root");
@@ -257,13 +310,42 @@ function drvCrumb() {
     c.appendChild(b);
   });
 }
-async function drvOpen(folderId, keepPath) {
+$("drv-up").onclick = () => {
+  if (DRV.path.length <= 1) return;
+  DRV.path.pop();
+  const parent = DRV.path[DRV.path.length - 1];
+  drvOpen(parent.id);
+};
+/* 드라이브 화면과 같은 순서: 폴더 먼저 → 이름순 (숫자 (1),(2)… 자연스럽게) */
+const drvSort = arr => arr.slice().sort((a, b) => {
+  const fa = a.mimeType === GFOLDER, fb = b.mimeType === GFOLDER;
+  if (fa !== fb) return fa ? -1 : 1;
+  return String(a.name || "").localeCompare(String(b.name || ""), "ko", { numeric: true, sensitivity: "base" });
+});
+async function drvOpen(folderId) {
   drvCrumb();
+  $("drv-up").style.display = DRV.path.length > 1 ? "" : "none";
   const box = $("drv-list"); box.innerHTML = '<div class="empty">불러오는 중…</div>';
   try {
-    const items = await GMAIL.driveListFolder(folderId, 200);
+    let items;
+    if (folderId === "shared") items = drvSort(await GMAIL.driveListShared(200));
+    else {
+      items = drvSort(await GMAIL.driveListFolder(folderId, 200));
+      // 최상위엔 '공유 문서함'(남이 공유해준 폴더)도 맨 위에
+      if (folderId === "root") items = [{ id: "shared", name: "공유 문서함", mimeType: GFOLDER }].concat(items);
+    }
     drvRender(items, true);
-  } catch (e) { box.innerHTML = ""; $("drv-msg").textContent = "⚠ " + e.message; }
+    // 마지막으로 본 폴더 기억 → 다음에 그 자리에서 시작 (매번 최상위부터 안 파고들게)
+    if (DRV.key && folderId !== "root" && folderId !== "shared") {
+      const cur = DRV.path[DRV.path.length - 1];
+      const all = await DB.get("driveFolders", {});
+      all[DRV.key + ":last"] = { id: folderId, name: cur ? cur.name : "" , path: DRV.path.slice() };
+      await DB.set("driveFolders", all);
+    }
+  } catch (e) {
+    if (/popup|로그인|권한|401|403|NEED_LOGIN/i.test(e.message || "")) { drvNeedLogin(); $("drv-msg").textContent = ""; }
+    else { box.innerHTML = ""; $("drv-msg").textContent = "⚠ " + e.message; }
+  }
 }
 async function drvSearch(q) {
   if (!q || !q.trim()) { DRV.path = [{ id: "root", name: "내 드라이브" }]; return drvOpen("root"); }
@@ -408,7 +490,7 @@ async function loadDates(header) {
     const el = document.createElement("span");
     el.className = "brow" + (i >= DT_SHOW ? " dt-more" : "");   // 최근 3개만 기본 표시
     el.dataset.d = d.date;
-    el.innerHTML = `<span class="box">${CHK}</span>${esc(d.label)} (${d.count}건)`;
+    el.innerHTML = `<span class="box">${CHK}</span>${esc(String(d.label).slice(5))} (${d.count})`;
     el.onclick = () => {
       const j = S.dateSel.indexOf(d.date);
       if (j >= 0) S.dateSel.splice(j, 1); else S.dateSel.push(d.date);
@@ -423,6 +505,7 @@ async function loadDates(header) {
     more.className = "minibtn"; more.id = "dt-more-btn";
     more.onclick = () => {
       S.dtOpen = !S.dtOpen;
+      box.classList.toggle("open", S.dtOpen);        // 펼치면 여러 줄, 접으면 한 줄
       box.querySelectorAll(".dt-more").forEach(x => x.classList.toggle("show", S.dtOpen));
       more.textContent = S.dtOpen ? "접기" : `+ 더보기 (${list.length - DT_SHOW}개)`;
     };
@@ -436,7 +519,7 @@ function drawDateChips() {
   box.querySelectorAll(".brow[data-d]").forEach(el => el.classList.toggle("on", S.dateSel.includes(el.dataset.d)));
   const all = box.querySelector(".brow:not([data-d])");
   const totalAll = S.dateAll.reduce((s, d) => s + d.count, 0);
-  if (all) all.textContent = (S.dateSel.length === S.dateAll.length && S.dateAll.length) ? "전체 해제" : `전체 ${totalAll}건 선택`;
+  if (all) all.textContent = (S.dateSel.length === S.dateAll.length && S.dateAll.length) ? "전체 해제" : `전체 ${totalAll}건`;
   const cnt = S.dateAll.filter(d => S.dateSel.includes(d.date)).reduce((s, d) => s + d.count, 0);
   $("dt-foot").textContent = S.dateSel.length
     ? `선택한 ${S.dateSel.length}개 날짜 · 총 ${cnt}건만 변환됩니다`
@@ -446,6 +529,10 @@ function drawDateChips() {
 }
 
 /* --- 내용 확인 --- */
+$("pv-more").onclick = function () {
+  const sc = $("pv-scroll"), open = sc.classList.toggle("collapsed") === false;
+  this.textContent = open ? "접기" : "+ 더보기";
+};
 $("pv-toggle").onclick = function () { S.pvAll = !S.pvAll; this.textContent = S.pvAll ? "주요 열만 보기" : "전체 열 보기"; renderPreview(); };
 async function drawPreview() {
   $("prev-wrap").style.display = "block";
@@ -478,6 +565,11 @@ function renderPreview() {
   $("pv-foot").textContent = (selSet && hasDates)
     ? `체크한 날짜의 주문 ${view.length}건 — 이 내용이 그대로 변환됩니다`
     : `전체 ${view.length}건 표시`;
+  // 행이 몇 개 안 되면 '더보기' 자체를 숨김
+  const many = view.length > 3;
+  $("pv-more").style.display = many ? "" : "none";
+  if (!many) $("pv-scroll").classList.remove("collapsed");
+  $("pv-more").textContent = $("pv-scroll").classList.contains("collapsed") ? "+ 더보기" : "접기";
 }
 
 /* --- 업체 양식 --- */
@@ -511,11 +603,17 @@ function drawForms() {
   S.forms.forEach(f => {
     const el = document.createElement("div");
     el.className = "vrow" + (f.checked ? " on" : "");
-    el.innerHTML = `<span class="box">${CHK}</span><div class="vinfo"><b>${esc(f.name)}</b><span>${esc(f.file)}</span></div><button class="pv" title="미리보기">${EYE}</button><button class="vdel">✕</button>`;
+    el.innerHTML = `<div class="vtop"><span class="box">${CHK}</span><b>${esc(f.name)}</b><button class="vdel">✕</button></div>
+      <span class="vfile">${esc(f.file)}</span>
+      <div class="vbtns"><button class="pv">미리보기</button><button class="dl">엑셀 받기</button></div>`;
     el.onclick = async ev => {
       if (ev.target.classList.contains("pv")) {
         ev.stopPropagation();
         openPreview(f.data, f.name + " 양식"); return;
+      }
+      if (ev.target.classList.contains("dl")) {
+        ev.stopPropagation();
+        download(f.data, f.file || (f.name + ".xlsx")); return;   // 실제 엑셀 파일 다운로드
       }
       if (ev.target.classList.contains("vdel")) {
         ev.stopPropagation();
@@ -696,13 +794,14 @@ function showResultO(results, skipped, verify) {
         value="${esc(S.vendorEmails[r.supplier] || "")}" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
         <button class="dlbtn send">메일 보내기</button></div>
       <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)">여러 명에게 보내려면 쉼표로 구분 (담당자, 대표 등)</span>
-        <button class="minibtn pvbtn">미리보기</button><button class="minibtn dl">엑셀만 받기</button></div>`;
+        <button class="minibtn share">📤 카톡·공유</button><button class="minibtn pvbtn">미리보기</button><button class="minibtn dl">엑셀만 받기</button></div>`;
     const inp = el.querySelector("input");
     fillRecipients(el.querySelector(".cands"), inp, {
       saved: S.vendorEmails[r.supplier], history: S.vendorSent[r.supplier],
       domains: parseDomains(S.vendorDomains[r.supplier]), query: r.supplier });
     el.querySelector(".pvbtn").onclick = () => openPreview(r.buf, r.supplier + " 발주서");
     el.querySelector(".dl").onclick = () => download(r.buf, r.filename);
+    el.querySelector(".share").onclick = () => shareFile(r.buf, r.filename);
     inp.onchange = inp.onblur = async () => {
       const v = inp.value.trim(); if (v === (S.vendorEmails[r.supplier] || "")) return;
       S.vendorEmails[r.supplier] = v; await DB.set("vendorEmails", S.vendorEmails);
@@ -866,9 +965,11 @@ function drawReps() {
   S.reps.forEach((r, i) => {
     const el = document.createElement("div");
     el.className = "vrow on";
-    el.innerHTML = `<span class="box">${CHK}</span><div class="vinfo"><b>${esc(QO.nameFromFilename(r.name))}</b>
-      <span>${esc(r.name)}</span></div><button class="pv" title="미리보기">${EYE}</button><button class="vdel">✕</button>`;
+    el.innerHTML = `<div class="vtop"><span class="box">${CHK}</span><b>${esc(QO.nameFromFilename(r.name))}</b><button class="vdel">✕</button></div>
+      <span class="vfile">${esc(r.name)}</span>
+      <div class="vbtns"><button class="pv">미리보기</button><button class="dl">엑셀 받기</button></div>`;
     el.querySelector(".pv").onclick = e => { e.stopPropagation(); openPreview(r.data, QO.nameFromFilename(r.name) + " 회신"); };
+    el.querySelector(".dl").onclick = e => { e.stopPropagation(); download(r.data, r.name); };
     el.querySelector(".vdel").onclick = e => { e.stopPropagation(); S.reps.splice(i, 1); drawReps(); };
     box.appendChild(el);
   });
@@ -955,10 +1056,11 @@ function showResultI(out, buf, filename) {
     <div class="rmail"><input type="text" id="inv-to" placeholder="받는 사람 이메일 (여러 개는 쉼표로)"
       value="${esc(S.invEmails || "")}" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button class="dlbtn" id="send-inv">메일 보내기</button></div>
-    <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)">여러 명에게 보내려면 쉼표로 구분 (담당자, 대표 등)</span><button class="minibtn" id="pv-inv">미리보기</button><button class="minibtn" id="dl-inv">엑셀만 받기</button></div></div>`;
+    <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)">여러 명에게 보내려면 쉼표로 구분 (담당자, 대표 등)</span><button class="minibtn" id="share-inv">📤 카톡·공유</button><button class="minibtn" id="pv-inv">미리보기</button><button class="minibtn" id="dl-inv">엑셀만 받기</button></div></div>`;
   $("rlist-i").innerHTML = h;
   $("pv-inv").onclick = () => openPreview(buf, "송장 취합본");
   $("dl-inv").onclick = () => download(buf, filename);
+  $("share-inv").onclick = () => shareFile(buf, filename);
   // 받는사람 후보: 마지막 발송(기본) + 이전 이력 + '발주서 보내는 곳'(주문 메일 발신자) 주소
   //  → 발주서 검색조건의 발신 도메인으로 메일을 찾아 그 발신자 주소를 후보로 띄움
   (async () => {
@@ -1101,28 +1203,24 @@ async function initGmail() {
   if (cid) {
     gmailReady = await GMAIL.waitReady();  // GSI 로드까지 기다렸다 준비
     updateGmailWho();
-    // 만료된 로그인은 화면 뒤에서 미리 조용히 갱신 → 쓰다가 로그인창 뜨는 것 방지
-    if (await GMAIL.refreshQuiet()) { updateGmailWho(); syncOnStart(); }
+
   }
 }
-// 앱으로 돌아올 때도 조용히 갱신 (백그라운드에 오래 있다 온 경우)
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && gmailReady)
-    GMAIL.refreshQuiet().then(ok => { if (ok) updateGmailWho(); });
-});
+
 function updateGmailWho() {
   const txt = !gmailReady ? "⚠ 메일 연결 준비 안 됨 (설정에서 연결하세요)"
     : GMAIL.signedIn() ? "✓ 구글 메일 연결됨" : "구글 계정 연결 필요 (버튼을 누르면 로그인)";
   const a = $("gmail-who-o"); if (a) a.textContent = txt;
 }
+/* ※ 로그인 팝업은 '사용자 클릭' 안에서 열려야 브라우저가 막지 않는다.
+   그래서 토큰 요청 전에 await(DB 읽기 등)를 하지 않도록, 클라이언트 ID는 시작할 때 미리 받아둔다. */
 async function ensureGmail() {
-  const cid = await clientId();          // 저장값 없으면 기본 내장 ID
-  if (!cid) { $("btn-settings").click(); throw new Error("먼저 설정에서 클라이언트 ID를 저장하세요."); }
-  if (!gmailReady) { GMAIL.init(cid); gmailReady = await GMAIL.waitReady(); updateGmailWho(); }
+  if (GMAIL.signedIn()) { updateGmailWho(); return; }   // 로그인 유효 → await 없이 바로 사용
+  if (!gmailReady) {                                     // 준비 안 된 경우에만 기다림
+    gmailReady = await GMAIL.waitReady(); updateGmailWho();
+  }
   if (!gmailReady) throw new Error("구글 로그인 라이브러리를 불러오지 못했어요.\n인터넷/광고차단을 확인하고 새로고침 해보세요.");
-  if (GMAIL.signedIn()) { updateGmailWho(); return; }   // 저장된 로그인 유효 → 그대로 사용
-  // 만료됐으면 '조용한 갱신' 먼저 시도 → 안 되면 계정선택 (동의창 반복 방지)
-  await GMAIL.token();
+  await GMAIL.token();    // 클릭 맥락에서 팝업 → 이미 승인했으면 잠깐 떴다 자동으로 닫힘
   updateGmailWho();
   syncOnStart();          // 로그인 직후 다른 기기 데이터 내려받기
 }

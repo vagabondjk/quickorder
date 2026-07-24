@@ -92,19 +92,15 @@ const GMAIL = (() => {
   }
   /* 토큰 얻기: 유효하면 그대로, 만료면 '조용한 갱신' 먼저 → 안 되면 계정선택
      (예전엔 만료될 때마다 consent(동의창)를 띄워서 매번 로그인하라고 나왔음) */
+  /* 토큰 얻기. ※ 구글 GSI는 prompt:""라도 '팝업'을 열기 때문에, 반드시 사용자의
+     '직접 클릭' 안에서 호출해야 한다. (자동 호출하면 브라우저가 팝업을 차단함) */
   async function token(allowInteractive = true) {
     if (signedIn()) return accessToken;
-    if (granted()) {
-      try { return await withTimeout(signIn(""), 8000); } catch (e) {}   // 조용히 갱신 시도
-    }
-    if (!allowInteractive) throw new Error("구글 로그인이 필요합니다.");
-    return await signIn(granted() ? "select_account" : "consent");
+    if (!allowInteractive) throw new Error("NEED_LOGIN");
+    // 이미 승인한 적 있으면 prompt:"" → 동의창 없이 팝업이 잠깐 떴다 닫힘
+    return await signIn(granted() ? "" : "consent");
   }
-  /* 화면 뒤에서 미리 갱신 (앱 열 때/포그라운드 복귀 시) — 사용 중 만료로 로그인창 뜨는 것 방지 */
-  async function refreshQuiet() {
-    if (signedIn() || !granted() || !clientId) return false;
-    try { await withTimeout(signIn(""), 8000); return true; } catch (e) { return false; }
-  }
+  const needLogin = () => !signedIn();
   function signOut() {
     if (accessToken && window.google) try { google.accounts.oauth2.revoke(accessToken, () => {}); } catch (e) {}
     accessToken = null; tokenExp = 0; clearToken();
@@ -334,7 +330,20 @@ const GMAIL = (() => {
     return null;
   }
   async function driveFileInfo(fileId) {
-    return await driveApiGet(`/files/${encodeURIComponent(fileId)}?fields=id,name,mimeType,modifiedTime&supportsAllDrives=true`);
+    return await driveApiGet(`/files/${encodeURIComponent(fileId)}?fields=id,name,mimeType,modifiedTime,parents&supportsAllDrives=true`);
+  }
+  /* 실제 상위 폴더들을 따라 올라가 경로를 만든다 (파일탐색기처럼 상위 이동하려고) */
+  async function driveAncestors(folderId, max = 8) {
+    const chain = [];
+    let id = folderId;
+    for (let i = 0; i < max && id; i++) {
+      let info;
+      try { info = await driveFileInfo(id); } catch (e) { break; }   // 권한 없는 상위면 중단
+      if (!info || !info.id) break;
+      chain.unshift({ id: info.id, name: info.name });
+      id = (info.parents && info.parents[0]) || null;
+    }
+    return chain;
   }
   // 엑셀/시트 파일 검색 (이름으로, 최근 수정순)
   async function driveSearch(q, max = 30) {
@@ -357,6 +366,16 @@ const GMAIL = (() => {
     return d.files || [];
   }
   const isFolder = f => f && f.mimeType === FOLDER_MIME;
+
+  // 남이 공유해준 항목(공유 문서함) — '내 드라이브' 목록에는 안 나오므로 따로 조회
+  async function driveListShared(max = 200) {
+    const types = `(mimeType='${FOLDER_MIME}' or mimeType='${XLSX_MIME}' or mimeType='${GSHEET_MIME}' or mimeType='application/vnd.ms-excel')`;
+    const qq = `sharedWithMe=true and trashed=false and ${types}`;
+    const d = await driveApiGet(`/files?q=${encodeURIComponent(qq)}` +
+      `&fields=files(id,name,mimeType,modifiedTime)&orderBy=folder,name&pageSize=${max}` +
+      `&supportsAllDrives=true&includeItemsFromAllDrives=true`);
+    return d.files || [];
+  }
 
   // 파일을 엑셀 바이너리로 받기 (구글시트면 xlsx로 변환해서)
   async function driveFetchExcel(fileId) {
@@ -393,6 +412,6 @@ const GMAIL = (() => {
   }
 
   return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, listMails, getAttachment, send, profile,
-           searchAddresses, driveFind, driveDownload, driveUpload, refreshQuiet, granted,
-           driveIdFromLink, driveFileInfo, driveSearch, driveFetchExcel };
+           searchAddresses, driveFind, driveDownload, driveUpload, granted,
+           driveIdFromLink, driveFileInfo, driveSearch, driveFetchExcel, driveListFolder, driveListShared, driveAncestors, needLogin };
 })();
