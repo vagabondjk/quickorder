@@ -9,7 +9,10 @@ const SYNC = (() => {
   const KV_KEYS = ["brandVendor", "vendorEmails", "vendorSent", "vendorDomains",
     "invEmails", "invSent", "driveOrderFile", "driveSabFile", "driveFolders",
     "orderSenders", "orderKeywords", "orderExclude",
-    "replySenders", "replyKeywords", "replyExclude"];
+    "replySenders", "replyKeywords", "replyExclude",
+    // v6.0 — CS·정산
+    "csItems", "csMaps", "csSenders", "csKeywords", "csExclude",
+    "settleRules", "settleMaps", "stSenders", "stKeywords", "stExclude"];
   const STAMP_KEY = "qo_sync_stamp";   // 이 기기가 마지막으로 반영/업로드한 시각
   const TIME_KEY = "qo_sync_time";     // 마지막 동기화 시각(표시용)
 
@@ -63,6 +66,20 @@ const SYNC = (() => {
       // 설정: 객체형(업체메일·브랜드·도메인 등)은 병합, 배열/문자열은 교체
       for (const k in (obj.kv || {})) {
         const remote = obj.kv[k];
+        // CS 목록은 '건 단위 병합' — 한쪽 기기의 등록/수정이 사라지지 않게.
+        // 같은 id는 updatedAt이 더 최신인 쪽을 남긴다.
+        if (k === "csItems" && Array.isArray(remote)) {
+          const local = await DB.get("csItems", []) || [];
+          const byId = new Map();
+          for (const it of local) if (it && it.id) byId.set(it.id, it);
+          for (const it of remote) {
+            if (!it || !it.id) continue;
+            const cur = byId.get(it.id);
+            if (!cur || (it.updatedAt || 0) >= (cur.updatedAt || 0)) byId.set(it.id, it);
+          }
+          await DB.set("csItems", [...byId.values()]);
+          continue;
+        }
         if (remote && typeof remote === "object" && !Array.isArray(remote)) {
           const local = await DB.get(k, {});
           await DB.set(k, Object.assign({}, local, remote));

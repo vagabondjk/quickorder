@@ -173,14 +173,22 @@ const readFile = f => new Promise((res, rej) => {
 });
 
 /* ---------------- 탭 ---------------- */
-$("tab-o").onclick = () => switchTab("o");
-$("tab-i").onclick = () => switchTab("i");
+const TABS = ["o", "i", "c", "s"];
+TABS.forEach(t => { const b = $("tab-" + t); if (b) b.onclick = () => switchTab(t); });
+/* ③CS·교환반품 / ④정산 — 실제 데이터로 검증하기 전까지 화면에서 감춘다.
+   켤 때는 아래 값을 true 로만 바꾸면 된다 (코드는 그대로 살아 있음). */
+const SHOW_CS_SETTLE = false;
+if (!SHOW_CS_SETTLE) ["c", "s"].forEach(t => { const b = $("tab-" + t); if (b) b.style.display = "none"; });
 function switchTab(t) {
-  $("pane-o").classList.toggle("on", t === "o");
-  $("pane-i").classList.toggle("on", t === "i");
-  $("tab-o").classList.toggle("on", t === "o");
-  $("tab-i").classList.toggle("on", t === "i");
+  TABS.forEach(x => {
+    const p = $("pane-" + x), b = $("tab-" + x);
+    if (p) p.classList.toggle("on", x === t);
+    if (b) b.classList.toggle("on", x === t);
+  });
   window.scrollTo(0, 0);
+  // 탭이 처음 열릴 때 해당 모듈이 목록을 그린다 (모듈이 없으면 무시)
+  try { if (t === "c" && window.CS) CS.onShow(); } catch (e) {}
+  try { if (t === "s" && window.ST) ST.onShow(); } catch (e) {}
 }
 
 /* =================================================================
@@ -850,13 +858,15 @@ function showResultO(results, skipped, verify) {
         ? `✔ 건수 일치 — 주문 ${verify.srcTotal}건 = ${detail} (합계 ${verify.converted}건)`
         : `✔ 건수 일치 — 주문 ${verify.srcTotal}건이 업체별로 전량 반영됨 (${detail})`;
     } else if (verify.diff > 0) {
-      let t = `⚠ 건수 불일치 — 주문 ${verify.srcTotal}건 중 발주서에 ${verify.converted}건만 들어갔습니다 (${verify.diff}건 누락)\n${detail}`;
+      let h = `⚠ 건수 불일치 — 주문 ${verify.srcTotal}건 중 발주서에 ${verify.converted}건만 들어갔습니다 (${verify.diff}건 누락)<br>${esc(detail)}`;
       if (verify.unassigned.length) {
-        t += "\n\n아래 브랜드가 어느 업체에도 배정되지 않아 발주서에서 빠졌습니다:";
-        verify.unassigned.forEach(u => { t += `\n· ${u.brand} — ${u.count}건`; });
-        t += "\n\n해당 브랜드를 업체에 체크한 뒤 다시 변환하세요.";
+        h += "<br><br>아래 브랜드가 어느 업체에도 배정되지 않아 발주서에서 빠졌습니다:";
+        verify.unassigned.forEach(u => { h += `<br>· ${esc(u.brand)} — ${u.count}건`; });
+        // 새로 들어온 브랜드는 이름을 그대로 크게 보여준다 (놓치면 발주 누락으로 이어짐)
+        const names = verify.unassigned.map(u => u.brand).join(", ");
+        h += `<div class="callout">🔔 신규 브랜드<br><b>${esc(names)}</b><br>의 업체를 선택해주세요</div>`;
       }
-      d.className = "msg show err"; d.textContent = t;
+      d.className = "msg show err"; d.innerHTML = h;
     } else {
       d.className = "msg show err";
       d.textContent = `⚠ 발주서 합계(${verify.converted}건)가 주문 수(${verify.srcTotal}건)보다 많습니다. 같은 브랜드가 여러 업체에 중복 배정됐는지 확인하세요.\n${detail}`;
@@ -1197,7 +1207,10 @@ $("sync-now").onclick = async function () {
   try {
     await ensureGmail();                 // 로그인 보장(드라이브 권한 포함)
     const r = await SYNC.syncDown();      // 원격이 최신이면 내려받고
-    if (r.changed) { await loadForms(); drawOrderFilter(); drawReplyFilter(); drawSettings(); }
+    if (r.changed) {
+      await loadForms(); drawOrderFilter(); drawReplyFilter(); drawSettings();
+      try { if (window.CS) await CS.reload(); } catch (e) {}
+    }
     await SYNC.syncUpNow();               // 이 기기 상태도 올려서 최신 유지
   } catch (e) { S.syncState = "error"; S.syncDetail = e.message; drawSyncStatus(); }
   this.disabled = false;
@@ -1358,19 +1371,21 @@ let filterMode = "order";   // 'order' | 'reply'
 const FKEY = {
   order: { senders: "orderSenders", keywords: "orderKeywords", exclude: "orderExclude" },
   reply: { senders: "replySenders", keywords: "replyKeywords", exclude: "replyExclude" },
+  cs: { senders: "csSenders", keywords: "csKeywords", exclude: "csExclude" },
+  settle: { senders: "stSenders", keywords: "stKeywords", exclude: "stExclude" },
 };
+const FTITLE = { order: "발주서 검색조건", reply: "회신 송장 검색조건", cs: "CS 검색조건", settle: "정산 파일 검색조건" };
 
 async function openFilter(mode) {
   filterMode = mode;
-  $("filter-title").textContent = mode === "order" ? "발주서 검색조건" : "회신 송장 검색조건";
+  $("filter-title").textContent = FTITLE[mode] || "검색조건";
   await renderFilterLists();
   filterModal.classList.add("on");
 }
 async function renderFilterLists() {
-  const f = filterMode === "order" ? await getOrderFilter() : await getReplyFilter();
-  drawChipList("flt-senders", f.senders, "senders");
-  drawChipList("flt-keywords", f.keywords, "keywords");
-  drawChipList("flt-excludes", f.exclude || [], "exclude");
+  drawChipList("flt-senders", await getList("senders"), "senders");
+  drawChipList("flt-keywords", await getList("keywords"), "keywords");
+  drawChipList("flt-excludes", await getList("exclude"), "exclude");
 }
 function drawChipList(boxId, items, kind) {
   const box = $(boxId); box.innerHTML = "";
@@ -1386,15 +1401,23 @@ function drawChipList(boxId, items, kind) {
 }
 async function getList(kind) {
   const key = FKEY[filterMode][kind];
-  const def = kind === "senders" ? (filterMode === "order" ? ["onekglobal.co.kr"] : [])
-    : kind === "keywords" ? (filterMode === "order" ? ["랩노마드 발주서", "랩노마드발주서", "★랩노마드", "랩노마드"] : ["송장", "운송장", "회신"])
-    : (filterMode === "order" ? ["플라스머", "디에스피", "송장", "회신", "운송장", "택배"] : []);
+  const DEF = {
+    order: { senders: ["onekglobal.co.kr"], keywords: ["랩노마드 발주서", "랩노마드발주서", "★랩노마드", "랩노마드"],
+             exclude: ["플라스머", "디에스피", "송장", "회신", "운송장", "택배"] },
+    reply: { senders: [], keywords: ["송장", "운송장", "회신"], exclude: [] },
+    cs: { senders: [], keywords: ["문의", "교환", "반품", "취소", "환불", "누락", "파손", "불량", "CS"],
+          exclude: ["발주", "정산"] },
+    settle: { senders: [], keywords: ["정산", "정산내역", "지급"], exclude: ["발주", "송장"] },
+  };
+  const def = (DEF[filterMode] || DEF.order)[kind] || [];
   return await DB.get(key, def);
 }
 async function setList(kind, arr) {
   await DB.set(FKEY[filterMode][kind], arr);
   await renderFilterLists();
   drawOrderFilter(); drawReplyFilter();
+  try { if (window.CS) CS.drawFilter(); } catch (e) {}
+  try { if (window.ST) ST.drawFilter(); } catch (e) {}
 }
 async function addFilterItem(kind, inputId) {
   const inp = $(inputId), val = inp.value.trim();
@@ -1671,7 +1694,11 @@ function drawSyncStatus() {
 async function syncOnStart() {
   try {
     const r = await SYNC.syncDown();
-    if (r.changed) { await loadForms(); drawOrderFilter(); drawReplyFilter(); if ($("setmodal").classList.contains("on")) drawSettings(); }
+    if (r.changed) {
+      await loadForms(); drawOrderFilter(); drawReplyFilter();
+      if ($("setmodal").classList.contains("on")) drawSettings();
+      try { if (window.CS) await CS.reload(); } catch (e) {}
+    }
     // 클라우드에 백업이 아직 없고, 이 기기에 데이터가 있으면 최초 1회 올려서 씨딩
     // (데이터 없는 기기는 올리지 않음 → 빈 상태로 다른 기기를 덮어쓰지 않게)
     else if (r.hadRemote === false && S.forms.length) { await SYNC.syncUpNow(); }

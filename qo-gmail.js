@@ -218,6 +218,35 @@ const GMAIL = (() => {
     return items;
   }
 
+  /* ---------- 본문 메일 목록 (첨부 없어도 됨) — CS 문의용 ----------
+     listMails 는 '엑셀 첨부가 있는 메일'만 본다. CS는 첨부 없이 본문만 오는
+     고객/고객센터 문의가 대부분이라 별도로 검색한다. 첨부가 있으면 함께 준다. */
+  async function listTextMails({ days = 7, keywords = [], senders = [], exclude = [], max = 30, onProgress } = {}) {
+    const qp = [`newer_than:${days}d`, "-in:chats"];
+    const or = [];
+    if (keywords.length) or.push("(" + keywords.map(k => `"${String(k).replace(/"/g, "")}"`).join(" OR ") + ")");
+    if (senders.length) or.push("(" + senders.map(s => `from:${String(s).trim()}`).join(" OR ") + ")");
+    if (or.length) qp.push(or.length > 1 ? "(" + or.join(" OR ") + ")" : or[0]);
+    const listed = await api(`/messages?q=${encodeURIComponent(qp.join(" "))}&maxResults=${max}`);
+    const ids = (listed.messages || []).map(m => m.id);
+    const out = [];
+    for (let i = 0; i < ids.length; i++) {
+      if (onProgress) onProgress(i + 1, ids.length);
+      let msg;
+      try { msg = await api(`/messages/${ids[i]}?format=full`); } catch (e) { continue; }
+      const subject = headerOf(msg, "Subject");
+      const from = headerOf(msg, "From");
+      const body = bodyText(msg) || "";
+      if (exclude.length && exclude.some(x => (subject + " " + body).includes(x))) continue;
+      const atts = walkParts(msg.payload, [])
+        .filter(p => p.filename && /\.xls[xm]$/i.test(p.filename) && p.body && p.body.attachmentId)
+        .map(p => ({ filename: p.filename, attachmentId: p.body.attachmentId }));
+      out.push({ id: msg.id, subject, from, date: fmtDate(msg.internalDate),
+                 ts: Number(msg.internalDate) || 0, body: body.slice(0, 1500), atts });
+    }
+    return out;
+  }
+
   /* ---------- 첨부 내려받기 ---------- */
   async function getAttachment(messageId, attachmentId) {
     const d = await api(`/messages/${messageId}/attachments/${attachmentId}`);
@@ -434,7 +463,7 @@ const GMAIL = (() => {
     return (await r.json()).id;
   }
 
-  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, listMails, getAttachment, send, profile,
+  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, listMails, listTextMails, getAttachment, send, profile,
            searchAddresses, driveFind, driveDownload, driveUpload, granted,
            driveIdFromLink, driveFileInfo, driveSearch, driveFetchExcel, driveListFolder, driveListShared, driveAncestors, driveUpdateFile, needLogin };
 })();

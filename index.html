@@ -231,6 +231,75 @@
   .flt-add input{flex:1;min-width:0;border:1.5px solid var(--line);background:var(--card);color:var(--ink);
     border-radius:9px;padding:10px;font-family:inherit;font-size:13px;outline:none}
   .flt-add input:focus{border-color:var(--brand)}
+
+  /* 신규 브랜드 안내 — 놓치면 발주가 통째로 빠지므로 크게 */
+  /* 배경은 다크/라이트 공통으로 진한 빨강 — 흰 글씨 대비 확보 */
+  .callout{margin-top:15px;padding:15px 14px;border-radius:13px;background:#d32020;color:#fff;
+    font-size:17px;font-weight:800;line-height:1.5;text-align:center;letter-spacing:-.02em;
+    box-shadow:0 10px 22px -12px color-mix(in srgb,var(--danger) 80%,transparent)}
+  .callout b{display:inline-block;font-size:21px;font-weight:900;margin:5px 0;
+    background:rgba(255,255,255,.2);padding:3px 12px;border-radius:9px;word-break:break-all}
+
+  /* ===== v6.0 : CS·정산 공용 ===== */
+  .tabs{flex-wrap:wrap}
+  .tabs button{flex:1 1 42%;font-size:12.5px;padding:10px 4px}
+  @media(min-width:520px){.tabs button{flex:1 1 0;font-size:13px}}
+  .tabs button .dot{display:inline-block;min-width:16px;height:16px;line-height:16px;padding:0 4px;
+    margin-left:4px;border-radius:999px;background:var(--danger);color:#fff;font-size:10px;font-weight:800}
+  .cnt{margin-left:auto;font-size:11.5px;color:var(--muted);font-weight:700}
+  .segbar{display:flex;gap:5px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:3px;margin-bottom:9px}
+  .seg{flex:none;font-family:inherit;font-size:11.5px;font-weight:700;padding:7px 11px;border-radius:999px;
+    border:1.5px solid var(--line);background:var(--card);color:var(--muted);cursor:pointer;white-space:nowrap}
+  .seg.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
+  .srch{width:100%;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);border-radius:10px;
+    padding:10px 12px;font-family:inherit;font-size:13px;outline:none;margin-bottom:10px}
+  .srch:focus{border-color:var(--brand);background:var(--card)}
+  .csrow{border:1.5px solid var(--line);border-radius:12px;padding:11px 12px;margin-bottom:8px;cursor:pointer;background:var(--card)}
+  .csrow.on{border-color:var(--brand);background:var(--brand-soft)}
+  .cshead{display:flex;align-items:center;gap:7px}
+  .cshead .box{width:17px;height:17px;border-radius:5px}
+  .cshead b{flex:1;min-width:0;font-size:13px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tag{font-size:10px;font-weight:800;padding:3px 7px;border-radius:999px;flex:none;letter-spacing:-.01em}
+  .t-문의{background:var(--brand-soft);color:var(--brand)}
+  .t-교환{background:var(--warn-soft);color:var(--warn)}
+  .t-반품{background:var(--danger-soft);color:var(--danger)}
+  .t-취소{background:var(--card2);color:var(--muted)}
+  .t-배송{background:var(--ok-soft);color:var(--ok)}
+  .t-기타{background:var(--card2);color:var(--muted)}
+  .st{font-size:10px;font-weight:800;padding:3px 7px;border-radius:999px;flex:none;border:1px solid var(--line);color:var(--muted);background:var(--card2)}
+  .st.접수{border-color:var(--danger);color:var(--danger);background:var(--danger-soft)}
+  .st.업체확인{border-color:var(--warn);color:var(--warn);background:var(--warn-soft)}
+  .st.처리중{border-color:var(--brand);color:var(--brand);background:var(--brand-soft)}
+  .st.완료{border-color:var(--ok);color:var(--ok);background:var(--ok-soft)}
+  .csmeta{font-size:11px;color:var(--muted);margin-top:5px;display:flex;flex-wrap:wrap;gap:4px 10px}
+  .csbody{font-size:12px;color:var(--ink);margin-top:6px;opacity:.85;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .maprow{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;
+    padding:9px 11px;margin-bottom:6px;background:var(--card2)}
+  .maprow b{flex:0 0 78px;font-size:12px;font-weight:800}
+  .maprow select{flex:1;min-width:0;border:1.5px solid var(--line);background:var(--card);color:var(--ink);
+    border-radius:8px;padding:8px;font-family:inherit;font-size:12.5px;outline:none}
+  .fld textarea{border:1.5px solid var(--line);background:var(--card2);color:var(--ink);border-radius:10px;
+    padding:12px;font-family:inherit;font-size:13.5px;outline:none;resize:vertical;min-height:74px}
+  .fld select{border:1.5px solid var(--line);background:var(--card2);color:var(--ink);border-radius:10px;
+    padding:12px;font-family:inherit;font-size:14px;outline:none}
+  .fld2{display:flex;gap:9px}.fld2>.fld{flex:1;min-width:0}
+  .sumrow{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);font-size:12.5px}
+  .sumrow:last-child{border-bottom:none}
+  .sumrow b{flex:1;min-width:0;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sumrow span{font-variant-numeric:tabular-nums;font-weight:700;flex:none}
+  .sumrow .pay{color:var(--brand);font-weight:800}
+  .totbox{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px 13px;margin-bottom:12px}
+  .totline{display:flex;justify-content:space-between;font-size:13px;padding:3px 0}
+  .totline b{font-weight:800}
+  .totline span{font-variant-numeric:tabular-nums;font-weight:800}
+  .rulerow{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;
+    padding:9px 11px;margin-bottom:6px}
+  .rulerow b{flex:1;min-width:0;font-size:12.5px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rulerow input{width:74px;flex:none;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);
+    border-radius:8px;padding:7px;font-family:inherit;font-size:13px;text-align:right;outline:none}
+  .rulerow select{flex:none;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);
+    border-radius:8px;padding:7px;font-family:inherit;font-size:11.5px;outline:none}
 </style>
 </head>
 <body>
@@ -239,7 +308,7 @@
 <div class="wrap">
   <header>
     <b>퀵오더 웹</b><span class="sub">by JK</span>
-    <span class="verbadge" id="app-ver">v5.4</span>
+    <span class="verbadge" id="app-ver">v5.5</span>
     <span style="margin-left:auto"></span>
     <button class="chip" id="btn-settings">설정</button>
   </header>
@@ -247,6 +316,8 @@
   <div class="tabs">
     <button id="tab-o" class="on">① 발주서 변환</button>
     <button id="tab-i">② 송장 취합</button>
+    <button id="tab-c">③ CS·교환반품<span class="dot" id="cs-badge" style="display:none">0</span></button>
+    <button id="tab-s">④ 정산</button>
   </div>
 
   <!-- ================= 발주서 변환 ================= -->
@@ -352,7 +423,85 @@
     </div>
   </div>
 
-  <p class="foot">퀵오더 웹 <b>v5.4</b> · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
+  <!-- ================= CS · 교환/반품 ================= -->
+  <div class="pane" id="pane-c">
+    <div class="card">
+      <h2><span class="n">1</span>CS 불러오기</h2>
+      <p class="hint">사방넷·쇼핑몰 어드민 엑셀, 메일 문의, 직접 등록을 한 곳에 모읍니다.</p>
+      <button class="go" id="cs-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 CS 가져오기</button>
+      <button class="go" id="cs-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📁 드라이브에서 CS 파일 가져오기</button>
+      <div class="setrow"><span id="cs-filter">CS 검색: 문의, 교환, 반품, 취소</span><button class="minibtn" id="cs-filter-btn">검색조건</button></div>
+      <label class="drop" id="drop-cs" style="margin-top:8px;padding:16px">
+        CS 엑셀 선택 또는 끌어다 놓기
+        <b id="cs-fname"></b>
+        <input type="file" id="f-cs" accept=".xlsx,.xlsm" multiple>
+      </label>
+      <button class="minibtn" id="cs-new" style="margin-top:8px">✏️ 직접 등록 (전화·카톡 문의)</button>
+      <div class="msg" id="msg-c"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="n">2</span>CS 목록<span class="cnt" id="cs-count"></span></h2>
+      <input class="srch" id="cs-q" placeholder="주문번호·고객명·상품·내용 검색" spellcheck="false" autocapitalize="off">
+      <div class="segbar" id="cs-fstatus"></div>
+      <div class="segbar" id="cs-ftype"></div>
+      <div id="cs-list"><div class="empty">아직 등록된 CS가 없습니다.<br>위에서 엑셀·메일로 불러오거나 직접 등록하세요.</div></div>
+      <div class="pvfoot" id="cs-foot"></div>
+    </div>
+
+    <div class="card" id="cs-actions" style="display:none">
+      <h2><span class="n">3</span>선택한 건 처리</h2>
+      <p class="hint">체크한 건을 업체별로 묶어 전달하거나 상태를 한 번에 바꿉니다.</p>
+      <div class="segbar" id="cs-bulk"></div>
+      <div id="cs-send"></div>
+    </div>
+
+    <div style="display:flex;gap:8px">
+      <button class="minibtn" id="cs-export" style="flex:1;padding:11px">📥 전체 엑셀로 저장</button>
+      <button class="minibtn" id="cs-purge" style="flex:1;padding:11px">🗑 완료건 정리</button>
+    </div>
+  </div>
+
+  <!-- ================= 정산 ================= -->
+  <div class="pane" id="pane-s">
+    <div class="card">
+      <h2><span class="n">1</span>쇼핑몰 정산 파일</h2>
+      <p class="hint">몰에서 확정된 정산 내역을 올리세요. 여러 몰·여러 파일 가능합니다.</p>
+      <button class="go" id="st-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 정산 파일 가져오기</button>
+      <button class="go" id="st-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📁 드라이브에서 정산 파일 가져오기</button>
+      <label class="drop" id="drop-st" style="margin-top:8px;padding:16px">
+        정산 엑셀 선택 또는 끌어다 놓기
+        <b id="st-fname"></b>
+        <input type="file" id="f-st" accept=".xlsx,.xlsm" multiple>
+      </label>
+      <div class="vlist" id="st-files" style="margin-top:10px"></div>
+      <div class="msg" id="msg-s"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="n">2</span>업체별 마진 규칙</h2>
+      <p class="hint">우리 마진을 뺀 금액이 업체 지급액이 됩니다. 한 번 정하면 기억합니다.</p>
+      <div class="rulerow"><b>기본 마진율</b>
+        <input id="st-default" type="number" inputmode="decimal" step="0.1" value="30"><span style="font-size:12px;font-weight:700">%</span></div>
+      <div id="st-rules"></div>
+      <div class="pvfoot" id="st-rule-foot">정산 파일을 올리면 업체 목록이 자동으로 나옵니다.</div>
+    </div>
+
+    <button class="go" id="run-s" disabled><span class="spin"></span><span id="run-s-lbl">업체별 정산 계산하기</span></button>
+
+    <div class="card" id="result-s" style="display:none;margin-top:14px">
+      <h2><span class="n">3</span>정산 결과</h2>
+      <div class="totbox" id="st-total"></div>
+      <div class="tblbox" id="st-sumbox" style="margin-bottom:12px"></div>
+      <div id="st-vendors"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="minibtn" id="st-export-all" style="flex:1;padding:12px">📥 전체 정산표 엑셀</button>
+        <button class="minibtn" id="st-mark" style="flex:1;padding:12px">✔ CS 차감 반영 완료</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="foot">퀵오더 웹 <b>v5.5</b> · 모든 처리가 <b>이 기기 안에서만</b> 이뤄집니다.<br>파일이 서버로 전송되지 않습니다.</p>
 </div>
 
 <!-- 메일 선택 모달 -->
@@ -480,6 +629,56 @@
   </div>
 </div>
 
+<!-- CS 메일 가져오기 모달 (본문 문의 + 첨부 엑셀) -->
+<div class="modal" id="csmailmodal">
+  <div class="sheet">
+    <div class="grip"></div>
+    <h3>메일에서 CS 가져오기</h3>
+    <p class="sub2" id="csmail-sub">기간을 골라 불러오세요.</p>
+    <div class="mailperiod" id="csmail-period">
+      <button data-d="1" class="on">오늘</button>
+      <button data-d="3">최근 3일</button>
+      <button data-d="7">최근 7일</button>
+      <button data-d="30">최근 30일</button>
+    </div>
+    <div class="mlist" id="csmail-list"></div>
+    <div class="row">
+      <button class="btn-cancel" id="csmail-cancel">취소</button>
+      <button class="btn-go" id="csmail-ok" disabled>선택 항목 가져오기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 열 맞추기(매핑) 모달 — CS·정산 공용 -->
+<div class="modal" id="mapmodal">
+  <div class="sheet">
+    <div class="grip"></div>
+    <h3 id="map-title">열 맞추기</h3>
+    <p class="sub2" id="map-sub">이 파일의 어느 열이 무슨 값인지 한 번만 정해주세요. 다음부터는 자동입니다.</p>
+    <div class="mlist" id="map-list"></div>
+    <div id="map-msg" style="font-size:12px;color:var(--danger);margin-bottom:8px"></div>
+    <div class="row">
+      <button class="btn-cancel" id="map-cancel">취소</button>
+      <button class="btn-go" id="map-ok">이대로 가져오기</button>
+    </div>
+  </div>
+</div>
+
+<!-- CS 상세/등록 모달 -->
+<div class="modal" id="csmodal">
+  <div class="sheet">
+    <div class="grip"></div>
+    <h3 id="cs-title">CS 상세</h3>
+    <p class="sub2" id="cs-sub"></p>
+    <div class="mlist" id="cs-body"></div>
+    <div class="row">
+      <button class="btn-cancel" id="cs-del" style="flex:0 0 70px!important;color:var(--danger)">삭제</button>
+      <button class="btn-cancel" id="cs-close">닫기</button>
+      <button class="btn-go" id="cs-save">저장</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async></script>
 <script src="qo-lock.js"></script>
@@ -487,5 +686,7 @@
 <script src="qo-gmail.js"></script>
 <script src="qo-sync.js"></script>
 <script src="qo-app.js"></script>
+<script src="qo-cs.js"></script>
+<script src="qo-settle.js"></script>
 </body>
 </html>
