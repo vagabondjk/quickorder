@@ -1,4 +1,4 @@
-/* =====================================================================
+﻿/* =====================================================================
    퀵오더 ④ 정산  (v6.0)
    쇼핑몰에서 확정된 정산금액 → 상품에서 브랜드/업체를 찾아 →
    우리 마진을 뺀 '업체 지급액'을 만든다.
@@ -259,7 +259,7 @@ const ST = (() => {
       row.querySelector(".dlbtn").onclick = () => sendOne(v, inp, row.querySelector(".dlbtn"));
     });
   }
-  const fileName = v => `${QO.todayStr()}_랩노마드_${cleanVendor(v)}_정산서.xlsx`;
+  const fileName = v => `${QO.todayStr()}_${CONFIG.company}_${cleanVendor(v)}_정산서.xlsx`;
 
   function showRows(v) {
     const cols = ["정산일", "쇼핑몰", "주문번호", "상품명", "옵션", "수량", "정산금액", "우리마진", "지급액"];
@@ -323,13 +323,13 @@ const ST = (() => {
     try {
       await ensureGmail();
       const buf = await buildExcel([v]);
-      const body = `안녕하세요, 랩노마드입니다.\n\n${QO.fmtDate(QO.todayStr())} 기준 정산 내역을 보내드립니다.\n\n`
+      const body = `안녕하세요, ${CONFIG.company}입니다.\n\n${QO.fmtDate(QO.todayStr())} 기준 정산 내역을 보내드립니다.\n\n`
         + `· 건수: ${v.rows.length}건\n· 정산금액 합계: ${won(v.amount)}\n`
         + (v.ded ? `· CS 차감(교환·반품): -${won(v.ded)}\n` : "")
         + `· 지급액: ${won(v.final)}\n\n자세한 내역은 첨부 파일을 확인해주세요.\n감사합니다.`;
       await GMAIL.send({
         to: to.join(", "),
-        subject: `[랩노마드] 정산서 ${QO.fmtDate(QO.todayStr())} - ${v.vendor}`,
+        subject: `[${CONFIG.company}] 정산서 ${QO.fmtDate(QO.todayStr())} - ${v.vendor}`,
         body,
         attachments: [{ filename: fileName(v.vendor), data: buf }],
       });
@@ -428,7 +428,7 @@ const ST = (() => {
     $("st-export-all").onclick = async () => {
       if (!result) return;
       const buf = await buildExcel(result.vendors);
-      download(buf, `${QO.todayStr()}_랩노마드_정산표_전체.xlsx`);
+      download(buf, `${QO.todayStr()}_${CONFIG.company}_정산표_전체.xlsx`);
     };
   }
 

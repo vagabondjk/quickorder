@@ -1,4 +1,4 @@
-/* =====================================================================
+﻿/* =====================================================================
    퀵오더 ③ CS · 교환/반품  (v6.0)
    - 사방넷·쇼핑몰 어드민 엑셀을 '열 맞추기' 한 번으로 가져온다(레이아웃별 기억).
    - 메일 문의(본문)·직접 등록도 같은 목록에 합친다.
@@ -511,7 +511,7 @@ const CS = (() => {
         saved: known, history: S.vendorSent[v] || [],
         domains: S.vendorDomains[v] || [], query: v !== "(업체 미지정)" ? v : "",
       });
-      row.querySelector(".xls").onclick = () => exportRows(rows, `${QO.todayStr()}_랩노마드_${cleanVendor(v)}_CS내역.xlsx`);
+      row.querySelector(".xls").onclick = () => exportRows(rows, `${QO.todayStr()}_${CONFIG.company}_${cleanVendor(v)}_CS내역.xlsx`);
       row.querySelector(".dlbtn").onclick = () => sendToVendor(v, rows, inp, row.querySelector(".dlbtn"));
     });
   }
@@ -536,12 +536,12 @@ const CS = (() => {
     try {
       await ensureGmail();
       const buf = await buildExcel(rows);
-      const fname = `${QO.todayStr()}_랩노마드_${cleanVendor(vendor)}_CS내역.xlsx`;
-      const body = `안녕하세요, 랩노마드입니다.\n\n아래 CS 건 확인 부탁드립니다. (총 ${rows.length}건)\n\n`
+      const fname = `${QO.todayStr()}_${CONFIG.company}_${cleanVendor(vendor)}_CS내역.xlsx`;
+      const body = `안녕하세요, ${CONFIG.company}입니다.\n\n아래 CS 건 확인 부탁드립니다. (총 ${rows.length}건)\n\n`
         + csText(rows) + `\n\n자세한 내용은 첨부 파일을 참고해주세요.\n감사합니다.`;
       await GMAIL.send({
         to: to.join(", "),
-        subject: `[랩노마드] CS 요청 ${rows.length}건 - ${QO.fmtDate(QO.todayStr())}`,
+        subject: `[${CONFIG.company}] CS 요청 ${rows.length}건 - ${QO.fmtDate(QO.todayStr())}`,
         body,
         attachments: [{ filename: fname, data: buf }],
       });
@@ -708,7 +708,7 @@ const CS = (() => {
     };
 
     $("cs-q").addEventListener("input", () => { filter.q = $("cs-q").value; draw(); });
-    $("cs-export").onclick = () => exportRows(items.filter(match), `${QO.todayStr()}_랩노마드_CS내역.xlsx`);
+    $("cs-export").onclick = () => exportRows(items.filter(match), `${QO.todayStr()}_${CONFIG.company}_CS내역.xlsx`);
     $("cs-purge").onclick = async () => {
       const done = items.filter(x => x.status === "완료").length;
       if (!done) { alert("완료된 건이 없습니다."); return; }

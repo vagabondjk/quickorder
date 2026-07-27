@@ -7,9 +7,10 @@ const GMAIL = (() => {
   const SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send " +
                  "https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive";  // drive = 읽기+쓰기(되쓰기용)
   const API = "https://gmail.googleapis.com/gmail/v1/users/me";
-  const TKEY = "qo_gmail_token4";    // 토큰을 기기에 보관 → 로그인 유지 (드라이브 권한 추가로 키 변경 → 1회 재로그인)
-  const GKEY = "qo_gmail_granted4";   // 권한 승인 이력(토큰 만료 후 동의창 반복 방지)
-  const HKEY = "qo_gmail_hint";       // 계정 이메일 힌트(재로그인 시 계정 선택 건너뛰기)
+  // 회사별로 키를 분리 (같은 도메인에 여러 회사를 올려도 로그인이 섞이지 않게)
+  const TKEY = CONFIG.ls("qo_gmail_token4");    // 토큰을 기기에 보관 → 로그인 유지
+  const GKEY = CONFIG.ls("qo_gmail_granted4");  // 권한 승인 이력(토큰 만료 후 동의창 반복 방지)
+  const HKEY = CONFIG.ls("qo_gmail_hint");      // 계정 이메일 힌트(재로그인 시 계정 선택 건너뛰기)
   let tokenClient = null, accessToken = null, tokenExp = 0, clientId = null;
 
   // 저장해 둔 토큰 불러오기 (아직 유효하면 재로그인 불필요)

@@ -4,7 +4,7 @@
 "use strict";
 // 구글 클라이언트 ID (기본 내장) — github 주소에서만 작동하게 묶여 있어 공개돼도 안전.
 // 기기·주소가 바뀌어도 다시 입력할 필요가 없다.
-const DEFAULT_CLIENT_ID = "598124965893-16qej37hhlah9ivtr9hdk76c50ms5aqs.apps.googleusercontent.com";
+const DEFAULT_CLIENT_ID = CONFIG.clientId;   // 회사별 구글 프로젝트 (qo-config.js)
 async function clientId() { return (await DB.get("gmailClientId", "")) || DEFAULT_CLIENT_ID; }
 
 const CHK = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>';
@@ -87,7 +87,7 @@ const DB = (() => {
   function open() {
     return new Promise((res, rej) => {
       if (db) return res(db);
-      const rq = indexedDB.open("quickorder", 1);
+      const rq = indexedDB.open(CONFIG.dbName, 1);   // 회사별로 저장소 분리 (qo-config.js)
       rq.onupgradeneeded = e => {
         const d = e.target.result;
         if (!d.objectStoreNames.contains("forms")) d.createObjectStore("forms", { keyPath: "name" });
@@ -812,7 +812,7 @@ $("run-o").onclick = async function () {
       results.push({ supplier: f.name, count: r.count, buf: out,
         // 파일명 고정: 오늘날짜_랩노마드_업체명_발주서.xlsx
         // ※ 사용자가 별도로 요청하지 않는 한 이 형식을 바꾸지 말 것
-        filename: `${QO.todayStr()}_랩노마드_${cleanVendor(f.name)}_발주양식.xlsx` });
+        filename: `${QO.todayStr()}_${CONFIG.company}_${cleanVendor(f.name)}_발주양식.xlsx` });
       // 학습 저장
       if (S.brands.length && sel.length) sel.forEach(b => { S.brandVendor[b] = f.name; });
     }
@@ -906,7 +906,7 @@ function showResultO(results, skipped, verify) {
       try {
         await ensureGmail();
         const ymd = QO.todayStr().slice(2);
-        await GMAIL.send({ to: list.join(", "), subject: `[랩노마드] ${ymd}_발주서 송부`,
+        await GMAIL.send({ to: list.join(", "), subject: `[${CONFIG.company}] ${ymd}_발주서 송부`,
           body: "안녕하세요 발주서 송부드립니다. 감사합니다!",
           attachments: [{ filename: r.filename, data: r.buf }] });
         S.vendorEmails[r.supplier] = inp.value.trim(); await DB.set("vendorEmails", S.vendorEmails);
@@ -1185,7 +1185,7 @@ function showResultI(out, buf, filename) {
     try {
       await ensureGmail();
       const ymd = QO.todayStr().slice(2);
-      await GMAIL.send({ to: list.join(", "), subject: `[랩노마드] ${ymd}_송장 취합본 송부`,
+      await GMAIL.send({ to: list.join(", "), subject: `[${CONFIG.company}] ${ymd}_송장 취합본 송부`,
         body: "안녕하세요 송장 취합본 송부드립니다. 감사합니다!",
         attachments: [{ filename, data: buf }] });
       S.invEmails = $("inv-to").value.trim(); await DB.set("invEmails", S.invEmails);
@@ -1338,9 +1338,9 @@ async function ensureGmail() {
 /* 발주서 검색조건 (PC 앱과 동일한 기본값) */
 async function getOrderFilter() {
   return {
-    senders: await DB.get("orderSenders", ["onekglobal.co.kr"]),
-    keywords: await DB.get("orderKeywords", ["랩노마드 발주서", "랩노마드발주서", "★랩노마드", "랩노마드"]),
-    exclude: await DB.get("orderExclude", ["플라스머", "디에스피", "송장", "회신", "운송장", "택배"]),
+    senders: await DB.get("orderSenders", CONFIG.order.senders),
+    keywords: await DB.get("orderKeywords", CONFIG.order.keywords),
+    exclude: await DB.get("orderExclude", CONFIG.order.exclude),
   };
 }
 async function drawOrderFilter() {
@@ -1353,9 +1353,9 @@ async function drawOrderFilter() {
 /* 회신 검색조건 */
 async function getReplyFilter() {
   return {
-    senders: await DB.get("replySenders", []),
-    keywords: await DB.get("replyKeywords", ["송장", "운송장", "회신"]),
-    exclude: await DB.get("replyExclude", []),
+    senders: await DB.get("replySenders", CONFIG.reply.senders),
+    keywords: await DB.get("replyKeywords", CONFIG.reply.keywords),
+    exclude: await DB.get("replyExclude", CONFIG.reply.exclude),
   };
 }
 async function drawReplyFilter() {
@@ -1402,9 +1402,8 @@ function drawChipList(boxId, items, kind) {
 async function getList(kind) {
   const key = FKEY[filterMode][kind];
   const DEF = {
-    order: { senders: ["onekglobal.co.kr"], keywords: ["랩노마드 발주서", "랩노마드발주서", "★랩노마드", "랩노마드"],
-             exclude: ["플라스머", "디에스피", "송장", "회신", "운송장", "택배"] },
-    reply: { senders: [], keywords: ["송장", "운송장", "회신"], exclude: [] },
+    order: CONFIG.order,
+    reply: CONFIG.reply,
     cs: { senders: [], keywords: ["문의", "교환", "반품", "취소", "환불", "누락", "파손", "불량", "CS"],
           exclude: ["발주", "정산"] },
     settle: { senders: [], keywords: ["정산", "정산내역", "지급"], exclude: ["발주", "송장"] },
@@ -1586,8 +1585,8 @@ async function setOrderFromBuf(buf, name) {
 /* =================================================================
    새 발주·송장 알림 (앱이 열려 있을 때 주기적으로 확인 → 알림)
    ================================================================= */
-const notifyEnabled = () => { try { return localStorage.getItem("qo_notifyOn") === "1"; } catch (e) { return false; } };
-const setNotifyEnabled = v => { try { localStorage.setItem("qo_notifyOn", v ? "1" : "0"); } catch (e) {} };
+const notifyEnabled = () => { try { return localStorage.getItem(CONFIG.ls("qo_notifyOn")) === "1"; } catch (e) { return false; } };
+const setNotifyEnabled = v => { try { localStorage.setItem(CONFIG.ls("qo_notifyOn"), v ? "1" : "0"); } catch (e) {} };
 const NOTIFY_MS = 3 * 60 * 1000;   // 3분마다
 let notifyTimer = null;
 

@@ -5,7 +5,7 @@
    =================================================================== */
 "use strict";
 const SYNC = (() => {
-  const FILE = "qo-backup.json";
+  const FILE = CONFIG.backupFile;   // 회사별 백업 파일명 (qo-config.js)
   const KV_KEYS = ["brandVendor", "vendorEmails", "vendorSent", "vendorDomains",
     "invEmails", "invSent", "driveOrderFile", "driveSabFile", "driveFolders",
     "orderSenders", "orderKeywords", "orderExclude",
@@ -13,8 +13,8 @@ const SYNC = (() => {
     // v6.0 — CS·정산
     "csItems", "csMaps", "csSenders", "csKeywords", "csExclude",
     "settleRules", "settleMaps", "stSenders", "stKeywords", "stExclude"];
-  const STAMP_KEY = "qo_sync_stamp";   // 이 기기가 마지막으로 반영/업로드한 시각
-  const TIME_KEY = "qo_sync_time";     // 마지막 동기화 시각(표시용)
+  const STAMP_KEY = CONFIG.ls("qo_sync_stamp");   // 이 기기가 마지막으로 반영/업로드한 시각
+  const TIME_KEY = CONFIG.ls("qo_sync_time");     // 마지막 동기화 시각(표시용)
 
   let fileId = null;
   let pushTimer = null;

@@ -1,8 +1,11 @@
 /* 퀵오더 서비스워커 — '항상 최신' 방식 (network-first)
    앱 파일은 매번 새로 받아오고, 인터넷이 안 될 때만 캐시를 사용한다.
    → 재배포하면 새로고침만으로 바로 최신 코드가 뜬다. */
-const CACHE = "quickorder-v5.5";
-const ASSETS = ["./", "./index.html", "./qo-lock.js", "./qo-logic.js", "./qo-gmail.js", "./qo-sync.js", "./qo-app.js",
+// 회사 설정을 그대로 읽어 캐시 이름을 회사별로 분리한다
+// (같은 도메인에 여러 회사를 올려도 캐시가 서로를 지우지 않게)
+importScripts("qo-config.js");
+const CACHE = "quickorder" + (CONFIG.tenant ? "-" + CONFIG.tenant : "") + "-v5.5";
+const ASSETS = ["./", "./index.html", "./qo-config.js", "./qo-lock.js", "./qo-logic.js", "./qo-gmail.js", "./qo-sync.js", "./qo-app.js",
   "./qo-cs.js", "./qo-settle.js",
   "./manifest.json", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 // 절대 안 바뀌는 외부 라이브러리는 캐시 우선(빠름)

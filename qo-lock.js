@@ -7,9 +7,16 @@
    =================================================================== */
 "use strict";
 const LOCK = (() => {
-  const SALT = "047ec6b655a0775637a17f233ce04bd4";
-  const MASTER = "4e3782b5293b1e04564a07aa343a25638ff682519529454c5898d0d984907c35";
-  const MONTHS = {
+  /* 회사별 비밀번호 — qo-config.js 의 lock 값에 따라 갈린다.
+       null  → 아래 기본(랩노마드) 비밀번호 사용
+       false → 잠금 없음 (바로 사용)
+       {salt, master, months} → 그 회사 전용 비밀번호 */
+  const LK = (typeof CONFIG !== "undefined") ? CONFIG.lock : null;
+  const OFF = LK === false;
+  const SALT = (LK && LK.salt) || "047ec6b655a0775637a17f233ce04bd4";
+  const MASTER = OFF ? "" : ((LK && LK.master) ||
+    "4e3782b5293b1e04564a07aa343a25638ff682519529454c5898d0d984907c35");
+  const MONTHS = OFF ? {} : ((LK && LK.months) || {
     "202607": "e75224ee2d3606ca4cd87a87aaef042d92614ba1995e973c9d6bcbe1b7197f68",
     "202608": "869abde9ba917da3ac189c77dba267fccf9a6918a84c164ad052ea2f3a85776d",
     "202609": "cbe76ea6b6c40a2111332fb483004fc21a319f1fed4833af3d23ae8dc705e33f",
@@ -34,7 +41,7 @@ const LOCK = (() => {
     "202804": "5eca2575eaa9808db946ed3fb06a014b02844e133af6e4be8540571b9da9661e",
     "202805": "1c52a9a2380fca585e064ad127e212327655e31bb872fb7f9504860aa3f4bbef",
     "202806": "a186e069936eb801004e2976d21003b307d9804aff5d0a242a7b0f1693949385",
-  };
+  });
 
   async function sha256Hex(str) {
     const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
@@ -47,11 +54,11 @@ const LOCK = (() => {
   }
   function deviceId() {
     let id = null;
-    try { id = localStorage.getItem("qo_device"); } catch (e) {}
+    try { id = localStorage.getItem(CONFIG.ls("qo_device")); } catch (e) {}
     if (!id) {
       const r = crypto.getRandomValues(new Uint8Array(16));
       id = [...r].map(b => b.toString(16).padStart(2, "0")).join("");
-      try { localStorage.setItem("qo_device", id); } catch (e) {}
+      try { localStorage.setItem(CONFIG.ls("qo_device"), id); } catch (e) {}
     }
     return id;
   }
@@ -70,7 +77,7 @@ const LOCK = (() => {
   async function isUnlocked() {
     if (!configured()) return true;
     try {
-      const s = JSON.parse(localStorage.getItem("qo_lock") || "null");
+      const s = JSON.parse(localStorage.getItem(CONFIG.ls("qo_lock")) || "null");
       if (!s || !s.exp || Date.now() >= s.exp) return false;   // 없거나 7일 지남
       if (s.token !== await signExp(s.exp)) return false;
       await saveUnlock();          // 슬라이딩: 열 때마다 만료를 다시 7일 뒤로 연장
@@ -79,9 +86,9 @@ const LOCK = (() => {
   }
   async function saveUnlock() {
     const exp = Date.now() + UNLOCK_MS;
-    try { localStorage.setItem("qo_lock", JSON.stringify({ exp, token: await signExp(exp) })); } catch (e) {}
+    try { localStorage.setItem(CONFIG.ls("qo_lock"),JSON.stringify({ exp, token: await signExp(exp) })); } catch (e) {}
   }
-  function signOut() { try { localStorage.removeItem("qo_lock"); } catch (e) {} }
+  function signOut() { try { localStorage.removeItem(CONFIG.ls("qo_lock")); } catch (e) {} }
 
   /* ---------- 잠금 화면 UI ---------- */
   function injectStyle() {
@@ -113,7 +120,7 @@ const LOCK = (() => {
       "<div class=\"card\">" +
       "<div class=\"lk\">🔒</div>" +
       "<h2>퀵오더 사용 승인</h2>" +
-      "<p>이번 달 비밀번호를 입력하세요.<br>관리자(JK)에게 매달 전달받습니다.</p>" +
+      "<p>이번 달 비밀번호를 입력하세요.<br>" + (CONFIG.adminLabel || "관리자") + "에게 매달 전달받습니다.</p>" +
       "<input id=\"qo-lock-pw\" type=\"password\" inputmode=\"text\" autocomplete=\"off\" " +
         "autocapitalize=\"characters\" autocorrect=\"off\" placeholder=\"비밀번호\">" +
       "<button id=\"qo-lock-go\">확인</button>" +
