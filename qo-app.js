@@ -456,14 +456,15 @@ async function drawDriveRecent() {
 $("drive-tpl").onclick = () => openDrivePicker({
   key: "tpl", title: "드라이브에서 업체 양식 가져오기", multiple: true,
   onPick: async files => {
-    let n = 0;
+    const list = [];
     for (const f of files) {
       const r = await GMAIL.driveFetchExcel(f.id);
-      await DB.putForm({ name: QO.nameFromFilename(r.name), file: r.name, data: r.buf, checked: true });
-      n++;
+      list.push({ fileName: r.name, buf: r.buf });
     }
+    const r = await saveForms(list);          // 이름이 겹쳐도 덮어쓰지 않음
     await loadForms();
-    msg("msg-o", "ok", `✔ 드라이브에서 업체 양식 ${n}개를 저장했어요.`);
+    msg("msg-o", "ok", `✔ 드라이브에서 업체 양식 ${r.added + r.updated}개 저장 — ${r.names.join(", ")}`
+      + (r.updated ? ` (${r.updated}개는 기존 양식 갱신)` : ""));
   },
 });
 
@@ -663,16 +664,90 @@ function renderPreview() {
 /* --- 업체 양식 --- */
 $("f-tpl").addEventListener("change", function () { const fs = [...this.files]; this.value = ""; addForms(fs); });
 bindDrop("drop-tpl", f => addForms(f));
+/* 파일명에서 업체명 후보를 순서대로 뽑는다. 앞의 것이 이미 쓰이고 있으면 다음 것으로 넘어간다.
+     "랩노마드 발주양식(디에스피).xlsx" → ①디에스피 ②랩노마드 ③디에스피 ④랩노마드 발주양식(디에스피)
+     "디에스피_발주양식.xlsx"          → ①디에스피_발주양식 ②발주양식 …
+   ※ 이미 저장돼 있는 양식의 이름은 바뀌지 않는다(같은 파일명이면 기존 이름을 그대로 씀). */
+function candidateNames(fileName) {
+  const stem = String(fileName).replace(/\.[^.]+$/, "").replace(/^.*[\\/]/, "").trim();
+  const out = [];
+  const push = v => {
+    v = String(v || "").replace(/[\\/:*?"<>|]/g, "").trim();
+    if (v && !out.includes(v)) out.push(v);
+  };
+  // 끝에 괄호가 있으면 그 안이 업체명인 경우가 많다 — "랩노마드 발주양식(디에스피)"
+  const paren = stem.match(/[([【]([^)\]】]+)[)\]】]\s*$/);
+  if (paren) push(paren[1]);
+  push(QO.nameFromFilename(fileName));                            // 첫 단어 (기존 규칙)
+  push(cleanVendor(stem.split(/[\s_]+/).filter(Boolean).pop()));   // 마지막 토막
+  push(stem);                                                     // 파일명 전체
+  return out;
+}
+
+/* 업체 양식 저장 — 이름이 겹쳐 먼저 넣은 양식을 덮어쓰지 않게 한다.
+   (여러 개를 골라도 하나만 남던 문제) list = [{fileName, buf}] */
+async function saveForms(list) {
+  const existing = await DB.listForms();
+  const byName = new Map(existing.map(f => [f.name, f]));
+  let added = 0, updated = 0;
+  const names = [];
+  for (const it of list) {
+    const cands = candidateNames(it.fileName);
+    const same = existing.find(f => f.file === it.fileName);
+    let name;
+    if (same) {
+      name = same.name;                   // 같은 파일을 다시 올림 = 양식 갱신
+    } else {
+      name = cands[0];
+      let i = 1;
+      while (byName.has(name) && i <= 50) {          // 다른 파일이 그 이름을 쓰는 중
+        name = (i < cands.length) ? cands[i] : `${cands[0]} (${i - cands.length + 2})`;
+        i++;
+      }
+    }
+    if (byName.has(name)) updated++; else added++;
+    const rec = { name, file: it.fileName, data: it.buf, checked: true };
+    await DB.putForm(rec);
+    byName.set(name, rec);
+    names.push(name);
+  }
+  return { added, updated, names };
+}
+
 async function addForms(files) {
-  let added = 0;
+  const list = [];
   for (const f of files) {
     if (!/\.xls[xm]$/i.test(f.name)) continue;
-    const buf = await readFile(f);
-    const name = QO.nameFromFilename(f.name);
-    await DB.putForm({ name, file: f.name, data: buf, checked: true });
-    added++;
+    list.push({ fileName: f.name, buf: await readFile(f) });
   }
-  if (added) { await loadForms(); msg("msg-o", "ok", `✔ 업체 양식 ${added}개를 이 기기에 저장했어요. 다음부터는 체크만 하면 됩니다.`); }
+  if (!list.length) return;
+  const r = await saveForms(list);
+  await loadForms();
+  msg("msg-o", "ok", `✔ 업체 양식 ${r.added + r.updated}개 저장 — ${r.names.join(", ")}`
+    + (r.updated ? ` (${r.updated}개는 기존 양식 갱신)` : "")
+    + "\n다음부터는 체크만 하면 됩니다.");
+}
+
+/* 업체명 바꾸기 — 브랜드 학습·업체 메일 이력도 같이 옮긴다 */
+async function renameForm(f) {
+  const v = prompt("업체명을 바꿉니다.\n(발주서 파일명과 브랜드 배정에 쓰이는 이름)", f.name);
+  if (v === null) return;
+  const newName = v.trim().replace(/[\\/:*?"<>|]/g, "");
+  if (!newName || newName === f.name) return;
+  if (S.forms.some(x => x.name === newName)) { alert("같은 이름의 업체 양식이 이미 있어요."); return; }
+  await DB.delForm(f.name);
+  await DB.putForm({ name: newName, file: f.file, data: f.data, checked: f.checked !== false });
+  for (const b in S.brandVendor) if (S.brandVendor[b] === f.name) S.brandVendor[b] = newName;
+  await DB.set("brandVendor", S.brandVendor);
+  const move = async (obj, key) => {
+    if (obj && obj[f.name] !== undefined) { obj[newName] = obj[f.name]; delete obj[f.name]; await DB.set(key, obj); }
+  };
+  await move(S.vendorEmails, "vendorEmails");
+  await move(S.vendorSent, "vendorSent");
+  await move(S.vendorDomains, "vendorDomains");
+  if (S.sel[f.name]) { S.sel[newName] = S.sel[f.name]; delete S.sel[f.name]; }
+  await loadForms();
+  msg("msg-o", "ok", `✔ '${f.name}' → '${newName}' 으로 바꿨어요.`);
 }
 async function loadForms() {
   S.forms = await DB.listForms();
@@ -693,11 +768,15 @@ function drawForms() {
     el.className = "vrow" + (f.checked ? " on" : "");
     el.innerHTML = `<div class="vtop"><span class="box">${CHK}</span><b>${esc(f.name)}</b><button class="vdel">✕</button></div>
       <span class="vfile">${esc(f.file)}</span>
-      <div class="vbtns"><button class="pv">미리보기</button><button class="dl">엑셀 받기</button></div>`;
+      <div class="vbtns"><button class="pv">미리보기</button><button class="rn">이름수정</button><button class="dl">엑셀 받기</button></div>`;
     el.onclick = async ev => {
       if (ev.target.classList.contains("pv")) {
         ev.stopPropagation();
         openPreview(f.data, f.name + " 양식"); return;
+      }
+      if (ev.target.classList.contains("rn")) {
+        ev.stopPropagation();
+        await renameForm(f); return;
       }
       if (ev.target.classList.contains("dl")) {
         ev.stopPropagation();
@@ -812,7 +891,9 @@ $("run-o").onclick = async function () {
       results.push({ supplier: f.name, count: r.count, buf: out,
         // 파일명 고정: 오늘날짜_랩노마드_업체명_발주서.xlsx
         // ※ 사용자가 별도로 요청하지 않는 한 이 형식을 바꾸지 말 것
-        filename: `${QO.todayStr()}_${CONFIG.company}_${cleanVendor(f.name)}_발주양식.xlsx` });
+        // 파일명 고정 형식: 오늘날짜_랩노마드_업체명_발주양식.xlsx
+        // 가운데 이름은 CONFIG.orderTag (랩노마드는 "랩노마드" 고정). 비면 그 자리를 뺀다.
+        filename: `${QO.todayStr()}_${CONFIG.orderTag ? CONFIG.orderTag + "_" : ""}${cleanVendor(f.name)}_발주양식.xlsx` });
       // 학습 저장
       if (S.brands.length && sel.length) sel.forEach(b => { S.brandVendor[b] = f.name; });
     }
