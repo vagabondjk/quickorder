@@ -458,10 +458,12 @@ $("drive-tpl").onclick = () => openDrivePicker({
   onPick: async files => {
     const list = [];
     for (const f of files) {
-      const r = await GMAIL.driveFetchExcel(f.id);
-      list.push({ fileName: r.name, buf: r.buf });
+      const g = await GMAIL.driveFetchExcel(f.id);
+      list.push({ fileName: g.name, buf: g.buf });
     }
-    const r = await saveForms(list);          // 이름이 겹쳐도 덮어쓰지 않음
+    const named = await askVendorNames(list);   // 업체명 확인 후 저장
+    if (!named) return;
+    const r = await saveForms(named);
     await loadForms();
     msg("msg-o", "ok", `✔ 드라이브에서 업체 양식 ${r.added + r.updated}개 저장 — ${r.names.join(", ")}`
       + (r.updated ? ` (${r.updated}개는 기존 양식 갱신)` : ""));
@@ -672,37 +674,104 @@ function candidateNames(fileName) {
   const stem = String(fileName).replace(/\.[^.]+$/, "").replace(/^.*[\\/]/, "").trim();
   const out = [];
   const push = v => {
-    v = String(v || "").replace(/[\\/:*?"<>|]/g, "").trim();
+    v = String(v || "").replace(/[\\/:*?"<>|()[\]【】]/g, "").trim();
     if (v && !out.includes(v)) out.push(v);
   };
-  // 끝에 괄호가 있으면 그 안이 업체명인 경우가 많다 — "랩노마드 발주양식(디에스피)"
-  const paren = stem.match(/[([【]([^)\]】]+)[)\]】]\s*$/);
-  if (paren) push(paren[1]);
-  push(QO.nameFromFilename(fileName));                            // 첫 단어 (기존 규칙)
-  push(cleanVendor(stem.split(/[\s_]+/).filter(Boolean).pop()));   // 마지막 토막
-  push(stem);                                                     // 파일명 전체
+  // ① 끝에 괄호가 있으면 그 안이 업체명 — "랩노마드 발주양식(디에스피)"
+  const tail = stem.match(/[([【]([^)\]】]+)[)\]】]\s*$/);
+  if (tail) push(tail[1]);
+
+  // ② 군더더기를 걷어내고 남는 첫 단어 — "(랩노마드) DSP 발주서_2607" → "DSP"
+  //    앞쪽 괄호(자사명)·문서 종류어(발주서/양식)·날짜숫자를 지운다.
+  const core = stem
+    .replace(/^\s*[([【][^)\]】]*[)\]】]\s*/, "")        // 맨 앞 괄호 묶음
+    .replace(/발주\s*양식|발주서|발주\s*의뢰|주문서|발주|양식|form|order/gi, " ")
+    .replace(/\d{4,8}/g, " ")                          // 2607 · 20260728 같은 날짜
+    .replace(/[_\-.]+/g, " ")
+    .replace(/\s+/g, " ").trim();
+  if (core) { push(core.split(" ")[0]); push(core); }
+
+  push(QO.nameFromFilename(fileName));                 // ③ 예전 규칙(첫 단어)
+  push(stem);                                          // ④ 파일명 전체
   return out;
 }
 
-/* 업체 양식 저장 — 이름이 겹쳐 먼저 넣은 양식을 덮어쓰지 않게 한다.
-   (여러 개를 골라도 하나만 남던 문제) list = [{fileName, buf}] */
+/* 업체명 입력 모달 — 파일마다 이름을 확인/수정한 뒤 저장한다.
+   list = [{fileName, buf}] → 확정된 [{fileName, buf, name}] 로 resolve. 취소하면 null. */
+function askVendorNames(list) {
+  return new Promise(async resolve => {
+    const existing = await DB.listForms();
+    const box = $("vn-list");
+    box.innerHTML = "";
+    $("vn-msg").textContent = "";
+    $("vn-title").textContent = list.length > 1 ? `업체명 정하기 (${list.length}개)` : "업체명 정하기";
+    const used = new Set(existing.map(f => f.name));
+    list.forEach(it => {
+      // 같은 파일을 다시 올린 것이면 이전에 쓰던 이름을 그대로 보여준다
+      const same = existing.find(f => f.file === it.fileName);
+      let pre = same ? same.name : "";
+      if (!pre) {
+        const cands = candidateNames(it.fileName);
+        pre = cands.find(c => !used.has(c)) || cands[0] || "";
+      }
+      used.add(pre);
+      const row = document.createElement("div");
+      row.className = "mitem";
+      row.innerHTML = `<div class="vnfile">📄 ${esc(it.fileName)}</div>
+        <input class="vnin" value="${esc(pre)}" placeholder="업체명 (예: 디에스피)"
+               autocapitalize="off" autocorrect="off" spellcheck="false">`;
+      box.appendChild(row);
+    });
+    $("vnmodal").classList.add("on");
+    setTimeout(() => { const i = box.querySelector(".vnin"); if (i) { i.focus(); i.select(); } }, 80);
+
+    const close = () => { $("vnmodal").classList.remove("on"); cleanup(); };
+    const onCancel = () => { close(); resolve(null); };
+    const onOk = () => {
+      const ins = [...box.querySelectorAll(".vnin")];
+      const names = ins.map(i => i.value.trim().replace(/[\\/:*?"<>|]/g, ""));
+      if (names.some(n => !n)) { $("vn-msg").textContent = "⚠ 업체명을 모두 입력해주세요."; return; }
+      const dup = names.find((n, i) => names.indexOf(n) !== i);
+      if (dup) { $("vn-msg").textContent = `⚠ '${dup}' 이(가) 중복됩니다. 서로 다르게 적어주세요.`; return; }
+      // 기존에 있는 이름이면 그 양식을 갱신하게 되므로 확인
+      const clash = names.find((n, i) => {
+        const ex = existing.find(f => f.name === n);
+        return ex && ex.file !== list[i].fileName;
+      });
+      if (clash && !confirm(`'${clash}' 업체 양식이 이미 있습니다.\n새 파일로 바꿀까요?`)) return;
+      close();
+      resolve(list.map((it, i) => Object.assign({}, it, { name: names[i] })));
+    };
+    const onBg = e => { if (e.target === $("vnmodal")) onCancel(); };
+    function cleanup() {
+      $("vn-cancel").onclick = null; $("vn-ok").onclick = null; $("vnmodal").onclick = null;
+    }
+    $("vn-cancel").onclick = onCancel;
+    $("vn-ok").onclick = onOk;
+    $("vnmodal").onclick = onBg;
+  });
+}
+
+/* 업체 양식 저장. list = [{fileName, buf, name}]
+   name 이 없으면 파일명에서 자동으로 짓되, 이름이 겹치면 덮어쓰지 않고 다른 후보로 피한다. */
 async function saveForms(list) {
   const existing = await DB.listForms();
   const byName = new Map(existing.map(f => [f.name, f]));
   let added = 0, updated = 0;
   const names = [];
   for (const it of list) {
-    const cands = candidateNames(it.fileName);
-    const same = existing.find(f => f.file === it.fileName);
-    let name;
-    if (same) {
-      name = same.name;                   // 같은 파일을 다시 올림 = 양식 갱신
-    } else {
-      name = cands[0];
-      let i = 1;
-      while (byName.has(name) && i <= 50) {          // 다른 파일이 그 이름을 쓰는 중
-        name = (i < cands.length) ? cands[i] : `${cands[0]} (${i - cands.length + 2})`;
-        i++;
+    let name = it.name;
+    if (!name) {
+      const cands = candidateNames(it.fileName);
+      const same = existing.find(f => f.file === it.fileName);
+      if (same) name = same.name;
+      else {
+        name = cands[0];
+        let i = 1;
+        while (byName.has(name) && i <= 50) {
+          name = (i < cands.length) ? cands[i] : `${cands[0]} (${i - cands.length + 2})`;
+          i++;
+        }
       }
     }
     if (byName.has(name)) updated++; else added++;
@@ -721,7 +790,9 @@ async function addForms(files) {
     list.push({ fileName: f.name, buf: await readFile(f) });
   }
   if (!list.length) return;
-  const r = await saveForms(list);
+  const named = await askVendorNames(list);
+  if (!named) return;                      // 사용자가 취소
+  const r = await saveForms(named);
   await loadForms();
   msg("msg-o", "ok", `✔ 업체 양식 ${r.added + r.updated}개 저장 — ${r.names.join(", ")}`
     + (r.updated ? ` (${r.updated}개는 기존 양식 갱신)` : "")
@@ -965,11 +1036,23 @@ function showResultO(results, skipped, verify) {
         value="${esc(S.vendorEmails[r.supplier] || "")}" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
         <button class="dlbtn send">메일 보내기</button></div>
       <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)">여러 명에게 보내려면 쉼표로 구분 (담당자, 대표 등)</span>
-        <button class="minibtn share">📤 카톡·공유</button><button class="minibtn pvbtn">미리보기</button><button class="minibtn dl">엑셀만 받기</button></div>`;
+        <button class="minibtn share">📤 카톡·공유</button><button class="minibtn pvbtn">미리보기</button><button class="minibtn dl">엑셀만 받기</button></div>
+      <div class="setrow" style="margin-top:4px"><span style="flex:1;font-size:11px;color:var(--faint)">저장·발송될 파일명입니다</span>
+        <button class="minibtn fn">✏️ 파일명 수정</button></div>`;
     const inp = el.querySelector("input");
     fillRecipients(el.querySelector(".cands"), inp, {
       saved: S.vendorEmails[r.supplier], history: S.vendorSent[r.supplier],
       domains: parseDomains(S.vendorDomains[r.supplier]), query: r.supplier });
+    // 파일명은 자동으로 지어지지만, 원하면 여기서 바꿀 수 있다 (저장·메일 첨부에 모두 반영)
+    el.querySelector(".fn").onclick = () => {
+      const cur = r.filename.replace(/\.xlsx$/i, "");
+      const v = prompt("저장·발송될 파일명을 바꿉니다.\n(확장자 .xlsx 는 자동으로 붙습니다)", cur);
+      if (v === null) return;
+      const t = v.trim().replace(/[\\/:*?"<>|]/g, "").replace(/\.xlsx$/i, "");
+      if (!t) return;
+      r.filename = t + ".xlsx";
+      el.querySelector(".vinfo span").textContent = r.filename;
+    };
     el.querySelector(".pvbtn").onclick = () => openPreview(r.buf, r.supplier + " 발주서");
     el.querySelector(".dl").onclick = () => download(r.buf, r.filename);
     el.querySelector(".share").onclick = () => shareFile(r.buf, r.filename);

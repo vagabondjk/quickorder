@@ -144,8 +144,10 @@
   .vtop b{flex:1;min-width:0;font-size:12.5px;font-weight:800;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .vtop .box{width:17px;height:17px;border-radius:5px}
-  .vfile{display:block;font-size:10px;color:var(--muted);margin:3px 0 6px;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* 파일명은 두 줄까지 보여준다 — 업체를 파일명으로도 구분할 수 있어야 함 */
+  .vfile{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+    font-size:10px;line-height:1.35;color:var(--muted);margin:3px 0 6px;
+    overflow:hidden;word-break:break-all}
   .vbtns{display:flex;gap:4px}
   .vbtns button{flex:1;min-width:0;font-size:10px;font-weight:700;font-family:inherit;
     padding:5px 2px;border-radius:6px;border:1px solid var(--line);
@@ -231,6 +233,12 @@
   .flt-add input{flex:1;min-width:0;border:1.5px solid var(--line);background:var(--card);color:var(--ink);
     border-radius:9px;padding:10px;font-family:inherit;font-size:13px;outline:none}
   .flt-add input:focus{border-color:var(--brand)}
+
+  /* 업체명 입력 모달 */
+  .vnfile{font-size:11px;color:var(--muted);word-break:break-all;margin-bottom:7px;line-height:1.4}
+  .vnin{width:100%;box-sizing:border-box;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);
+    border-radius:10px;padding:12px;font-family:inherit;font-size:15px;font-weight:700;outline:none}
+  .vnin:focus{border-color:var(--brand);background:var(--card)}
 
   /* 신규 브랜드 안내 — 놓치면 발주가 통째로 빠지므로 크게 */
   /* 배경은 다크/라이트 공통으로 진한 빨강 — 흰 글씨 대비 확보 */
@@ -645,6 +653,21 @@
     <div class="row">
       <button class="btn-cancel" id="csmail-cancel">취소</button>
       <button class="btn-go" id="csmail-ok" disabled>선택 항목 가져오기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 업체명 입력 모달 (업체 양식을 추가할 때) -->
+<div class="modal" id="vnmodal">
+  <div class="sheet">
+    <div class="grip"></div>
+    <h3 id="vn-title">업체명 정하기</h3>
+    <p class="sub2">발주서 파일명과 브랜드 배정에 쓰이는 이름입니다. 파일명에서 자동으로 채웠으니 다르면 고쳐주세요.</p>
+    <div class="mlist" id="vn-list"></div>
+    <div id="vn-msg" style="font-size:12px;color:var(--danger);margin-bottom:8px"></div>
+    <div class="row">
+      <button class="btn-cancel" id="vn-cancel">취소</button>
+      <button class="btn-go" id="vn-ok">저장</button>
     </div>
   </div>
 </div>
