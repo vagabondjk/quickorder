@@ -242,6 +242,10 @@ function isDateHeader(h) {
 function hasDateFormat(numFmt) {
   return typeof numFmt === "string" && /[ymdhs]/.test(numFmt.replace(/\[[^\]]*\]|"[^"]*"/g, ""));
 }
+/* 시간까지 보여주는 서식인가 — 업체 양식이 "yyyy-mm-dd hh:mm" 이면 00:00 이 붙어 보이므로 날짜만으로 바꿔준다 */
+function hasTimeFormat(numFmt) {
+  return typeof numFmt === "string" && /[hs]/.test(numFmt.replace(/\[[^\]]*\]|"[^"]*"/g, ""));
+}
 function findDateColumns(ws, headerRow) {
   const out = [], d = dims(ws);
   for (let c = 1; c <= d.cols; c++) {
@@ -404,14 +408,17 @@ function convert(orderWb, tplWb, opts) {
         // (안 걸면 엑셀·구글시트에서 46231.6 같은 일련번호로 보인다)
         const dv = dateCols.has(tcol) && !isBlank(out) ? toDateValue(out) : null;
         if (dv) {
-          cell.value = dv;
-          if (!hasDateFormat(cell.numFmt)) {  // 업체 양식에 이미 날짜 서식이 있으면 그대로 둔다
-            const fmt = (dv.getHours() || dv.getMinutes() || dv.getSeconds()) ? "yyyy-mm-dd hh:mm" : "yyyy-mm-dd";
+          // 시간은 뺀다 — 업체에 나가는 발주서에는 날짜만 있으면 된다.
+          // 값 자체를 자정으로 맞춰야 서식을 바꿔도 시간이 되살아나지 않는다.
+          cell.value = new Date(dv.getFullYear(), dv.getMonth(), dv.getDate());
+          // 날짜 서식이 없거나, 시간까지 보여주는 서식이면 날짜만 나오게 바꾼다.
+          // (업체 양식이 "yyyy/mm/dd" 처럼 날짜만이면 그대로 존중)
+          if (!hasDateFormat(cell.numFmt) || hasTimeFormat(cell.numFmt)) {
             // ★ cell.numFmt = ... 로 넣으면 안 된다.
             //   업체 양식은 표 전체가 같은 스타일을 '공유'하는 경우가 많아서,
             //   한 셀의 numFmt 를 바꾸면 공유 객체가 통째로 바뀌어 수량·금액까지 날짜로 보인다.
             //   반드시 새 스타일 객체를 만들어 이 셀에만 건다.
-            cell.style = Object.assign({}, cell.style, { numFmt: fmt });
+            cell.style = Object.assign({}, cell.style, { numFmt: "yyyy-mm-dd" });
           }
         } else {
           cell.value = (out === undefined ? null : out);
@@ -721,7 +728,7 @@ function fmtDate(ymd) { return ymd ? `${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.
 return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   cv, getV, isBlank, dims, canonField, findHeaderRow, buildOrderFieldMap, phoneColumns,
   pickOrderSheet, findBrandColumn, listBrands, extractDate, isCollectHeader,
-  toDateValue, isDateHeader, hasDateFormat,
+  toDateValue, isDateHeader, hasDateFormat, hasTimeFormat,
   findDateColumns, defaultDateColumn, orderDateInfo, formatPhone, stripHyphen,
   valueTransformForHeader, nameFromFilename, normKey,
   convert, collectInvoices, countOrders, preview, previewAny, loadWorkbook, saveWorkbook, todayStr, fmtDate };
