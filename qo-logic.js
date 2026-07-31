@@ -15,6 +15,9 @@ const ORDER_FIELDS = [
   ["OPTION",    ["옵션","단품명","단품"], ["코드"]],
   ["QTY",       ["수량"], []],
   ["AMOUNT",    ["결제금액","주문금액","판매금액","공급금액","금액"], ["할인"]],
+  // 수집일자 — 업체 양식에 이 칸이 있을 때만 채워진다(없으면 아무 일도 안 함).
+  // 주문일시보다 먼저 둬서 '주문수집일자' 열을 주문일시가 채가지 않게 한다.
+  ["COLLECT_DATE",["주문수집일자","주문수집일","수집일자","수집일"], []],
   ["ORDER_DATE",["주문일시","주문일자","주문일"], ["지시","예정","예약","희망","완료","출하"]],
   ["PAY_DATE",  ["결제일시","결제일자","결제일"], []],
   ["RECIPIENT", ["수령인명","수령인","수취인","받는분","받는사람","이름"], ["전화","연락처","주소","코드","번호"]],
@@ -33,7 +36,7 @@ const BRAND_HEADER = "브랜드";
 const DATE_COL_KEYWORDS = ["수집일","주문일","일자","일시"];
 const COLLECT_KEYWORDS = ["주문수집일","수집일자","수집일"];
 const FIELD_KR = {ORDER_NO:"주문번호",PRODUCT:"상품",OPTION:"옵션",QTY:"수량",AMOUNT:"금액",
-  ORDER_DATE:"주문일시",PAY_DATE:"결제일시",RECIPIENT:"수령인",RECIPIENT_PHONE:"연락처1",
+  COLLECT_DATE:"주문수집일자",ORDER_DATE:"주문일시",PAY_DATE:"결제일시",RECIPIENT:"수령인",RECIPIENT_PHONE:"연락처1",
   RECIPIENT_PHONE2:"연락처2",ADDRESS:"주소",MESSAGE:"배송메시지",ZIP:"우편번호",ORDERER:"주문자"};
 
 /* ---------------- 셀 값 읽기 (ExcelJS 값 형태 정규화) ---------------- */
