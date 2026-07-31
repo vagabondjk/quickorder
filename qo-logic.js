@@ -206,6 +206,42 @@ function isCollectHeader(h) {
   const s = String(h).replace(/\s/g, "");
   return COLLECT_KEYWORDS.some(k => s.includes(k));
 }
+
+/* 어떤 형태로 들어오든 진짜 Date 로 바꾼다 (못 바꾸면 null)
+     · Date         → 그대로
+     · 45000.604    → 엑셀 일련번호 (날짜 서식이 안 걸린 채 숫자로 들어온 경우)
+     · "2026-07-28 14:30:00" / "2026.07.28" / "20260728" → 파싱
+   ※ 일련번호는 시분초까지 직접 계산해 '로컬' Date 로 만든다.
+      UTC 로 만들면 시간대 때문에 날짜가 하루 밀릴 수 있다. */
+function toDateValue(v) {
+  if (v === null || v === undefined || v === "") return null;
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+  if (typeof v === "number") {
+    if (!isFinite(v) || v < 1 || v > 60000) return null;   // 엑셀에서 날짜로 볼 수 있는 범위 밖
+    const days = Math.floor(v);
+    const secs = Math.round((v - days) * 86400);
+    const d = new Date(1899, 11, 30 + days);               // 엑셀 1900 체계(1900 윤년 버그 포함)
+    d.setHours(Math.floor(secs / 3600), Math.floor(secs / 60) % 60, secs % 60, 0);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const g = String(v).replace(/\D/g, "");
+  if (g.length < 8) return null;
+  const y = +g.slice(0, 4), mo = +g.slice(4, 6), da = +g.slice(6, 8);
+  if (y < 1900 || y > 2200 || mo < 1 || mo > 12 || da < 1 || da > 31) return null;
+  const d = new Date(y, mo - 1, da, +(g.slice(8, 10) || 0), +(g.slice(10, 12) || 0), +(g.slice(12, 14) || 0));
+  return isNaN(d.getTime()) ? null : d;
+}
+/* 업체 양식의 이 열이 날짜 열인가 (헤더로 판단) */
+function isDateHeader(h) {
+  if (typeof h !== "string") return false;
+  const s = normHeader(h);
+  return !!s && DATE_COL_KEYWORDS.some(k => s.includes(k));
+}
+/* 이미 날짜 표시형식이 걸려 있는 셀인가 — 걸려 있으면 업체 양식 서식을 존중해 건드리지 않는다.
+   "General"·"#,##0"·"@" 등에는 y/m/d/h/s 가 없으므로 걸러진다. */
+function hasDateFormat(numFmt) {
+  return typeof numFmt === "string" && /[ymdhs]/.test(numFmt.replace(/\[[^\]]*\]|"[^"]*"/g, ""));
+}
 function findDateColumns(ws, headerRow) {
   const out = [], d = dims(ws);
   for (let c = 1; c <= d.cols; c++) {
@@ -336,10 +372,13 @@ function convert(orderWb, tplWb, opts) {
 
   // 대상 열 값 후처리
   const colTransform = {};
+  const dateCols = new Set();          // 날짜로 기입해야 하는 대상 열
   const td = dims(tws);
   for (let c = 1; c <= td.cols; c++) {
-    const tf = valueTransformForHeader(getV(tws, tgtHeaderRow, c));
+    const th = getV(tws, tgtHeaderRow, c);
+    const tf = valueTransformForHeader(th);
     if (tf) colTransform[c] = tf;
+    if (isDateHeader(th)) dateCols.add(c);
   }
 
   const sd = dims(sws);
@@ -360,7 +399,23 @@ function convert(orderWb, tplWb, opts) {
         let out = v;
         const tf = colTransform[tcol];
         if (tf && !isBlank(out)) out = tf(out);
-        tws.getRow(outRow).getCell(tcol).value = (out === undefined ? null : out);
+        const cell = tws.getRow(outRow).getCell(tcol);
+        // 날짜 열은 '진짜 날짜'로 넣고 표시형식까지 걸어준다.
+        // (안 걸면 엑셀·구글시트에서 46231.6 같은 일련번호로 보인다)
+        const dv = dateCols.has(tcol) && !isBlank(out) ? toDateValue(out) : null;
+        if (dv) {
+          cell.value = dv;
+          if (!hasDateFormat(cell.numFmt)) {  // 업체 양식에 이미 날짜 서식이 있으면 그대로 둔다
+            const fmt = (dv.getHours() || dv.getMinutes() || dv.getSeconds()) ? "yyyy-mm-dd hh:mm" : "yyyy-mm-dd";
+            // ★ cell.numFmt = ... 로 넣으면 안 된다.
+            //   업체 양식은 표 전체가 같은 스타일을 '공유'하는 경우가 많아서,
+            //   한 셀의 numFmt 를 바꾸면 공유 객체가 통째로 바뀌어 수량·금액까지 날짜로 보인다.
+            //   반드시 새 스타일 객체를 만들어 이 셀에만 건다.
+            cell.style = Object.assign({}, cell.style, { numFmt: fmt });
+          }
+        } else {
+          cell.value = (out === undefined ? null : out);
+        }
       }
     }
     outRow++; count++;
@@ -446,6 +501,18 @@ function collectInvoices(sabangWb, replies, opts) {
 
   // 3) 가장 많이 매칭되는 시트 선택
   const normInv = v => String(v == null ? "" : v).replace(/[^0-9a-zA-Z]/g, "").toLowerCase();
+  // 취합본에 기입할 송장번호 — 하이픈·공백 등을 빼고 숫자만 남긴다. (1234-5678 → 12345678)
+  //  · 영문이 섞인 운송장(해외 EMS 등)은 글자가 사라지면 안 되므로 구분기호만 뺀다.
+  //    (EE123-456-789KR → EE123456789KR)
+  //  · 뺄 게 없으면 원본 값을 그대로 반환 → 셀 형식(숫자/텍스트)이 바뀌지 않는다.
+  //  · 실제로 뺀 경우에만 문자열로 넣는다 → 앞자리 0이 사라지지 않는다.
+  const cleanInv = v => {
+    const s = String(v == null ? "" : v).trim();
+    if (!s) return v;
+    const out = /[A-Za-z]/.test(s) ? s.replace(/[\s\-.·]/g, "") : s.replace(/\D/g, "");
+    if (!out) return v;          // 숫자가 하나도 없는 값 → 원본 유지
+    return out === s ? v : out;
+  };
   const SEP = "";   // 키 필드 구분자(연결 시 경계 뭉개짐 방지)
   function matchSheet(c) {
     const { ws, hr, fm } = c, d = dims(ws);
@@ -500,7 +567,7 @@ function collectInvoices(sabangWb, replies, opts) {
         used.add(pick.row);
         if (!fills[pick.row]) fills[pick.row] = {};
         if (!isBlank(row.car)) fills[pick.row][fm.CARRIER] = row.car;
-        if (!isBlank(row.inv)) fills[pick.row][fm.INVOICE] = row.inv;
+        if (!isBlank(row.inv)) fills[pick.row][fm.INVOICE] = cleanInv(row.inv);
         vf++;
       }
       total += vf; already += dup;
@@ -654,6 +721,7 @@ function fmtDate(ymd) { return ymd ? `${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.
 return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   cv, getV, isBlank, dims, canonField, findHeaderRow, buildOrderFieldMap, phoneColumns,
   pickOrderSheet, findBrandColumn, listBrands, extractDate, isCollectHeader,
+  toDateValue, isDateHeader, hasDateFormat,
   findDateColumns, defaultDateColumn, orderDateInfo, formatPhone, stripHyphen,
   valueTransformForHeader, nameFromFilename, normKey,
   convert, collectInvoices, countOrders, preview, previewAny, loadWorkbook, saveWorkbook, todayStr, fmtDate };
