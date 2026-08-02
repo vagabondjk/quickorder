@@ -13,7 +13,10 @@
 
 const ST = (() => {
   const FIELDS = [
-    { k: "date", n: "정산일", kw: ["수집일자", "주문수집일자", "정산일", "정산기준일", "결제일", "주문일", "구매확정일", "일자", "날짜"] },
+    // 정산 기준일 = 주문일. 행사 공급가 적용기간도 이 날짜로 따진다.
+    { k: "date", n: "정산일(주문일)", kw: ["주문일시", "주문일자", "주문일", "정산일", "정산기준일", "결제일", "구매확정일", "수집일자", "일자", "날짜"] },
+    // ★ 송장이 있어야 정산에 포함한다 (출고된 건만). 이 열을 지정하면 빈 줄은 정산에서 빠진다.
+    { k: "invoice", n: "송장번호", kw: ["운송장번호", "운송장", "송장번호", "송장"] },
     // '쇼핑몰명'을 앞에 둔다 — 뒤에 두면 '판매가(쇼핑몰)' 열이 먼저 걸려 쇼핑몰로 잡힌다
     { k: "mall", n: "쇼핑몰", kw: ["쇼핑몰명", "판매처", "마켓명", "채널명", "쇼핑몰", "마켓", "채널", "사이트", "몰"] },
     { k: "orderNo", n: "주문번호", kw: ["주문번호", "주문no", "오더번호", "결제번호", "order"] },
@@ -27,8 +30,8 @@ const ST = (() => {
     //   '판매가(쇼핑몰)'은 몰이 소비자에게 파는 값이라 우리 매출이 아니다. 헷갈리지 말 것.
     { k: "unitPrice", n: `${(typeof CONFIG !== "undefined" && CONFIG.company) || "우리"} 매출(개당)`,
       kw: ["원가", "공급가(쇼핑몰)", "쇼핑몰공급가", "공급단가", "공급가", "판매단가"] },
-    // 줄 합계로 들어오는 몰 정산 파일용. 위 단가가 없을 때 쓴다.
-    { k: "amount", n: "매출(줄 합계)", kw: ["정산금액", "정산예정금액", "지급액", "정산대금", "실정산액", "정산", "금액"] },
+    // 몰이 소비자에게 판 값(결제금액). 위 '매출(개당)'이 없을 때만 매출 대신 쓴다.
+    { k: "amount", n: "쇼핑몰 매출", kw: ["정산금액", "정산예정금액", "지급액", "정산대금", "실정산액", "정산", "금액"] },
   ];
 
   /* 업체별 공급가표 — 업체에 '지급할' 상품별 단가. 통합 파일엔 없어서 따로 올린다. */
@@ -49,7 +52,6 @@ const ST = (() => {
   ];
 
   let files = [];        // [{name, cols, rows, map, sig}]
-  let rules = { def: 30, vendors: {} };
   let maps = {};
   let result = null;     // 계산 결과
   let useCs = true;
@@ -58,6 +60,7 @@ const ST = (() => {
   let pbook = { items: [], errors: [] };
   let aliases = {};      // 연결표 — {주문키: 공급가표키}. 이름이 달라 자동으로 못 붙는 상품을 이어준다
   let brandFix = {};     // 브랜드 → 업체 수동 배정 (공급가표 자동 배정보다 우선). 한 번 정하면 기억한다
+  let extraVendors = []; // 공급가표에 없어도 직접 만든 업체
   let names = {};        // 업체 → 저장·발송할 파일명 (수정하면 그대로 씀)
 
   const s = v => (v === null || v === undefined) ? "" : String(v).trim();
@@ -68,17 +71,14 @@ const ST = (() => {
   const won = n => (Math.round(n || 0)).toLocaleString("ko-KR") + "원";
 
   async function load() {
-    rules = await DB.get("settleRules", { def: 30, vendors: {} }) || { def: 30, vendors: {} };
-    if (!rules.vendors) rules.vendors = {};
     maps = await DB.get("settleMaps", {}) || {};
-    $("st-default").value = rules.def;
+    extraVendors = await DB.get("settleVendors", []) || [];
     pbRaw = await DB.get("priceBook", null);
     aliases = await DB.get("priceAliases", {}) || {};
     brandFix = await DB.get("settleBrandVendor", {}) || {};
     rebuildBook();
   }
   async function saveBrandFix() { await DB.set("settleBrandVendor", brandFix); }
-  async function saveRules() { await DB.set("settleRules", rules); }
   function rebuildBook() {
     if (!pbRaw || !pbRaw.sheets) { pbook = QO.buildPriceBook([]); return; }
     const off = pbRaw.off || [];
@@ -133,7 +133,7 @@ const ST = (() => {
       rows: p.rows.map(r => r.slice()),
     })), off: off.slice() };
     await savePriceBook();
-    drawPriceBook(); drawBrands(); drawRules(); refresh();
+    drawPriceBook(); drawBrands(); refresh();
     if (result) calc();
     const bad = pbook.errors.length;
     msg("msg-pb", bad ? "warn" : "ok",
@@ -190,14 +190,14 @@ const ST = (() => {
       if (!cb.checked) cur.push(nm);
       pbRaw.off = cur;
       await savePriceBook();
-      drawPriceBook(); drawBrands(); drawRules();
+      drawPriceBook(); drawBrands();
       if (result) calc();
     });
     const cl = $("pb-clear");
     if (cl) cl.onclick = async () => {
       if (!confirm("공급가표를 지울까요?\n지우면 업체 지급액은 마진율 방식으로 계산됩니다.")) return;
       pbRaw = null; await DB.set("priceBook", null);
-      rebuildBook(); drawPriceBook(); drawBrands(); drawRules(); if (result) calc();
+      rebuildBook(); drawPriceBook(); drawBrands(); if (result) calc();
       msg("msg-pb", "ok", "공급가표를 지웠어요.");
     };
   }
@@ -237,7 +237,7 @@ const ST = (() => {
       maps[sig] = m; await DB.set("settleMaps", maps);
       files = files.filter(f => f.name !== name);
       files.push({ name, cols: pv.columns, rows: pv.rows, map: m, sig });
-      drawFiles(); drawBrands(); drawRules(); refresh();
+      drawFiles(); drawBrands(); refresh();
       msg("msg-s", "ok", `✔ ${name} — ${pv.rows.length}행 불러왔어요.`);
     };
     if (saved && MAP.ok(auto, FIELDS)) { await put(auto); return; }
@@ -256,7 +256,7 @@ const ST = (() => {
         <span class="vfile">${f.rows.length}행</span></div>`).join("");
     box.querySelectorAll(".vdel").forEach(b => b.onclick = () => {
       files.splice(Number(b.dataset.i), 1);
-      drawFiles(); drawBrands(); drawRules(); refresh();
+      drawFiles(); drawBrands(); refresh();
     });
   }
 
@@ -292,6 +292,7 @@ const ST = (() => {
           unitPrice: unitPrice || null,
           amount,
           vendor, brand,
+          invoice: f.map.invoice === undefined ? null : s(g(r, "invoice")),
         });
       }
     }
@@ -327,103 +328,101 @@ const ST = (() => {
   /* =================================================================
      업체별 브랜드 선택 — 발주 탭과 같은 방식. 바꾸면 기억한다.
      ================================================================= */
+  /* 업체 목록 — 공급가표의 업체명 + 직접 추가한 업체 + 이미 배정에 쓰인 이름.
+     ※ 브랜드를 업체로 쓰지 않는다. 업체(플라스머·디에스피)가 위, 브랜드가 그 안이다. */
+  function vendorNames() {
+    const out = [];
+    const add = v => { v = String(v || "").trim(); if (v && out.indexOf(v) < 0) out.push(v); };
+    pbook.items.forEach(it => add(it.vendor));
+    Object.keys(brandFix).forEach(b => add(brandFix[b]));
+    extraVendors.forEach(add);
+    return out.sort();
+  }
+  /* 브랜드가 어느 업체 것인지 — 직접 지정 > 공급가표 */
+  function ownerOf(brand) {
+    if (brandFix[brand]) return brandFix[brand];
+    const bv = brandVendorMap();
+    return bv[QO.normPriceText(brand)] || "";
+  }
+
   function drawBrands() {
     const card = $("st-card-brand"), box = $("st-vbrands");
     if (!card) return;
     const rows = allRows();
     if (!rows.length) { card.style.display = "none"; box.innerHTML = ""; return; }
-    resolveVendors(rows);
-    const brands = [], byBrand = {};
+    card.style.display = "block";
+
+    const brands = [], cnt = {};
     rows.forEach(r => {
       const b = r.brand || "(브랜드 없음)";
       if (brands.indexOf(b) < 0) brands.push(b);
-      (byBrand[b] = byBrand[b] || { n: 0, vendor: vOf(r) }).n++;
+      cnt[b] = (cnt[b] || 0) + 1;
     });
-    const vendors = [];
-    brands.forEach(b => { const v = byBrand[b].vendor; if (vendors.indexOf(v) < 0) vendors.push(v); });
-    if (!vendors.length) { card.style.display = "none"; return; }
-    card.style.display = "block";
-    brands.sort(); vendors.sort();
+    brands.sort();
+    const vendors = vendorNames();
+    const addBtn = `<button class="minibtn" id="st-add-vendor" style="margin-top:8px">＋ 업체 추가</button>`;
+
+    if (!vendors.length) {
+      box.innerHTML = `<div class="pvfoot">공급가표를 올리면 업체가 자동으로 잡힙니다.
+        먼저 업체를 직접 만들어도 됩니다.</div>${addBtn}`;
+      $("st-brand-foot").textContent = `브랜드 ${brands.length}개: ` + brands.join(", ");
+      bindAddVendor();
+      return;
+    }
 
     box.innerHTML = vendors.map(v => {
       const chips = brands.map(b => {
-        const mine = byBrand[b].vendor === v;
+        const owner = ownerOf(b);
+        const mine = owner === v;
         const fixed = brandFix[b] === v;
         if (mine) return `<span class="brow on" data-b="${esc(b)}" data-v="${esc(v)}">` +
-          `<span class="box">✓</span>${esc(b)} <small>· ${byBrand[b].n}건${fixed ? " · 직접 지정" : ""}</small></span>`;
+          `<span class="box">✓</span>${esc(b)} <small>· ${cnt[b]}건${fixed ? " · 직접" : ""}</small></span>`;
+        if (owner) return `<span class="brow taken" data-b="${esc(b)}" data-v="${esc(v)}" title="${esc(owner)} 것">` +
+          `${esc(b)} <small>· ${esc(owner)}</small></span>`;
         return `<span class="brow" data-b="${esc(b)}" data-v="${esc(v)}">` +
-          `<span class="box"></span>${esc(b)} <small>· ${esc(byBrand[b].vendor)}</small></span>`;
+          `<span class="box"></span>${esc(b)} <small>· ${cnt[b]}건</small></span>`;
       }).join("");
-      const cnt = brands.filter(b => byBrand[b].vendor === v).length;
-      return `<div class="vendorbox"><div class="vh">🏭 ${esc(v)}<span class="cnt">${cnt}개 브랜드</span></div>
+      const mineCnt = brands.filter(b => ownerOf(b) === v).length;
+      const del = extraVendors.indexOf(v) >= 0 ? `<button class="vdel" data-v="${esc(v)}">✕</button>` : "";
+      return `<div class="vendorbox"><div class="vh">🏭 ${esc(v)}<span class="cnt">브랜드 ${mineCnt}개</span>${del}</div>
         <div class="brands">${chips}</div></div>`;
-    }).join("");
+    }).join("") + addBtn;
 
     box.querySelectorAll(".brow").forEach(el => el.onclick = async () => {
       const b = el.dataset.b, v = el.dataset.v;
-      if (brandFix[b] === v) delete brandFix[b];      // 다시 누르면 자동 배정으로 되돌림
-      else brandFix[b] = v;
+      if (brandFix[b] === v) delete brandFix[b];   // 다시 누르면 자동 배정으로
+      else brandFix[b] = v;                        // 남의 것이어도 눌러서 가져올 수 있다
       await saveBrandFix();
-      drawBrands(); drawRules(); if (result) calc();
+      drawBrands(); if (result) calc();
     });
-    const fixed = Object.keys(brandFix).length;
-    $("st-brand-foot").textContent = fixed
-      ? `직접 지정한 브랜드 ${fixed}개 — 한 번 더 누르면 자동 배정으로 돌아갑니다.`
+    box.querySelectorAll(".vdel").forEach(el => el.onclick = async e => {
+      e.stopPropagation();
+      const v = el.dataset.v;
+      if (!confirm(`업체 '${v}' 를 목록에서 지울까요?\n(배정해둔 브랜드는 자동 배정으로 돌아갑니다)`)) return;
+      extraVendors = extraVendors.filter(x => x !== v);
+      Object.keys(brandFix).forEach(b => { if (brandFix[b] === v) delete brandFix[b]; });
+      await DB.set("settleVendors", extraVendors); await saveBrandFix();
+      drawBrands(); if (result) calc();
+    });
+    bindAddVendor();
+
+    const none = brands.filter(b => !ownerOf(b));
+    $("st-brand-foot").textContent = none.length
+      ? `아직 업체가 정해지지 않은 브랜드: ${none.join(", ")} — 해당 업체 칸에서 눌러 배정하세요.`
       : "브랜드를 눌러 다른 업체로 옮길 수 있습니다. 옮기면 기억합니다.";
   }
-  function vendorList() {
-    const rows = allRows();
-    resolveVendors(rows);
-    const set = new Set();
-    rows.forEach(r => set.add(vOf(r)));
-    return [...set].sort();
-  }
-  function ruleOf(v) {
-    const r = rules.vendors[v] || {};
-    const defMode = hasBook() ? "book" : "rate";
-    return { mode: r.mode || defMode, rate: r.rate === undefined ? rules.def : r.rate, unit: r.unit || 0 };
-  }
-  function drawRules() {
-    const box = $("st-rules"), vs = vendorList();
-    if (!vs.length) {
-      box.innerHTML = "";
-      $("st-rule-foot").textContent = "정산 파일을 올리면 업체 목록이 자동으로 나옵니다.";
-      return;
-    }
-    $("st-rule-foot").textContent = hasBook()
-      ? "‘공급가표’는 올려둔 표에서 상품별 단가를 찾아 수량 × 단가로 계산합니다."
-      : "‘공급단가’를 고르면 수량 × 단가로 지급액을 계산합니다.";
-    box.innerHTML = vs.map(v => {
-      const r = ruleOf(v);
-      const bookOpt = hasBook()
-        ? `<option value="book"${r.mode === "book" ? " selected" : ""}>공급가표</option>` : "";
-      const showVal = r.mode !== "book";
-      return `<div class="rulerow" data-v="${esc(v)}">
-        <b>🏭 ${esc(v)}</b>
-        <select class="mode">
-          ${bookOpt}
-          <option value="rate"${r.mode === "rate" ? " selected" : ""}>마진율%</option>
-          <option value="unit"${r.mode === "unit" ? " selected" : ""}>공급단가</option>
-        </select>
-        <input class="val" type="number" inputmode="decimal" step="${r.mode === "rate" ? "0.1" : "10"}"
-               value="${r.mode === "rate" ? r.rate : r.unit}"${showVal ? "" : ' style="visibility:hidden"'}>
-      </div>`;
-    }).join("");
-    box.querySelectorAll(".rulerow").forEach(row => {
-      const v = row.dataset.v;
-      const mode = row.querySelector(".mode"), val = row.querySelector(".val");
-      const apply = async () => {
-        const cur = rules.vendors[v] || {};
-        cur.mode = mode.value;
-        if (mode.value === "rate") cur.rate = num(val.value);
-        else if (mode.value === "unit") cur.unit = num(val.value);
-        rules.vendors[v] = cur;
-        await saveRules();
-        if (result) calc();
-      };
-      mode.onchange = async () => { await apply(); drawRules(); };
-      val.onchange = apply;
-    });
+  function bindAddVendor() {
+    const b = $("st-add-vendor");
+    if (!b) return;
+    b.onclick = async () => {
+      const v = prompt("업체명을 입력하세요.\n(예: 플라스머, 디에스피)");
+      if (v === null) return;
+      const t = v.trim();
+      if (!t || extraVendors.indexOf(t) >= 0) return;
+      extraVendors.push(t);
+      await DB.set("settleVendors", extraVendors);
+      drawBrands();
+    };
   }
 
   /* =================================================================
@@ -452,31 +451,30 @@ const ST = (() => {
     const ded = csDeduction();
     const byVendor = {};
     const unpriced = [];       // 공급가표에서 단가를 못 찾은 줄
-    for (const r of rows) {
+    // ★ 송장이 없으면 아직 출고 전이라 이번 정산에서 뺀다 (송장 열을 지정한 경우에만).
+    //   조용히 빼면 안 되므로 따로 세어 검산과 화면에 띄운다.
+    const hasInvCol = files.some(f => f.map.invoice !== undefined);
+    const unshipped = hasInvCol ? rows.filter(r => !String(r.invoice || "").trim()) : [];
+    const shipped = hasInvCol ? rows.filter(r => String(r.invoice || "").trim()) : rows;
+    // 지급액은 언제나 공급가표 기준이다 — 공급단가 × 수량 + 배송비.
+    for (const r of shipped) {
       const v = vOf(r);
-      const rule = ruleOf(v);
-      r.mode = rule.mode;
+      r.mode = "book";
       r.unitCost = null; r.priced = true; r.why = ""; r.how = "";
       r.ship = 0; r.shipMode = "개당"; r.shipTotal = 0;
-      if (rule.mode === "book") {
-        const m = r.m || QO.matchPrice(pbook, r, aliases);
-        if (m.ok) {
-          const it = m.item || {};
-          r.unitCost = Math.round(m.price); r.how = m.how; r.priceFrom = m.from || "";
-          r.ship = Math.round(it.ship || 0);
-          r.shipMode = it.shipMode || "개당";
-          r.shipTotal = r.ship * (r.shipMode === "건당" ? (r.qty > 0 ? 1 : 0) : r.qty);
-          // 단가는 줄마다 원 단위로 반올림한 뒤 수량을 곱한다
-          r.pay = r.unitCost * r.qty + r.shipTotal;
-        } else {
-          // 못 찾은 줄은 0 원으로 두되 따로 모아 화면에 띄운다. 조용히 넘기지 않는다.
-          r.priced = false; r.why = m.why; r.pay = 0;
-          unpriced.push(r);
-        }
-      } else if (rule.mode === "unit") {
-        r.pay = r.qty * rule.unit;
+      const m = r.m || QO.matchPrice(pbook, r, aliases);
+      if (m.ok) {
+        const it = m.item || {};
+        r.unitCost = Math.round(m.price); r.how = m.how; r.priceFrom = m.from || "";
+        r.ship = Math.round(it.ship || 0);
+        r.shipMode = it.shipMode || "개당";
+        r.shipTotal = r.ship * (r.shipMode === "건당" ? (r.qty > 0 ? 1 : 0) : r.qty);
+        // 단가는 줄마다 원 단위로 반올림한 뒤 수량을 곱한다
+        r.pay = r.unitCost * r.qty + r.shipTotal;
       } else {
-        r.pay = r.amount * (1 - rule.rate / 100);
+        // 못 찾은 줄은 0 원으로 두되 따로 모아 화면에 띄운다. 조용히 넘기지 않는다.
+        r.priced = false; r.why = m.why; r.pay = 0;
+        unpriced.push(r);
       }
       // 단가를 못 찾은 줄은 마진도 0. (지급액 0 원을 그대로 마진으로 잡으면 마진이 부풀려진다)
       r.margin = r.priced ? r.amount - r.pay : 0;
@@ -508,7 +506,8 @@ const ST = (() => {
       loose: sum("loose"),
       usedBook: vendors.some(v => v.rows.some(r => r.mode === "book")),
     };
-    result.check = reconcile(rows, vendors, unpriced);
+    result.check = reconcile(rows, shipped, unshipped, vendors, unpriced);
+    result.unshipped = unshipped;
     drawResult();
   }
 
@@ -516,7 +515,7 @@ const ST = (() => {
      검산 — 올린 주문이 하나도 빠짐없이 업체 정산에 담겼는지 확인한다.
      금액이 작다고 넘어가면 안 된다. 한 건이라도 어긋나면 빨간 상자로 띄운다.
      ================================================================= */
-  function reconcile(rows, vendors, unpriced) {
+  function reconcile(rows, shipped, unshipped, vendors, unpriced) {
     const issues = [];
     const err = (why, detail) => issues.push({ level: "error", why, detail: detail || "" });
     const warn = (why, detail) => issues.push({ level: "warn", why, detail: detail || "" });
@@ -525,6 +524,8 @@ const ST = (() => {
     const fileRows = files.reduce((s, f) => s + f.rows.length, 0);
     const inCount = rows.length;
     const inQty = rows.reduce((s, r) => s + (r.qty || 0), 0);
+    const shipCount = shipped.length;
+    const shipQty = shipped.reduce((s, r) => s + (r.qty || 0), 0);
     const outCount = vendors.reduce((s, v) => s + v.rows.length, 0);
     const outQty = vendors.reduce((s, v) => s + (v.rows.reduce((t, r) => t + (r.qty || 0), 0)), 0);
     const outPay = vendors.reduce((s, v) => s + v.pay, 0);
@@ -532,17 +533,21 @@ const ST = (() => {
     if (skipped.length)
       err(`올린 파일 ${fileRows}줄 중 ${skipped.length}줄이 정산에서 빠졌어요`,
           "상품명과 금액이 모두 비어 있는 줄입니다. 열 맞추기가 잘못됐을 수 있어요");
-    if (inCount !== outCount)
-      err(`주문 ${inCount}건 중 ${outCount}건만 업체 정산에 담겼어요`, `${inCount - outCount}건이 사라졌습니다`);
-    if (inQty !== outQty)
-      err(`주문 수량 ${inQty}개와 업체 정산 수량 ${outQty}개가 달라요`, `${inQty - outQty}개 차이`);
+    // 송장이 없는 건은 아직 출고 전이라 빼는 게 정상이다 — 오류가 아니라 안내로 남긴다
+    if (unshipped.length)
+      warn(`송장이 없어 이번 정산에서 뺀 주문이 ${unshipped.length}건 (수량 ${unshipped.reduce((s, r) => s + (r.qty || 0), 0)}) 있어요`,
+           "출고되면 다음 정산에 포함됩니다");
+    // 출고된 건은 하나도 빠짐없이 담겨야 한다
+    if (shipCount !== outCount)
+      err(`출고 ${shipCount}건 중 ${outCount}건만 업체 정산에 담겼어요`, `${shipCount - outCount}건이 사라졌습니다`);
+    if (shipQty !== outQty)
+      err(`출고 수량 ${shipQty}개와 업체 정산 수량 ${outQty}개가 달라요`, `${shipQty - outQty}개 차이`);
 
-    // ② 줄별 지급액을 다시 계산해 업체 합계와 맞는지
+    // ② 줄별 지급액을 다시 계산해 업체 합계와 맞는지 (출고분만)
     let recomputed = 0, badRows = 0;
-    rows.forEach(r => {
-      const want = r.priced === false ? 0
-        : (r.mode === "book" ? (r.unitCost || 0) * r.qty + (r.shipTotal || 0) : r.pay);
-      if (Math.round(want) !== Math.round(r.pay)) badRows++;
+    shipped.forEach(r => {
+      const want = r.priced === false ? 0 : (r.unitCost || 0) * r.qty + (r.shipTotal || 0);
+      if (Math.round(want) !== Math.round(r.pay || 0)) badRows++;
       recomputed += want;
     });
     if (badRows) err(`지급액이 단가 × 수량과 맞지 않는 줄이 ${badRows}건 있어요`);
@@ -557,19 +562,22 @@ const ST = (() => {
       err(`단가를 못 찾아 0 원으로 둔 주문이 ${unpriced.length}건 (수량 ${q}) 있어요`,
           `상품 ${Object.keys(kinds).length}종 — 아래에서 연결해주면 해결됩니다`);
     }
-    const zero = rows.filter(r => !r.qty);
+    const zero = shipped.filter(r => !r.qty);
     if (zero.length) warn(`수량이 비어 있는 주문이 ${zero.length}건 있어요`, "그 줄은 지급액이 0 원입니다");
-    const nov = rows.filter(r => vOf(r) === "(업체 미지정)");
+    const nov = shipped.filter(r => vOf(r) === "(업체 미지정)");
     if (nov.length) warn(`업체를 정하지 못한 주문이 ${nov.length}건 있어요`);
 
     return { ok: !issues.some(i => i.level === "error"), issues,
              fileRows, orderCount: inCount, orderQty: inQty,
+             shipCount, shipQty, unshipped: unshipped.length,
              settledCount: outCount, settledQty: outQty, pay: outPay };
   }
 
   function checkBoxHtml(c) {
     if (!c) return "";
-    const line = `주문 ${c.orderCount}건 · 수량 ${c.orderQty}개  →  업체 정산 ${c.settledCount}건 · 수량 ${c.settledQty}개`;
+    const line = `주문 ${c.orderCount}건 · 수량 ${c.orderQty}개`
+      + (c.unshipped ? `  →  출고 ${c.shipCount}건 · 수량 ${c.shipQty}개` : "")
+      + `  →  업체 정산 ${c.settledCount}건 · 수량 ${c.settledQty}개`;
     if (c.ok && !c.issues.length)
       return `<div style="margin-top:10px;padding:10px;border:1px solid var(--ok);border-radius:8px;background:rgba(16,150,90,.06)">
         <b style="color:var(--ok)">✔ 검산 통과 — 주문이 하나도 빠지지 않았습니다</b>
@@ -1048,15 +1056,10 @@ const ST = (() => {
         msg("msg-s", "ok", `✔ 메일에서 ${n}개 파일을 불러왔어요.`);
       } catch (e) { msg("msg-s", "err", "⚠ " + e.message); }
     };
-    $("st-default").onchange = async () => {
-      rules.def = num($("st-default").value);
-      await saveRules(); drawRules();
-      if (result) calc();
-    };
     $("run-s").onclick = async () => {
       const b = $("run-s");
       b.classList.add("loading"); b.disabled = true;
-      try { calc(); msg("msg-s", "ok", "✔ 계산했습니다. 아래에서 업체별 지급액을 확인하세요."); }
+      try { calc(); msg("msg-s", "ok", "✔ 뽑았습니다. 아래에서 업체별 정산내역을 확인하세요."); }
       catch (e) { msg("msg-s", "err", "⚠ " + e.message); }
       finally { b.classList.remove("loading"); b.disabled = false; }
     };
@@ -1073,7 +1076,7 @@ const ST = (() => {
   async function init() { bind(); await load(); drawFilterLine(); }
   async function onShow() {
     if (!drawn) { await load(); drawn = true; }
-    drawFiles(); drawPriceBook(); drawBrands(); drawRules(); refresh();
+    drawFiles(); drawPriceBook(); drawBrands(); refresh();
     if (result) drawResult();
   }
 
