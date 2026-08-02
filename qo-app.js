@@ -181,6 +181,20 @@ const SHOW_CS = false;      // ③ CS·교환반품 — 아직 실제 데이터�
 const SHOW_SETTLE = true;   // ④ 정산 — 2026-08-02 실제 7월 데이터(768행)로 검증하고 켬
 if (!SHOW_CS) { const b = $("tab-c"); if (b) b.style.display = "none"; }
 if (!SHOW_SETTLE) { const b = $("tab-s"); if (b) b.style.display = "none"; }
+/* 감춘 탭을 빼고 번호를 다시 매긴다 — 안 하면 ① ② ④ 처럼 건너뛴 채로 보인다.
+   라벨 안의 배지(<span class="dot">)는 건드리지 않도록 첫 텍스트 노드만 고친다. */
+(function renumberTabs() {
+  const NUM = ["①", "②", "③", "④", "⑤"];
+  let n = 0;
+  TABS.forEach(t => {
+    const b = $("tab-" + t);
+    if (!b || b.style.display === "none") return;
+    const node = b.firstChild;
+    if (node && node.nodeType === 3 && n < NUM.length)
+      node.nodeValue = node.nodeValue.replace(/^\s*[①②③④⑤]?\s*/, NUM[n] + " ");
+    n++;
+  });
+})();
 function switchTab(t) {
   TABS.forEach(x => {
     const p = $("pane-" + x), b = $("tab-" + x);
