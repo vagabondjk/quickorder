@@ -177,8 +177,10 @@ const TABS = ["o", "i", "c", "s"];
 TABS.forEach(t => { const b = $("tab-" + t); if (b) b.onclick = () => switchTab(t); });
 /* ③CS·교환반품 / ④정산 — 실제 데이터로 검증하기 전까지 화면에서 감춘다.
    켤 때는 아래 값을 true 로만 바꾸면 된다 (코드는 그대로 살아 있음). */
-const SHOW_CS_SETTLE = false;
-if (!SHOW_CS_SETTLE) ["c", "s"].forEach(t => { const b = $("tab-" + t); if (b) b.style.display = "none"; });
+const SHOW_CS = false;      // ③ CS·교환반품 — 아직 실제 데이터로 검증 안 함
+const SHOW_SETTLE = true;   // ④ 정산 — 2026-08-02 실제 7월 데이터(768행)로 검증하고 켬
+if (!SHOW_CS) { const b = $("tab-c"); if (b) b.style.display = "none"; }
+if (!SHOW_SETTLE) { const b = $("tab-s"); if (b) b.style.display = "none"; }
 function switchTab(t) {
   TABS.forEach(x => {
     const p = $("pane-" + x), b = $("tab-" + x);
