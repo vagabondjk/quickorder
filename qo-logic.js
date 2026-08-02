@@ -990,7 +990,10 @@ function settle(rows, book, opts) {
     const unit = r.unitPrice === undefined || r.unitPrice === null || r.unitPrice === ""
       ? null : toPriceNumber(r.unitPrice);
     const revenue = unit === null ? (toPriceNumber(r.amount) || 0) : unit * qty;
-    const m = matchPrice(book, r, aliases);
+    // 단가(행사 적용기간)는 '주문일' 기준으로 본다 — 고객이 언제 주문했는지가 기준.
+    // 정산 귀속(어느 달 정산인지)은 r.date(수집일자)로 따로 잡는다.
+    const priceRow = r.orderDate ? Object.assign({}, r, { date: r.orderDate }) : r;
+    const m = matchPrice(book, priceRow, aliases);
     const it = m.ok ? (m.item || {}) : {};
     // 단가는 줄마다 원 단위로 반올림한 뒤 수량을 곱한다 (정산서 줄 금액이 눈으로 맞아떨어지게)
     const unitCost = m.ok ? Math.round(m.price) : null;
@@ -1005,7 +1008,7 @@ function settle(rows, book, opts) {
       vendor: (m.ok && it.vendor) || brandVendor[normPriceText(r.brand)]
               || r.vendor || r.brand || "(업체 미지정)",
       product: r.product || "", option: r.option || "",
-      date: r.date || "", mall: r.mall || "", orderNo: r.orderNo || "",
+      date: r.date || "", orderDate: r.orderDate || "", mall: r.mall || "", orderNo: r.orderNo || "",
       qty, unitPrice: unit, revenue,
       matched: m.ok, how: m.ok ? m.how : "", why: m.ok ? "" : m.why,
       unitCost,
@@ -1123,6 +1126,19 @@ function vendorSheetColumns(colLists) {
   return out;
 }
 
+/* 이월 건 표기 — 주문한 달과 수집(출고)된 달이 다르면 비고에 적는다.
+   주문일이 7/31 이어도 발주마감 뒤 주문이면 수집이 8/1 이라 8월 정산으로 넘어온다.
+   업체가 정산서를 볼 때 '왜 7월 주문이 8월 정산에 있지?' 하지 않도록 이유를 남긴다. */
+function carryNote(row) {
+  const o = extractDate(row && row.orderDate);
+  const d = extractDate(row && row.date);
+  if (!o || !d) return "";
+  const om = o.slice(0, 6), dm = d.slice(0, 6);
+  if (om === dm) return "";
+  const mm = s => Number(s.slice(4, 6)) + "월";
+  return `${mm(om)} 주문 · ${mm(dm)} 수집`;
+}
+
 function settleSheetHead(internal) {
   return (internal ? SETTLE_HEAD_INTERNAL : SETTLE_HEAD_VENDOR).slice();
 }
@@ -1209,5 +1225,5 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   convert, collectInvoices, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, todayStr, fmtDate,
   normPriceText, toPriceNumber, priceKeyParts, priceRowKey, buildPriceBook, matchPrice,
   rankPriceCandidates, settle, settleCheck,
-  settleSheetHead, settleSheetRow, isPriceHeader, vendorSheetColumns };
+  settleSheetHead, settleSheetRow, isPriceHeader, vendorSheetColumns, carryNote };
 });

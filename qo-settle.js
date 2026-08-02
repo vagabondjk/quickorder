@@ -13,8 +13,12 @@
 
 const ST = (() => {
   const FIELDS = [
-    // 정산 기준일 = 주문일. 행사 공급가 적용기간도 이 날짜로 따진다.
-    { k: "date", n: "정산일(주문일)", kw: ["주문일시", "주문일자", "주문일", "정산일", "정산기준일", "결제일", "구매확정일", "수집일자", "일자", "날짜"] },
+    /* ★ 날짜 두 개를 따로 쓴다.
+       · 정산일 = 주문수집일자 → 어느 달 정산에 넣을지를 정한다.
+         주문일이 7/31 이어도 발주마감 뒤 주문이면 수집이 8/1 이고, 출고도 8월이라 8월 정산이다.
+       · 주문일시 → 행사 공급가가 적용되는지(고객이 언제 주문했는지)를 따진다. */
+    { k: "date", n: "정산일(수집일자)", kw: ["주문수집일자", "수집일자", "수집일", "정산일", "정산기준일", "구매확정일", "일자", "날짜"] },
+    { k: "orderDate", n: "주문일시", kw: ["주문일시", "주문일자", "주문일", "결제일시", "결제일"] },
     // ★ 송장이 있어야 정산에 포함한다 (출고된 건만). 이 열을 지정하면 빈 줄은 정산에서 빠진다.
     { k: "invoice", n: "송장번호", kw: ["운송장번호", "운송장", "송장번호", "송장"] },
     // '쇼핑몰명'을 앞에 둔다 — 뒤에 두면 '판매가(쇼핑몰)' 열이 먼저 걸려 쇼핑몰로 잡힌다
@@ -314,7 +318,8 @@ const ST = (() => {
         out.push({
           src: f.name,
           srcCols: f.cols, raw: r,     // 업체용 정산서를 원본 양식 그대로 뽑기 위해 들고 다닌다
-          date: CS.toYmd(g(r, "date")),
+          date: CS.toYmd(g(r, "date")),                    // 수집일자 — 정산 귀속
+          orderDate: f.map.orderDate === undefined ? "" : CS.toYmd(g(r, "orderDate")),
           mall: s(g(r, "mall")) || guessMall(f.name),
           orderNo: s(g(r, "orderNo")),
           product, option, qty,
@@ -922,8 +927,11 @@ const ST = (() => {
     const perOrderShip = v.rows.reduce((s2, r) => s2 + (r.shipMode === "건당" ? (r.shipTotal || 0) : 0), 0);
     // 열 이름에 실제 업체명을 넣는다 ('업체→랩노마드' 가 아니라 '플라스머→랩노마드').
     // 개당 업체는 배송비가 단가에 이미 합쳐져 있지만 '(배송비 포함)' 이라고 적지 않는다 — 업체 요청.
+    // 주문한 달과 수집(출고)된 달이 다른 건이 있으면 '비고' 열을 붙인다
+    const anyCarry = v.rows.some(r => QO.carryNote(r));
     const head = src.concat([`${v.vendor}→${CO()} 공급가`])
-      .concat(perOrderShip ? ["배송비"] : []).concat(["정산금액"]);
+      .concat(perOrderShip ? ["배송비"] : []).concat(["정산금액"])
+      .concat(anyCarry ? ["비고"] : []);
     const nCol = head.length;
 
     const p = (result && result.period) || { label: "" };
@@ -970,13 +978,16 @@ const ST = (() => {
       line.push(r.priced === false ? "미확정" : (r.unitCost == null ? "" : Math.round(r.unitCost) + merged));
       if (perOrderShip) line.push(r.shipMode === "건당" ? Math.round(r.shipTotal || 0) : 0);
       line.push(Math.round(r.pay || 0));
+      if (anyCarry) line.push(QO.carryNote(r));
       ws.addRow(line);
     });
 
     ws.addRow([]);
+    // 합계는 금액 열 끝(정산금액)에 맞춘다 — 맨 끝에 '비고'가 붙어도 밀리지 않게
+    const moneyEnd = nCol - (anyCarry ? 1 : 0);
     const add = (label, val, color) => {
       const cells = new Array(nCol).fill("");
-      cells[nCol - 2] = label; cells[nCol - 1] = Math.round(val);
+      cells[moneyEnd - 2] = label; cells[moneyEnd - 1] = Math.round(val);
       const row = ws.addRow(cells);
       row.font = { bold: true, color: color ? { argb: color } : undefined };
     };
@@ -1000,8 +1011,10 @@ const ST = (() => {
       const w = /상품명|주소|메시지|메세지/.test(h) ? 34 : /수취인|주문자|이름/.test(h) ? 12 : 14;
       ws.getColumn(i + 1).width = w;
     });
-    for (let n = src.length + 1; n <= nCol; n++) { ws.getColumn(n).width = 14; ws.getColumn(n).numFmt = "#,##0"; }
-    alignSheet(ws, nCol, src.length, hr);
+    for (let n = src.length + 1; n <= moneyEnd; n++) { ws.getColumn(n).width = 14; ws.getColumn(n).numFmt = "#,##0"; }
+    if (anyCarry) ws.getColumn(nCol).width = 20;      // 비고는 글자라 서식을 걸지 않는다
+    alignSheet(ws, moneyEnd, src.length, hr);
+    if (anyCarry) ws.getColumn(nCol).alignment = { horizontal: "center", vertical: "middle" };
     // alignSheet 는 열 단위로 정렬을 덮어쓴다 → 상단 요약은 그 뒤에 다시 오른쪽으로
     tops.forEach((t, i) => {
       const row = ws.getRow(i + 1);
