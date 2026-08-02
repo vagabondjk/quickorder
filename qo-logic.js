@@ -924,6 +924,52 @@ function pickByDate(hit, d) {
   return { ok: true, hit: eff.filter(it => (it.from || "") === maxFrom) };
 }
 
+/* '3팩'·'950g'·'3인분' 같은 크기·수량 낱말은 아무 상품에나 다 붙어서
+   후보를 고르는 데 도움이 안 된다. 점수에서 뺀다. */
+function isSizeToken(t) {
+  return /^\d+(g|kg|ml|l|매|팩|개|개입|인분|입|세트|box|ea)?$/.test(t);
+}
+/* 글자가 순서대로 나타나는지 (연속일 필요 없음) — 줄임말 판별용 */
+function subseqIn(tok, hay) {
+  let i = 0;
+  for (let c = 0; c < hay.length && i < tok.length; c++) if (hay[c] === tok[i]) i++;
+  return i === tok.length;
+}
+
+/* 연결표에서 고를 후보 추리기.
+   상품 21개를 통째로 늘어놓으면 사람이 못 고른다 — 이름이 겹치는 것만,
+   많이 겹치는 순서로 준다. '닭갈비'면 닭갈비, '일떡'이면 일떡이 위로 온다.
+   반환: [{item, score}] (점수 높은 순). 겹치는 낱말이 하나도 없으면 후보에서 뺀다. */
+function rankPriceCandidates(book, row) {
+  const items = (book && book.items) || [];
+  const k = priceKeyParts(row.brand, row.product, row.option);
+  const oTok = priceTokens(row.product);
+  const seen = {}, out = [];
+  items.forEach(it => {
+    if (seen[it.key]) return;
+    seen[it.key] = 1;
+    let name = 0, miss = 0;
+    (it.tk || []).forEach(t => {
+      if (isSizeToken(t)) return;
+      if (k.pBase.indexOf(t) >= 0) { name += 3; return; }                      // 표의 낱말이 주문명에 있나
+      // '즉떡'(즉석떡볶기)·'일떡'(일반떡볶기) 같은 줄임말은 통째로는 안 들어 있다.
+      // 글자가 순서대로 나타나면 약하게 가산해 둘을 구분한다. (추천용일 뿐 매칭 판정에는 안 쓴다)
+      if (t.length <= 3 && subseqIn(t, k.pBase)) { name += 2; return; }
+      miss++;   // 표 이름에만 있고 주문명엔 없는 낱말 — 많을수록 엉뚱한 상품이다
+    });
+    oTok.forEach(t => {                                                        // 주문 낱말이 표 이름에 있나
+      if (isSizeToken(t)) return;
+      if (it.pBase.indexOf(t) >= 0) name += 2;
+    });
+    if (!name) return;                        // 이름이 하나도 안 겹치면 후보 아님
+    const sameBrand = k.b && it.b && k.b === it.b;
+    out.push({ item: it, score: name - miss + (sameBrand ? 10 : 0), sameBrand: !!sameBrand });
+  });
+  out.sort((a, b) => b.score - a.score ||
+    String(a.item.product).localeCompare(String(b.item.product)));
+  return out;
+}
+
 /* 정산 계산
    rows: [{brand, vendor, product, option, qty, unitPrice, amount, ...}]
      · 매출  = unitPrice × 수량  (unitPrice 없으면 amount 를 그대로)
@@ -1157,6 +1203,7 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   findDateColumns, defaultDateColumn, orderDateInfo, formatPhone, stripHyphen,
   valueTransformForHeader, nameFromFilename, normKey,
   convert, collectInvoices, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, todayStr, fmtDate,
-  normPriceText, toPriceNumber, priceKeyParts, priceRowKey, buildPriceBook, matchPrice, settle, settleCheck,
+  normPriceText, toPriceNumber, priceKeyParts, priceRowKey, buildPriceBook, matchPrice,
+  rankPriceCandidates, settle, settleCheck,
   settleSheetHead, settleSheetRow, isPriceHeader, vendorSheetColumns };
 });

@@ -753,12 +753,24 @@ const ST = (() => {
     return out.sort((a, b) =>
       (a.brand || "").localeCompare(b.brand || "") || (a.product || "").localeCompare(b.product || ""));
   }
-  function unpricedBoxHtml(kinds, keys, total) {
-    const choices = bookChoices();
-    const opts = ['<option value="">— 공급가표에서 고르기 —</option>'].concat(choices.map(c =>
-      `<option value="${esc(c.key)}">${esc((c.brand ? c.brand + " · " : "") + c.product)}` +
+  /* 후보 목록 — 이름이 겹치는 것만 위에, 나머지는 접어서 뒤에.
+     21개를 통째로 늘어놓으면 못 고른다 (닭갈비면 닭갈비만 보여야 한다) */
+  function pickOptions(row) {
+    const opt = c => `<option value="${esc(c.key)}">${esc((c.brand ? c.brand + " · " : "") + c.product)}` +
       `${c.option ? " [" + esc(c.option) + "]" : ""} — ${Math.round(c.price).toLocaleString("ko-KR")}원` +
-      `${c.n > 1 ? " (기간별 " + c.n + "개)" : ""}</option>`)).join("");
+      `${c.n > 1 ? " (기간별 " + c.n + "개)" : ""}</option>`;
+    const all = bookChoices();
+    const byKey = {}; all.forEach(c => { byKey[c.key] = c; });
+    const ranked = QO.rankPriceCandidates(pbook, row);
+    const top = ranked.map(x => byKey[x.item.key]).filter(Boolean);
+    const topKeys = {}; top.forEach(c => { topKeys[c.key] = 1; });
+    const rest = all.filter(c => !topKeys[c.key]);
+    let h = '<option value="">— 공급가표에서 고르기 —</option>';
+    if (top.length) h += `<optgroup label="이름이 비슷한 상품 ${top.length}개">` + top.map(opt).join("") + "</optgroup>";
+    if (rest.length) h += `<optgroup label="${top.length ? "그 외 " : "전체 "}${rest.length}개">` + rest.map(opt).join("") + "</optgroup>";
+    return h;
+  }
+  function unpricedBoxHtml(kinds, keys, total) {
     return `<div style="margin-top:10px;padding:10px;border:1px solid var(--danger);border-radius:8px">
       <b style="color:var(--danger)">⚠ 공급가표에서 단가를 못 찾은 ${total}건 — 지급액 0 원으로 뒀습니다</b>
       <div style="margin-top:4px;font-size:12px;color:var(--muted)">
@@ -768,8 +780,8 @@ const ST = (() => {
           <div style="font-size:12.5px"><b>${esc(kinds[k].row.product.slice(0, 60))}</b>
             ${kinds[k].row.option ? `<span style="color:var(--muted)"> [${esc(kinds[k].row.option)}]</span>` : ""}
             <span style="color:var(--danger)"> ${kinds[k].n}건</span></div>
-          <div style="font-size:11.5px;color:var(--muted);margin-top:2px">${esc(kinds[k].row.brand || "")} · ${esc(kinds[k].why)}</div>
-          <select class="aliaspick" data-i="${i}" style="width:100%;margin-top:5px;padding:7px;font-size:12.5px">${opts}</select>
+          <div style="font-size:11.5px;color:var(--muted);margin-top:2px">${esc(kinds[k].row.brand || "")}</div>
+          <select class="aliaspick" data-i="${i}" style="width:100%;margin-top:5px;padding:7px;font-size:12.5px">${pickOptions(kinds[k].row)}</select>
         </div>`).join("")}
     </div>`;
   }
