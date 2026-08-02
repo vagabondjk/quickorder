@@ -542,6 +542,7 @@ const ST = (() => {
     };
     result.check = reconcile(rows, shipped, unshipped, vendors, unpriced);
     result.unshipped = unshipped;
+    result.period = periodOf(shipped.length ? shipped : rows);
     drawResult();
   }
 
@@ -661,7 +662,10 @@ const ST = (() => {
       e.n++;
     });
     const kindKeys = Object.keys(upKinds);
+    const per = result.period || { label: "" };
     $("st-total").innerHTML =
+      (per.label ? `<div style="margin-bottom:6px;font-size:13px"><b>📅 정산월 ${esc(per.label)}</b>
+         <span style="color:var(--muted);font-size:11.5px"> · 주문일 ${esc(QO.fmtDate(per.from))} ~ ${esc(QO.fmtDate(per.to))} · 작성일 ${esc(QO.fmtDate(QO.todayStr()))}</span></div>` : "") +
       `<div class="totline"><b>${result.usedBook ? "몰 매출 합계" : "몰 정산금액 합계"}</b><span>${won(t.amount)}</span></div>
        ${t.unpricedAmount ? `<div class="totline" style="font-size:12px;color:var(--danger)"><span>└ 단가 못 찾은 건 (지급·마진에서 빠짐)</span><span>${won(t.unpricedAmount)}</span></div>` : ""}
        <div class="totline"><b>${esc(CO())} 마진</b><span style="color:var(--ok)">${won(t.margin)}</span></div>
@@ -735,8 +739,9 @@ const ST = (() => {
       row.querySelector(".dlbtn").onclick = () => sendOne(v, inp, row.querySelector(".dlbtn"));
     });
   }
-  /* 저장·발송 파일명. 사용자가 고쳤으면 그걸 쓴다. */
-  const fileName = v => names[v] || `${QO.todayStr()}_${CONFIG.company}_${cleanVendor(v)}_정산서.xlsx`;
+  /* 저장·발송 파일명 — 앞에 정산월을 붙인다 (파일만 봐도 어느 달 정산인지 알게).
+     사용자가 고쳤으면 그걸 쓴다. */
+  const fileName = v => names[v] || `${periodTag()}_${CONFIG.company}_${cleanVendor(v)}_정산서.xlsx`;
 
   /* =================================================================
      연결표 — 이름이 달라 자동으로 못 붙는 상품을 사람이 한 번 이어준다
@@ -832,6 +837,31 @@ const ST = (() => {
        업체별 저장/메일은 전부 업체용(internal 없음)으로만 부른다. */
   const CO = () => (typeof CONFIG !== "undefined" && CONFIG.company) || "우리";
 
+  /* 정산월 — 주문일 범위에서 뽑는다. 한 달 안에 들어오면 '2026년 7월',
+     달을 걸치면 '2026-07-28 ~ 2026-08-03' 으로 적는다. */
+  function periodOf(rows) {
+    const ds = [];
+    (rows || []).forEach(r => {
+      const d = String(r.date || "").replace(/\D/g, "").slice(0, 8);
+      if (d.length === 8) ds.push(d);
+    });
+    if (!ds.length) return { from: "", to: "", label: "", tag: "" };
+    ds.sort();
+    const from = ds[0], to = ds[ds.length - 1];
+    const f = d => d.slice(0, 4) + "-" + d.slice(4, 6) + "-" + d.slice(6, 8);
+    if (from.slice(0, 6) === to.slice(0, 6))
+      return { from, to, label: `${from.slice(0, 4)}년 ${Number(from.slice(4, 6))}월`,
+               tag: from.slice(0, 4) + "-" + from.slice(4, 6) };
+    return { from, to, label: `${f(from)} ~ ${f(to)}`,
+             tag: from.slice(0, 4) + "-" + from.slice(4, 6) + "~" + to.slice(4, 6) };
+  }
+  const periodTag = () => (result && result.period && result.period.tag) || QO.todayStr().slice(0, 6);
+  /* 파일 머리말에 공통으로 넣는 줄 */
+  function stampLine(extra) {
+    const p = (result && result.period) || { label: "" };
+    return (p.label ? `정산월 ${p.label} · ` : "") + `작성일 ${QO.fmtDate(QO.todayStr())}` + (extra ? ` · ${extra}` : "");
+  }
+
   /* 업체용 정산서 — 주문 통합 양식을 그대로 쓰되 가격 열만 걷어내고
      '업체→(회사) 공급가'와 정산금액을 붙인다. 업체가 자기 주문건과 바로 대조할 수 있게. */
   function vendorSheet(wb, v) {
@@ -843,9 +873,10 @@ const ST = (() => {
     const head = src.concat([`업체→${CO()} 공급가`]).concat(anyShip ? ["배송비"] : []).concat(["정산금액"]);
     const nCol = head.length;
 
-    ws.addRow([`${v.vendor} 정산서`]);
+    const p = (result && result.period) || { label: "" };
+    ws.addRow([`${v.vendor} 정산서${p.label ? " — " + p.label : ""}`]);
     ws.getRow(1).font = { bold: true, size: 14 };
-    ws.addRow([`작성일 ${QO.fmtDate(QO.todayStr())} · ${v.rows.length}건`]);
+    ws.addRow([stampLine(`${v.rows.length}건`)]);
     ws.addRow(["※ 아래 금액은 모두 부가세가 포함된 금액입니다."]);
     ws.addRow([]);
     ws.addRow(head);
@@ -898,9 +929,11 @@ const ST = (() => {
   function summarySheet(wb, vendors) {
     const ws = wb.addWorksheet("정산 요약");
     const co = CO();
-    ws.addRow([`${co} 정산 요약`]);
+    const p = (result && result.period) || { label: "" };
+    ws.addRow([`${co} 정산 요약${p.label ? " — " + p.label : ""}`]);
     ws.getRow(1).font = { bold: true, size: 14 };
-    ws.addRow([`작성일 ${QO.fmtDate(QO.todayStr())} · 부가세 포함`]);
+    ws.addRow([stampLine("부가세 포함")]);
+    if (p.from) ws.addRow([`정산 대상 주문일 ${QO.fmtDate(p.from)} ~ ${QO.fmtDate(p.to)}`]);
     const w = ws.addRow(["※ 내부용입니다. 매출·마진이 들어 있으니 업체에 보내지 마세요."]);
     w.font = { bold: true, color: { argb: "FFCC0000" } };
     ws.addRow([]);
@@ -967,9 +1000,10 @@ const ST = (() => {
       const safe = n => String(n).replace(/[\\\/\?\*\[\]:]/g, "_").slice(0, 26) || "정산";
       for (const v of vendors) {
         const ws = wb.addWorksheet(safe(v.vendor) + "_상세");
-        ws.addRow([`${v.vendor} 정산 상세 (내부용)`]);
+        const p = (result && result.period) || { label: "" };
+        ws.addRow([`${v.vendor} 정산 상세 (내부용)${p.label ? " — " + p.label : ""}`]);
         ws.getRow(1).font = { bold: true, size: 14 };
-        ws.addRow([`작성일 ${QO.fmtDate(QO.todayStr())} · 부가세 포함`]);
+        ws.addRow([stampLine("부가세 포함")]);
         const w = ws.addRow([`※ 내부용입니다. ${CO()} 매출·마진이 들어 있으니 업체에 그대로 보내지 마세요.`]);
         w.font = { bold: true, color: { argb: "FFCC0000" } };
         ws.addRow([]);
@@ -1006,7 +1040,10 @@ const ST = (() => {
     try {
       await ensureGmail();
       const buf = await buildExcel([v]);          // 업체용 — 매출·마진 없음
-      const body = `안녕하세요, ${CONFIG.company}입니다.\n\n${QO.fmtDate(QO.todayStr())} 기준 정산 내역을 보내드립니다.\n\n`
+      const p = (result && result.period) || { label: "" };
+      const body = `안녕하세요, ${CONFIG.company}입니다.\n\n`
+        + (p.label ? `${p.label} 정산 내역을 보내드립니다. (작성일 ${QO.fmtDate(QO.todayStr())})\n\n`
+                   : `${QO.fmtDate(QO.todayStr())} 기준 정산 내역을 보내드립니다.\n\n`)
         + `· 건수: ${v.rows.length}건 (수량 ${v.rows.reduce((s2, r) => s2 + (r.qty || 0), 0)}개)\n`
         + `· 공급가 합계: ${won(v.pay)}\n`
         + (v.ded ? `· CS 차감(교환·반품): -${won(v.ded)}\n` : "")
@@ -1015,7 +1052,7 @@ const ST = (() => {
         + `\n자세한 내역은 첨부 파일을 확인해주세요.\n감사합니다.`;
       await GMAIL.send({
         to: to.join(", "),
-        subject: `[${CONFIG.company}] 정산서 ${QO.fmtDate(QO.todayStr())} - ${v.vendor}`,
+        subject: `[${CONFIG.company}] ${p.label ? p.label + " " : ""}정산서 - ${v.vendor} (작성 ${QO.fmtDate(QO.todayStr())})`,
         body,
         attachments: [{ filename: fileName(v.vendor), data: buf }],
       });
@@ -1141,7 +1178,7 @@ const ST = (() => {
       if (!result) return;
       try {
         const buf = await buildExcel(result.vendors, { internal: true });   // 내부용 — 매출·마진 포함
-        download(buf, `${QO.todayStr()}_${CONFIG.company}_정산표_전체_내부용.xlsx`);
+        download(buf, `${periodTag()}_${CONFIG.company}_정산표_전체_내부용.xlsx`);
       } catch (e) { msg("msg-s", "err", "⚠ 정산표를 만들지 못했어요 — " + e.message); }
     };
   }
