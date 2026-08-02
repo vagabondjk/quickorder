@@ -551,7 +551,9 @@
     <h3 id="pv-modal-title">미리보기</h3>
     <p class="sub2" id="pv-modal-sub"></p>
     <div style="flex:1;min-height:0;display:flex;flex-direction:column">
-      <div class="tblbox" style="flex:1;min-height:0"><div class="tblscroll" id="pv-modal-scroll" style="max-height:100%;height:100%"><table class="pv" id="pv-modal-table"></table></div></div>
+      <!-- max-height:100% 는 부모 높이가 확정돼야 먹는데 flex 안에서 안 잡히는 경우가 있어
+           내용이 길어도 스크롤이 안 됐다. vh 로 확실히 묶는다. -->
+      <div class="tblbox" style="flex:1;min-height:0"><div class="tblscroll" id="pv-modal-scroll" style="max-height:56vh"><table class="pv" id="pv-modal-table"></table></div></div>
       <div class="pvfoot" id="pv-modal-foot"></div>
     </div>
     <div class="row" style="margin-top:10px"><button class="btn-go" id="pv-modal-close">닫기</button></div>

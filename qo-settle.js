@@ -708,12 +708,21 @@ const ST = (() => {
           <button class="minibtn pvv">👁 정산 내역</button></div>`;
       box.appendChild(row);
       const inp = row.querySelector("input");
-      const known = S.vendorEmails[v.vendor] || "";
+      const ek = emailKey(v.vendor);            // ① 발주 탭에 저장된 업체 이메일을 같이 쓴다
+      const known = (S.vendorEmails || {})[ek] || "";
       inp.value = known;
       fillRecipients(row.querySelector(".cands"), inp, {
-        saved: known, history: S.vendorSent[v.vendor] || [],
-        domains: S.vendorDomains[v.vendor] || [], query: v.vendor !== "(업체 미지정)" ? v.vendor : "",
+        saved: known, history: (S.vendorSent || {})[ek] || [],
+        domains: (S.vendorDomains || {})[ek] || [], query: v.vendor !== "(업체 미지정)" ? v.vendor : "",
       });
+      // 여기서 고친 이메일은 ① 발주 탭과 같은 곳에 저장한다 (한 번만 적으면 양쪽에서 쓴다)
+      inp.onchange = inp.onblur = async () => {
+        const val = inp.value.trim();
+        if (val === ((S.vendorEmails || {})[ek] || "")) return;
+        S.vendorEmails = S.vendorEmails || {};
+        S.vendorEmails[ek] = val;
+        await DB.set("vendorEmails", S.vendorEmails);
+      };
       // 파일명은 자동으로 지어지되 여기서 바꿀 수 있다 (저장·공유·메일 첨부에 모두 반영)
       const lbl = row.querySelector(".fnlbl");
       const showName = () => { lbl.textContent = fileName(v.vendor); };
@@ -739,6 +748,21 @@ const ST = (() => {
       row.querySelector(".dlbtn").onclick = () => sendOne(v, inp, row.querySelector(".dlbtn"));
     });
   }
+  /* 정산 업체명 → ① 발주 탭에 저장된 업체 키.
+     발주 들어가는 업체가 곧 정산하는 업체라, 이메일·발송이력·도메인을 같이 쓴다.
+     이름이 정확히 같으면 그대로, 띄어쓰기·괄호만 다르면 그것도 찾아준다. */
+  function emailKey(vendor) {
+    const em = S.vendorEmails || {};
+    if (em[vendor]) return vendor;
+    const n = QO.normPriceText(vendor);
+    if (!n) return vendor;
+    for (const k in em) if (QO.normPriceText(k) === n) return k;
+    const sent = S.vendorSent || {};
+    for (const k in sent) if (QO.normPriceText(k) === n) return k;
+    for (const f of (S.forms || [])) if (QO.normPriceText(f.name) === n) return f.name;
+    return vendor;
+  }
+
   /* 저장·발송 파일명 — 앞에 정산월을 붙인다 (파일만 봐도 어느 달 정산인지 알게).
      사용자가 고쳤으면 그걸 쓴다. */
   const fileName = v => names[v] || `${periodTag()}_${CONFIG.company}_${cleanVendor(v)}_정산서.xlsx`;
@@ -837,6 +861,19 @@ const ST = (() => {
        업체별 저장/메일은 전부 업체용(internal 없음)으로만 부른다. */
   const CO = () => (typeof CONFIG !== "undefined" && CONFIG.company) || "우리";
 
+  /* 정산서 정렬 — 내용은 가운데, 금액 칸만 오른쪽.
+     머리말(제목·작성일 줄)은 가운데로 몰면 어색해서 왼쪽에 그대로 둔다.
+     moneyFrom = 이 열 번호부터 금액 (0 이면 금액 열 없음) */
+  function alignSheet(ws, nCol, srcCols, headerRow) {
+    const center = { horizontal: "center", vertical: "middle", wrapText: false };
+    const right = { horizontal: "right", vertical: "middle" };
+    for (let n = 1; n <= nCol; n++) ws.getColumn(n).alignment = n > srcCols ? right : center;
+    // 표 머리(헤더)는 항상 가운데
+    if (headerRow) for (let n = 1; n <= nCol; n++) ws.getRow(headerRow).getCell(n).alignment = center;
+    // 제목·작성일 등 머리말 줄은 왼쪽
+    for (let r = 1; r < (headerRow || 1); r++) ws.getRow(r).getCell(1).alignment = { horizontal: "left" };
+  }
+
   /* 정산월 — 주문일 범위에서 뽑는다. 한 달 안에 들어오면 '2026년 7월',
      달을 걸치면 '2026-07-28 ~ 2026-08-03' 으로 적는다. */
   function periodOf(rows) {
@@ -870,7 +907,8 @@ const ST = (() => {
     const src = QO.vendorSheetColumns(
       [...new Set(v.rows.map(r => r.srcCols).filter(Boolean))]);
     const anyShip = v.rows.some(r => r.shipTotal);
-    const head = src.concat([`업체→${CO()} 공급가`]).concat(anyShip ? ["배송비"] : []).concat(["정산금액"]);
+    // 열 이름에 실제 업체명을 넣는다 ('업체→랩노마드' 가 아니라 '플라스머→랩노마드')
+    const head = src.concat([`${v.vendor}→${CO()} 공급가`]).concat(anyShip ? ["배송비"] : []).concat(["정산금액"]);
     const nCol = head.length;
 
     const p = (result && result.period) || { label: "" };
@@ -922,6 +960,7 @@ const ST = (() => {
       ws.getColumn(i + 1).width = w;
     });
     for (let n = src.length + 1; n <= nCol; n++) { ws.getColumn(n).width = 14; ws.getColumn(n).numFmt = "#,##0"; }
+    alignSheet(ws, nCol, src.length, hr);
     return ws;
   }
 
@@ -987,6 +1026,7 @@ const ST = (() => {
 
     ws.getColumn(1).width = 18;
     for (let i = 2; i <= cols.length + 2; i++) { ws.getColumn(i).width = 16; ws.getColumn(i).numFmt = "#,##0"; }
+    alignSheet(ws, cols.length + 2, 1, hr);   // 1열은 항목 이름, 2열부터 금액
     return ws;
   }
 
@@ -1025,6 +1065,7 @@ const ST = (() => {
         add("업체 지급액", v.final, "FF1A56DB");
         ws.columns.forEach((c, i) => { c.width = [12, 12, 20, 34, 18, 7, 13, 12, 13, 13][i] || 14; });
         for (let n = 7; n <= nCol; n++) ws.getColumn(n).numFmt = "#,##0";
+        alignSheet(ws, nCol, 6, hr);          // 6열까지는 내용, 7열부터 금액
       }
     } else {
       for (const v of vendors) vendorSheet(wb, v);
@@ -1056,8 +1097,13 @@ const ST = (() => {
         body,
         attachments: [{ filename: fileName(v.vendor), data: buf }],
       });
-      S.vendorSent[v.vendor] = mergeRecent(S.vendorSent[v.vendor], to);
+      const ek = emailKey(v.vendor);              // ① 발주 탭과 같은 키로 이력을 쌓는다
+      S.vendorSent = S.vendorSent || {};
+      S.vendorSent[ek] = mergeRecent(S.vendorSent[ek], to);
       await DB.set("vendorSent", S.vendorSent);
+      S.vendorEmails = S.vendorEmails || {};
+      S.vendorEmails[ek] = inp.value.trim();
+      await DB.set("vendorEmails", S.vendorEmails);
       btn.textContent = "✔ 보냈어요";
       setTimeout(() => { btn.textContent = old; btn.disabled = false; }, 2500);
     } catch (e) {
