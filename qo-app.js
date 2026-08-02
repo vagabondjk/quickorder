@@ -1235,31 +1235,37 @@ async function recordSentInv(emails) {
      · 회사 도메인(공용 메일 아님)이 개인 gmail 보다 먼저다
      · 보낸사람으로 나온 주소가 참조만 된 주소보다 먼저다 */
 const FREEMAIL_RE = /^(gmail|googlemail|naver|daum|hanmail|nate|kakao|hanmir|empas|korea|outlook|hotmail|live|msn|yahoo|icloud|me|proton|protonmail|aol|qq|163)\./i;
-function rankVendorAddrs(found) {
+function rankVendorAddrs(found, known) {
   const list = (found || []).filter(f => f && f.email);
   if (!list.length) return [];
+  // 이 업체와 실제로 주고받은 적 있는 주소 (저장된 주소 + 발송 이력) — 개인메일이어도 살린다
+  const knownSet = new Set((known || []).map(e => String(e).toLowerCase()));
   const byDom = {};
   list.forEach(f => {
     const d = (String(f.email).split("@")[1] || "").toLowerCase();
     (byDom[d] = byDom[d] || []).push(f);
   });
   const scored = list.map(f => {
-    const dom = (String(f.email).split("@")[1] || "").toLowerCase();
+    const lc = String(f.email).toLowerCase();
+    const dom = (lc.split("@")[1] || "");
     const free = FREEMAIL_RE.test(dom + ".");
     const mates = byDom[dom].length;            // 같은 도메인에 몇 명이나 나왔나
+    const isKnown = knownSet.has(lc);
     let s = 0;
+    if (isKnown) s += 60;                        // 이미 이 업체와 주고받은 주소
     if (!free) s += 20;                          // 회사 도메인
     if (!free && mates >= 2) s += 25 + Math.min(mates, 6) * 3;   // 여럿 = 그 업체 회사
     s += Math.min(f.fromCount || 0, 3) * 6;      // 보낸사람으로 등장
     s += Math.min(f.count || 0, 4) * 2;          // 자주 등장
-    if (free) s -= 10;
-    return { email: f.email, score: s, free, mates };
+    return { email: f.email, score: s, free, mates, known: isKnown };
   }).sort((a, b) => b.score - a.score);
-  // 회사 도메인이 하나라도 있으면 개인 메일은 뒤로 밀고 잘라낸다 (아예 지우지는 않는다)
+
+  // 회사 도메인이 하나라도 잡히면 그게 업체다.
+  // 그때 개인메일(gmail·naver…)은 이 업체와 실제로 주고받은 적이 있는 것만 남긴다.
+  // — 검색에 걸렸다는 이유만으로 우리 쪽 사람이나 남의 개인메일이 후보로 뜨면 안 된다.
   const hasCorp = scored.some(x => !x.free);
-  const top = scored.filter(x => !x.free);
-  const rest = scored.filter(x => x.free);
-  return hasCorp ? top.concat(rest.slice(0, 2)) : scored;
+  if (!hasCorp) return scored;                   // 업체가 개인메일만 쓰는 경우
+  return scored.filter(x => !x.free || x.known);
 }
 
 async function fillRecipients(container, inp, opts) {
@@ -1294,6 +1300,8 @@ async function fillRecipients(container, inp, opts) {
   }
   inp.addEventListener("input", refreshStates);
 
+  // 이 업체와 이미 주고받은 주소 — 개인메일이어도 후보로 살려두는 근거가 된다
+  const knownAddrs = () => parseEmails(opts.saved || "").concat(opts.history || []);
   const doms = opts.domains || [];
   const inDom = e => { const d = (String(e).split("@")[1] || "").toLowerCase(); return doms.some(x => d === x || d.endsWith("." + x)); };
 
@@ -1313,7 +1321,7 @@ async function fillRecipients(container, inp, opts) {
         // 도메인을 설정해뒀으면 그것만, 아니면 연관성 순으로
         const inDomList = found.map(f => f.email).filter(inDom);
         if (inDomList.length) inDomList.slice(0, 8).forEach(addChip);
-        else rankVendorAddrs(found).slice(0, 8).forEach(x => addChip(x.email));
+        else rankVendorAddrs(found, knownAddrs()).slice(0, 8).forEach(x => addChip(x.email));
       } catch (e) { hint.remove(); }
       if (seen.size === 0) {
         const s = document.createElement("span");
@@ -1331,7 +1339,7 @@ async function fillRecipients(container, inp, opts) {
         try { await ensureGmail(); } catch (e) { b.textContent = old; b.disabled = false; return; }
         try {
           const found = await GMAIL.searchAddresses({ query: opts.query, max: 30 });
-          const list = rankVendorAddrs(found).map(x => x.email);
+          const list = rankVendorAddrs(found, knownAddrs()).map(x => x.email);
           b.remove();
           if (!list.length) {
             const s2 = document.createElement("span");
