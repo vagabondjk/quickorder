@@ -714,6 +714,424 @@ function previewAny(wb, limit) {
   return { columns: cols, rows, total, sheet: ws.name, sheets: wb.worksheets.map(w => w.name) };
 }
 
+/* ==================================================================
+   업체별 공급가표 · 정산 계산
+   업체에 지급할 단가는 통합 파일에 없다. 따로 올린 '업체별 공급가표'에서 끌어온다.
+   매칭 키는 브랜드 + 상품명 + 옵션.
+   상품명이 마케팅 문구라('카레 우동 밀키트 500g x 3팩 / 일본 카레의 …')
+   완전 일치만 보면 문구를 조금만 고쳐도 매칭이 끊긴다. 그래서 3단계로 좁혀 간다.
+     ① 완전 일치  ② '/' 앞부분(상품 본체)만 일치  ③ 앞부분 접두 일치
+   돈이 나가는 계산이라, 후보가 여러 개인데 단가가 서로 다르면 고르지 않고 '모호'로 남긴다.
+   ================================================================== */
+/* 접두 일치로 인정할 최소 길이(정규화 후).
+   '수피아토 쿨타월'(7) · '아동비치모자'(6) 처럼 짧은 모델명이 실제로 쓰여서 6 으로 뒀다.
+   짧게 잡아도 ① 한쪽이 다른 쪽의 '앞부분 전체'여야 하고 ② 후보가 둘 이상이면 거부하므로
+   아무 상품에나 붙지는 않는다. */
+const PRICE_PREFIX_MIN = 6;
+
+/* 매칭용 정규화 — 공백·괄호·기호를 걷어내고 소문자로.
+   'pk' 와 '팩' 은 같은 말로 본다 (공급가표는 '3pk', 주문 파일은 '3팩' 으로 적힌다). */
+function normPriceText(v) {
+  return String(v === null || v === undefined ? "" : v)
+    .replace(/\s+/g, "")
+    .replace(/[()\[\]{}<>·・,，.。/\\_+*~!?'"`|:;＋]/g, "")
+    .toLowerCase()
+    .replace(/(\d+)(pk|pack|개입세트)/g, "$1팩");
+}
+/* 앞머리에 붙은 [브랜드] 를 뗀다.
+   공급가표는 '[현우동] 카레우동 3pk' 처럼 브랜드를 이름 앞에 달아두는데,
+   주문 파일 상품명에는 그 말이 없어서 그대로 두면 낱말 비교가 늘 어긋난다.
+   브랜드는 어차피 별도 열로 따로 맞추므로 떼도 정보가 사라지지 않는다. */
+function stripLeadBracket(v) {
+  return String(v === null || v === undefined ? "" : v)
+    .replace(/^\s*[\[(【][^\]\)】]*[\]\)】]\s*/, "");
+}
+/* 금액 읽기 — 못 읽으면 null (0 과 구분해야 해서 0 을 돌려주지 않는다) */
+function toPriceNumber(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "number") return isFinite(v) ? v : null;
+  const s = String(v).replace(/[^0-9.\-]/g, "");
+  if (!s || s === "-" || s === "." || s === "-.") return null;
+  const n = Number(s);
+  return isFinite(n) ? n : null;
+}
+/* 한 행에서 매칭 키 3종을 뽑는다 */
+function priceKeyParts(brand, product, option) {
+  const raw = String(product === null || product === undefined ? "" : product);
+  const bare = stripLeadBracket(raw);
+  return {
+    b: normPriceText(brand),
+    pFull: normPriceText(raw),
+    pBase: normPriceText(bare.split("/")[0]),   // 앞머리 [브랜드] 를 떼고, '/' 뒤 문구도 뗀다
+    o: normPriceText(option),
+  };
+}
+function prefixHit(a, b) {
+  if (!a || !b) return false;
+  const short = a.length <= b.length ? a : b;
+  const long = a.length <= b.length ? b : a;
+  return short.length >= PRICE_PREFIX_MIN && long.indexOf(short) === 0;
+}
+
+/* 상품명을 낱말로 쪼갠다 (2글자 미만은 버린다) */
+function priceTokens(v) {
+  return stripLeadBracket(v)
+    .split(/[\s/·・,，.。+＋()\[\]{}<>~!?'"`|:;_\\-]+/)
+    .map(normPriceText)
+    .filter(t => t.length >= 2);
+}
+/* 표에 적은 낱말이 주문 상품명 안에 '전부' 들어 있는가.
+   '수피아토 웻타월' 처럼 모델명 낱말이 상품명 중간에 흩어져 있는 경우를 잡는다.
+     표: 수피아토 웻타월  ←→  주문: 수피아토 물없이 샤워하는 웻타월 화이트 민트 대형
+   낱말이 하나뿐이거나 너무 짧으면(합쳐 6글자 미만) 아무 데나 붙을 수 있어 쓰지 않는다. */
+function tokenHit(tokens, hay) {
+  if (!tokens || tokens.length < 2 || !hay) return false;
+  let len = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    if (hay.indexOf(tokens[i]) < 0) return false;
+    len += tokens[i].length;
+  }
+  return len >= PRICE_PREFIX_MIN;
+}
+
+/* 공급가표 만들기 — rows: [{brand, product, option, price, from}]
+   from(적용시작일)은 선택이다. 없으면 그 단가가 '언제나' 적용된다(예전과 같은 동작).
+   같은 상품을 적용일만 달리해 여러 줄 넣으면 주문일 기준으로 골라 쓴다.
+   (2026-07 랩노마드 실제 사례: 쿨타월 공급가가 7/13 부터 7,370 → 8,730 으로 바뀌었다.
+    단가 하나짜리 표로는 그 달 정산이 통째로 틀어진다) */
+function buildPriceBook(rows, opts) {
+  opts = opts || {};
+  // 업체별 배송비 방식 — 공급가 파일의 '업체별 배송비 정산 방법' 시트에서 온다
+  const vendorShip = opts.shipModes || {};
+  const items = [], errors = [], seen = {};
+  (rows || []).forEach((r, i) => {
+    const line = i + 1;
+    const brand = String(r.brand === null || r.brand === undefined ? "" : r.brand).trim();
+    const product = String(r.product === null || r.product === undefined ? "" : r.product).trim();
+    const option = String(r.option === null || r.option === undefined ? "" : r.option).trim();
+    if (!brand && !product && (r.price === undefined || r.price === null || r.price === "")) return;  // 빈 줄
+    if (!product) { errors.push({ line, why: "상품명이 비어 있어요", brand }); return; }
+    const price = toPriceNumber(r.price);
+    if (price === null) { errors.push({ line, why: "공급단가를 숫자로 읽을 수 없어요", brand, product, option, raw: r.price }); return; }
+    if (price <= 0) { errors.push({ line, why: "공급단가가 0 이하예요", brand, product, option, price }); return; }
+    const from = extractDate(r.from) || "";      // 적용시작일(선택) — yyyymmdd
+    const to = extractDate(r.to) || "";          // 적용종료일(선택) — 행사가 여기 걸린다
+    if (from && to && from > to) {
+      errors.push({ line, why: "적용시작일이 종료일보다 늦어요", brand, product, option, from, to });
+      return;
+    }
+    const ship = toPriceNumber(r.ship) || 0;     // 배송비(선택)
+    const vendor = String(r.vendor === null || r.vendor === undefined ? "" : r.vendor).trim();
+    // 배송비를 수량만큼 붙일지, 주문 한 건에 한 번만 붙일지.
+    // 줄에 적혀 있으면 그걸, 없으면 업체별 설정을, 그것도 없으면 '개당'.
+    //   "주문당 배송비 1회 정산" → 건당 / "배송비 포함 공급가 그대로 정산" → 개당
+    const modeText = String(
+      (r.shipMode === null || r.shipMode === undefined || r.shipMode === "" ? vendorShip[vendor] : r.shipMode) || ""
+    );
+    const shipMode = /건당|주문당|1회|1번|한번|한 번/.test(modeText) ? "건당" : "개당";
+    const k = priceKeyParts(brand, product, option);
+    const id = [k.b, k.pFull, k.o, from, to].join("|");
+    if (Object.prototype.hasOwnProperty.call(seen, id)) {
+      if (seen[id].price !== price)
+        errors.push({ line, why: "같은 상품이 같은 적용기간에 단가가 다르게 두 번 있어요",
+                      brand, product, option, price, before: seen[id].price });
+      return;
+    }
+    const it = { brand, product, option, price, from, to, ship, shipMode, vendor,
+                 key: [k.b, k.pFull, k.o].join("|"),
+                 b: k.b, pFull: k.pFull, pBase: k.pBase, o: k.o, tk: priceTokens(product) };
+    seen[id] = it;
+    items.push(it);
+  });
+  return { items, errors };
+}
+
+/* 주문 줄을 가리키는 안정된 키 — 연결표(별칭) 저장에 쓴다 */
+function priceRowKey(brand, product, option) {
+  const k = priceKeyParts(brand, product, option);
+  return [k.b, k.pFull, k.o].join("|");
+}
+
+/* 주문 한 줄에 맞는 공급단가 찾기
+   aliases: {주문키: 공급가표키} — 이름이 달라 자동으로 못 붙는 상품을 사람이 한 번 이어준 것.
+   별칭이 있으면 이름 비교를 건너뛰고 그 상품으로 바로 간다(적용기간은 그대로 따진다). */
+function matchPrice(book, row, aliases) {
+  const items = (book && book.items) || [];
+  if (!items.length) return { ok: false, why: "공급가표가 비어 있어요" };
+  const d0 = extractDate(row.date) || "";
+  if (aliases) {
+    const want = aliases[priceRowKey(row.brand, row.product, row.option)];
+    if (want) {
+      const hit = items.filter(it => it.key === want);
+      if (!hit.length) return { ok: false, why: "연결해 둔 상품이 지금 공급가표에 없어요" };
+      const p = pickByDate(hit, d0);
+      if (!p.ok) return { ok: false, why: p.why, how: "연결표" };
+      const ps = [];
+      p.hit.forEach(h => { if (ps.indexOf(h.price) < 0) ps.push(h.price); });
+      if (ps.length > 1)
+        return { ok: false, why: "연결해 둔 상품의 단가가 여러 개예요", how: "연결표", candidates: p.hit.slice(0, 5) };
+      return { ok: true, how: "연결표", price: ps[0], item: p.hit[0], from: p.hit[0].from || "" };
+    }
+  }
+  const k = priceKeyParts(row.brand, row.product, row.option);
+  const bookHasBrand = items.some(it => it.b);
+  // 표에 브랜드 열이 아예 없으면 브랜드는 따지지 않는다
+  const brandOk = it => !bookHasBrand || !k.b || it.b === k.b;
+  // 표의 옵션이 비어 있으면 그 상품의 모든 옵션에 적용된다
+  const optOk = it => !it.o || it.o === k.o;
+
+  const stages = [
+    ["완전일치", it => brandOk(it) && optOk(it) && it.pFull && it.pFull === k.pFull],
+    ["본체일치", it => brandOk(it) && optOk(it) && it.pBase && it.pBase === k.pBase],
+    ["앞부분일치", it => brandOk(it) && optOk(it) && prefixHit(it.pBase, k.pBase)],
+    ["핵심어일치", it => brandOk(it) && optOk(it) && tokenHit(it.tk, k.pBase)],
+  ];
+  const d = extractDate(row.date) || "";
+  for (let i = 0; i < stages.length; i++) {
+    let hit = items.filter(stages[i][1]);
+    if (!hit.length) continue;
+    const picked = pickByDate(hit, d);
+    if (!picked.ok) return { ok: false, why: picked.why, how: stages[i][0], candidates: hit.slice(0, 5) };
+    hit = picked.hit;
+    const prices = [];
+    hit.forEach(h => { if (prices.indexOf(h.price) < 0) prices.push(h.price); });
+    if (prices.length > 1)
+      return { ok: false, why: "공급가표에 후보가 여러 개인데 단가가 서로 달라요", how: stages[i][0], candidates: hit.slice(0, 5) };
+    return { ok: true, how: stages[i][0], price: prices[0], item: hit[0], from: hit[0].from || "" };
+  }
+  return { ok: false, why: "공급가표에서 못 찾았어요" };
+}
+
+/* 적용시작일로 후보 좁히기
+   주문일 이하인 것들 중 '가장 늦게 시작한' 단가를 쓴다. 적용일이 없는 줄은 언제나 후보.
+   표에 적용일이 하나도 없으면 예전과 똑같이 동작한다. */
+function pickByDate(hit, d) {
+  if (!hit.some(it => it.from || it.to)) return { ok: true, hit };
+  if (!d) {
+    const ps = [];
+    hit.forEach(h => { if (ps.indexOf(h.price) < 0) ps.push(h.price); });
+    if (ps.length > 1) return { ok: false, why: "적용시작일이 있는데 주문 날짜를 몰라 단가를 고를 수 없어요" };
+    return { ok: true, hit };
+  }
+  const eff = hit.filter(it => (!it.from || it.from <= d) && (!it.to || d <= it.to));
+  if (!eff.length) return { ok: false, why: "그 날짜에 적용되는 공급단가가 없어요 (적용기간을 확인해주세요)" };
+  let maxFrom = "";
+  eff.forEach(it => { if ((it.from || "") > maxFrom) maxFrom = it.from || ""; });
+  return { ok: true, hit: eff.filter(it => (it.from || "") === maxFrom) };
+}
+
+/* 정산 계산
+   rows: [{brand, vendor, product, option, qty, unitPrice, amount, ...}]
+     · 매출  = unitPrice × 수량  (unitPrice 없으면 amount 를 그대로)
+     · 지급액 = 공급단가 × 수량
+   못 찾은 줄은 지급액을 0 으로 두고 unmatched 에 모아 화면에 띄운다 — 조용히 넘기지 않는다. */
+function settle(rows, book, opts) {
+  opts = opts || {};
+  const aliases = opts.aliases || null;
+  const out = [], unmatched = [];
+  // 브랜드 → 업체. 단가를 못 찾은 줄도 업체는 알 수 있게 공급가표에서 미리 뽑아둔다.
+  // (이게 없으면 미매칭 줄만 브랜드 이름으로 떨어져 나가 정산서가 둘로 갈린다)
+  const brandVendor = {};
+  ((book && book.items) || []).forEach(it => {
+    if (it.b && it.vendor && !brandVendor[it.b]) brandVendor[it.b] = it.vendor;
+  });
+  (rows || []).forEach(r => {
+    const qty = Number(r.qty) || 0;
+    const unit = r.unitPrice === undefined || r.unitPrice === null || r.unitPrice === ""
+      ? null : toPriceNumber(r.unitPrice);
+    const revenue = unit === null ? (toPriceNumber(r.amount) || 0) : unit * qty;
+    const m = matchPrice(book, r, aliases);
+    const it = m.ok ? (m.item || {}) : {};
+    // 단가는 줄마다 원 단위로 반올림한 뒤 수량을 곱한다 (정산서 줄 금액이 눈으로 맞아떨어지게)
+    const unitCost = m.ok ? Math.round(m.price) : null;
+    const ship = m.ok ? Math.round(it.ship || 0) : 0;
+    const shipMode = it.shipMode || "개당";
+    const shipTotal = m.ok ? ship * (shipMode === "건당" ? (qty > 0 ? 1 : 0) : qty) : 0;
+    const pay = m.ok ? unitCost * qty + shipTotal : 0;
+    const o = {
+      brand: r.brand || "",
+      // 업체는 공급가표의 '업체명'을 우선한다 (브랜드 여러 개가 한 업체로 묶인다).
+      // 단가를 못 찾았어도 브랜드로 업체를 되짚어 같은 정산서에 남긴다.
+      vendor: (m.ok && it.vendor) || brandVendor[normPriceText(r.brand)]
+              || r.vendor || r.brand || "(업체 미지정)",
+      product: r.product || "", option: r.option || "",
+      date: r.date || "", mall: r.mall || "", orderNo: r.orderNo || "",
+      qty, unitPrice: unit, revenue,
+      matched: m.ok, how: m.ok ? m.how : "", why: m.ok ? "" : m.why,
+      unitCost,
+      ship, shipMode, shipTotal,
+      priceFrom: m.ok ? (m.from || "") : "",     // 어느 적용일의 단가를 썼는지
+      pay,
+      margin: m.ok ? revenue - pay : 0,
+    };
+    if (!m.ok) unmatched.push(o);
+    out.push(o);
+  });
+
+  const byVendor = {};
+  out.forEach(o => {
+    const g = byVendor[o.vendor] = byVendor[o.vendor] ||
+      { vendor: o.vendor, rows: [], qty: 0, revenue: 0, pay: 0, margin: 0, ship: 0, unmatched: 0, brands: [] };
+    g.rows.push(o); g.qty += o.qty; g.revenue += o.revenue; g.pay += o.pay;
+    g.margin += o.margin; g.ship += o.shipTotal;
+    if (o.brand && g.brands.indexOf(o.brand) < 0) g.brands.push(o.brand);
+    if (!o.matched) g.unmatched++;
+  });
+  const vendors = Object.keys(byVendor).map(k => byVendor[k]).sort((a, b) => b.pay - a.pay);
+  const sum = f => vendors.reduce((s, v) => s + v[f], 0);
+  const res = {
+    rows: out, vendors, unmatched,
+    total: { count: out.length, qty: sum("qty"), revenue: sum("revenue"),
+             pay: sum("pay"), margin: sum("margin"), ship: sum("ship"),
+             unmatched: unmatched.length },
+  };
+  res.check = settleCheck(rows || [], res);
+  return res;
+}
+
+/* 검산 — 주문이 하나도 빠지지 않고 정산에 담겼는지 확인한다.
+   금액이 작다고 넘어가면 안 된다. 한 건이라도 어긋나면 화면에 띄운다. */
+function settleCheck(input, res) {
+  const issues = [];
+  const err = (why, detail) => issues.push({ level: "error", why, detail: detail || "" });
+  const warn = (why, detail) => issues.push({ level: "warn", why, detail: detail || "" });
+
+  const inCount = input.length;
+  const inQty = input.reduce((s, r) => s + (Number(r.qty) || 0), 0);
+  const outCount = res.vendors.reduce((s, v) => s + v.rows.length, 0);
+  const outQty = res.vendors.reduce((s, v) => s + v.qty, 0);
+  const outPay = res.vendors.reduce((s, v) => s + v.pay, 0);
+
+  if (inCount !== outCount)
+    err(`주문 ${inCount}건 중 ${outCount}건만 정산에 담겼어요`, `${inCount - outCount}건이 사라졌습니다`);
+  if (inQty !== outQty)
+    err(`주문 수량 ${inQty}개와 정산 수량 ${outQty}개가 달라요`, `${inQty - outQty}개 차이`);
+
+  // 줄별 지급액을 다시 계산해 합계와 맞는지 본다
+  let recomputed = 0, badRows = 0;
+  res.rows.forEach(r => {
+    const want = r.matched ? (r.unitCost * r.qty + r.shipTotal) : 0;
+    if (want !== r.pay) badRows++;
+    recomputed += want;
+  });
+  if (badRows) err(`지급액이 단가×수량과 맞지 않는 줄이 ${badRows}건 있어요`);
+  if (Math.round(recomputed) !== Math.round(outPay))
+    err(`줄별 지급액 합계(${Math.round(recomputed)})와 업체별 합계(${Math.round(outPay)})가 달라요`);
+
+  // 단가를 못 찾아 0 원으로 둔 건 — 정산이 덜 된 상태다
+  if (res.unmatched.length) {
+    const q = res.unmatched.reduce((s, r) => s + r.qty, 0);
+    const kinds = [];
+    res.unmatched.forEach(r => { const k = (r.brand || "") + "/" + r.product; if (kinds.indexOf(k) < 0) kinds.push(k); });
+    err(`단가를 못 찾아 지급액 0 원으로 둔 주문이 ${res.unmatched.length}건 (수량 ${q}) 있어요`,
+        `상품 ${kinds.length}종 — 연결표로 이어주면 해결됩니다`);
+  }
+  // 수량이 비어 있으면 지급액이 0 이 된다
+  const zero = res.rows.filter(r => !r.qty);
+  if (zero.length) warn(`수량이 비어 있는 주문이 ${zero.length}건 있어요`, "그 줄은 지급액이 0 원입니다");
+  // 업체를 못 정한 줄
+  const noVendor = res.rows.filter(r => r.vendor === "(업체 미지정)");
+  if (noVendor.length) warn(`업체를 정하지 못한 주문이 ${noVendor.length}건 있어요`);
+
+  return {
+    ok: !issues.some(i => i.level === "error"),
+    issues,
+    orderCount: inCount, orderQty: inQty,
+    settledCount: outCount, settledQty: outQty,
+    pricedCount: res.rows.filter(r => r.matched).length,
+    pricedQty: res.rows.filter(r => r.matched).reduce((s, r) => s + r.qty, 0),
+    pay: outPay,
+  };
+}
+
+/* 정산서 시트의 열 구성.
+   ★ 업체용에는 '매출'과 '우리마진'이 절대 들어가면 안 된다.
+     업체가 볼 것은 '무엇을 몇 개, 단가 얼마에, 얼마 받는지'까지다.
+     화면(qo-settle.js)에서 직접 배열을 만들지 말고 반드시 이 함수를 쓸 것 —
+     여기 한 곳만 지키면 실수로 마진이 새어 나가지 않는다. */
+const SETTLE_HEAD_VENDOR = ["정산일", "쇼핑몰", "주문번호", "상품명", "옵션", "수량", "공급단가", "지급액"];
+const SETTLE_HEAD_INTERNAL = ["정산일", "쇼핑몰", "주문번호", "상품명", "옵션", "수량", "매출", "공급단가", "우리마진", "지급액"];
+
+/* 업체로 나갈 표에서 빼야 할 열인지.
+   ★ 통합 파일에는 TAG가·원가·판매가·결제금액이 들어 있다.
+     '원가'는 이름과 달리 우리가 쇼핑몰에 넘기는 값(우리 매출)이라 절대 나가면 안 되고,
+     판매가·결제금액도 업체가 알 필요가 없다. 애매하면 빼는 쪽으로 잡았다. */
+function isPriceHeader(h) {
+  const s = String(h === null || h === undefined ? "" : h).replace(/\s/g, "").toLowerCase();
+  if (!s) return false;
+  return /tag가|tag|원가|판매가|소비자가|공급가|공급단가|정산금액|결제금액|주문금액|매출|마진|수익|이익|단가|금액|수수료|할인|부가세|세액/.test(s);
+}
+/* 업체용 표에 남길 열 목록. 원래 파일의 열 순서를 지키고, 가격 열과 빈 헤더만 걷어낸다. */
+function vendorSheetColumns(colLists) {
+  const out = [];
+  (colLists || []).forEach(cols => (cols || []).forEach(h => {
+    const t = String(h === null || h === undefined ? "" : h).trim();
+    if (!t) return;
+    if (isPriceHeader(t)) return;
+    if (out.indexOf(t) < 0) out.push(t);
+  }));
+  return out;
+}
+
+function settleSheetHead(internal) {
+  return (internal ? SETTLE_HEAD_INTERNAL : SETTLE_HEAD_VENDOR).slice();
+}
+function settleSheetRow(r, internal) {
+  r = r || {};
+  const n = v => Math.round(Number(v) || 0);
+  // 단가를 못 찾은 줄을 업체 쪽에 '0원'으로만 보이면 오해를 사므로 '미확정'으로 적는다
+  const notPriced = r.priced === false || r.matched === false;
+  const unit = notPriced ? "미확정"
+    : (r.unitCost === null || r.unitCost === undefined ? "" : n(r.unitCost));
+  const base = [r.date || "", r.mall || "", r.orderNo || "", r.product || "", r.option || "", Number(r.qty) || 0];
+  if (!internal) return base.concat([unit, n(r.pay)]);
+  const revenue = r.amount === undefined || r.amount === null ? r.revenue : r.amount;
+  return base.concat([n(revenue), unit, n(r.margin), n(r.pay)]);
+}
+
+/* 시트를 전부 미리보기 — 공급가 파일처럼 여러 장에 나눠 담긴 경우에 쓴다.
+   (previewAny 는 데이터가 제일 많은 시트 '하나'만 돌려줘서 행사 시트를 놓친다) */
+function previewSheets(wb, limit) {
+  limit = limit || 5000;
+  const out = [];
+  for (const ws of wb.worksheets) {
+    const d = dims(ws);
+    if (!d.rows || !d.cols) { out.push({ name: ws.name, columns: [], rows: [], headerRow: 1 }); continue; }
+    const read = r => {
+      const out = [];
+      for (let c = 1; c <= d.cols; c++) {
+        const v = getV(ws, r, c);
+        out.push(v === null ? "" : String(v).trim().replace(/\s*\n\s*/g, " "));
+      }
+      while (out.length && !out[out.length - 1]) out.pop();
+      return out;
+    };
+    // findHeaderRow 는 발주서 기준(수령인·상품명…)이라 '업체명/배송비정산' 같은
+    // 작은 표에서는 못 찾고 1행을 준다. 그 줄이 비어 있으면 '채워진 칸이 가장 많은 줄'로 다시 찾는다.
+    let hr = findHeaderRow(ws);
+    let cols = read(hr);
+    if (cols.filter(Boolean).length < 2) {
+      let best = hr, bestN = cols.filter(Boolean).length;
+      for (let r = 1; r <= Math.min(d.rows, 10); r++) {
+        const n = read(r).filter(Boolean).length;
+        if (n > bestN) { bestN = n; best = r; }
+      }
+      hr = best; cols = read(hr);
+    }
+    const ncol = Math.max(cols.length, 1);
+    const rows = [];
+    for (let r = hr + 1; r <= d.rows; r++) {
+      const vals = []; let empty = true;
+      for (let c = 1; c <= ncol; c++) { const v = getV(ws, r, c); vals.push(v); if (!isBlank(v)) empty = false; }
+      if (empty) continue;
+      if (rows.length < limit)
+        rows.push(vals.map(v => v === null || v === undefined ? "" : (v instanceof Date ? extractDate(v) : v)));
+    }
+    out.push({ name: ws.name, columns: cols, rows, headerRow: hr });
+  }
+  return out;
+}
+
 /* ---------------- 워크북 헬퍼 ---------------- */
 async function loadWorkbook(dataOrBuffer) {
   const wb = new ExcelJS.Workbook();
@@ -734,5 +1152,7 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   toDateValue, isDateHeader, hasDateFormat, hasTimeFormat,
   findDateColumns, defaultDateColumn, orderDateInfo, formatPhone, stripHyphen,
   valueTransformForHeader, nameFromFilename, normKey,
-  convert, collectInvoices, countOrders, preview, previewAny, loadWorkbook, saveWorkbook, todayStr, fmtDate };
+  convert, collectInvoices, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, todayStr, fmtDate,
+  normPriceText, toPriceNumber, priceKeyParts, priceRowKey, buildPriceBook, matchPrice, settle, settleCheck,
+  settleSheetHead, settleSheetRow, isPriceHeader, vendorSheetColumns };
 });
