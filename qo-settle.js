@@ -61,6 +61,7 @@ const ST = (() => {
   let aliases = {};      // 연결표 — {주문키: 공급가표키}. 이름이 달라 자동으로 못 붙는 상품을 이어준다
   let brandFix = {};     // 브랜드 → 업체 수동 배정 (공급가표 자동 배정보다 우선). 한 번 정하면 기억한다
   let extraVendors = []; // 공급가표에 없어도 직접 만든 업체
+  let carry = { at: 0, list: [] };   // 지난 정산에서 송장이 없어 뺀 주문 (이월 추적용)
   let names = {};        // 업체 → 저장·발송할 파일명 (수정하면 그대로 씀)
 
   const s = v => (v === null || v === undefined) ? "" : String(v).trim();
@@ -76,7 +77,19 @@ const ST = (() => {
     pbRaw = await DB.get("priceBook", null);
     aliases = await DB.get("priceAliases", {}) || {};
     brandFix = await DB.get("settleBrandVendor", {}) || {};
+    // 지난 정산에서 '송장 없어 뺀' 목록. 이번에 출고됐으면 이월 건으로 알려준다.
+    carry = await DB.get("settleCarry", { at: 0, list: [] }) || { at: 0, list: [] };
+    if (!carry.list) carry.list = [];
     rebuildBook();
+  }
+  /* 이번 정산의 미출고 목록을 남겨둔다 (다음 달에 이월 여부를 알려주기 위해).
+     화면에 쓰는 기준값(carry)은 그대로 둬서, 같은 세션에서 다시 계산해도 비교 대상이 흔들리지 않는다. */
+  async function saveCarry(unshipped) {
+    const list = unshipped.filter(r => s(r.orderNo)).map(r => ({
+      orderNo: s(r.orderNo), brand: r.brand || "", product: (r.product || "").slice(0, 60),
+      qty: r.qty || 0, date: r.date || "",
+    }));
+    await DB.set("settleCarry", { at: Date.now(), list });
   }
   async function saveBrandFix() { await DB.set("settleBrandVendor", brandFix); }
   function rebuildBook() {
@@ -128,6 +141,12 @@ const ST = (() => {
 
     // 이전에 껐던 시트는 기억한다
     const off = (pbRaw && pbRaw.name === name && pbRaw.off) || [];
+    // 업체명이 있는 가격 시트가 하나라도 있으면, 업체명 없는 가격 시트는 참고자료로 보고 꺼둔다.
+    // (랩노마드 파일의 '최저가 기준 방식' 시트가 여기 걸린다 — 켜두면 엉뚱한 상품이 섞인다)
+    const anyVendor = parsed.some(p => p.kind === "price" && p.map.vendor !== undefined);
+    if (anyVendor) parsed.forEach(p => {
+      if (p.kind === "price" && p.map.vendor === undefined && off.indexOf(p.name) < 0) off.push(p.name);
+    });
     pbRaw = { name, at: Date.now(), sheets: parsed.map(p => ({
       name: p.name, kind: p.kind, count: p.count, map: p.map,
       rows: p.rows.map(r => r.slice()),
@@ -146,43 +165,53 @@ const ST = (() => {
     rebuildBook();
   }
 
+  /* 정산 파일 ↔ 공급가표 매칭 결과 한 줄.
+     다 맞으면 성공 표시만, 안 맞는 게 있으면 어떤 상품이 몇 건인지만 보여준다. */
+  function matchBoxHtml() {
+    if (!files.length) return `<div style="margin-top:6px;color:var(--muted)">정산 파일을 올리면 상품이 다 맞는지 확인해 드립니다.</div>`;
+    const rows = allRows();
+    if (!rows.length) return "";
+    const miss = {};
+    let ok = 0;
+    rows.forEach(r => {
+      const m = QO.matchPrice(pbook, r, aliases);
+      if (m.ok) { ok++; return; }
+      const k = (r.brand ? r.brand + " / " : "") + (r.product || "");
+      (miss[k] = miss[k] || 0); miss[k]++;
+    });
+    const keys = Object.keys(miss).sort((a, b) => miss[b] - miss[a]);
+    if (!keys.length)
+      return `<div style="margin-top:8px;padding:9px;border:1px solid var(--ok);border-radius:8px;background:var(--ok-soft)">
+        <b style="color:var(--ok)">✔ 정산 파일의 상품이 모두 공급가표에 있습니다</b>
+        <span style="color:var(--muted);font-size:12px"> · ${ok}건</span></div>`;
+    const total = keys.reduce((s2, k) => s2 + miss[k], 0);
+    return `<div style="margin-top:8px;padding:9px;border:1.5px solid var(--danger);border-radius:8px">
+      <b style="color:var(--danger)">⚠ 공급가표에 없는 상품 ${keys.length}종 · ${total}건</b>
+      <div style="margin-top:5px;font-size:12.5px;line-height:1.7">${
+        keys.slice(0, 10).map(k => `· ${esc(k.slice(0, 52))} <b>${miss[k]}건</b>`).join("<br>")}${
+        keys.length > 10 ? `<br>· 외 ${keys.length - 10}종` : ""}</div>
+      <div style="margin-top:5px;font-size:11.5px;color:var(--muted)">
+        공급가표에 추가하거나, 아래 ‘정산내역 추출’ 후 화면에서 연결해주세요.</div></div>`;
+  }
+
   function drawPriceBook() {
     const box = $("pb-state");
     if (!box) return;
     if (!hasBook()) {
-      box.innerHTML = "공급가표를 올리면 상품별 지급 단가로 정산합니다. 없으면 아래 마진율로 계산합니다.";
+      box.innerHTML = "공급가표를 올리면 상품별 지급 단가로 정산합니다.";
       return;
     }
-    const dated = pbook.items.filter(i => i.from || i.to).length;
-    const vends = {};
-    pbook.items.forEach(i => {
-      const v = i.vendor || "(업체 없음)";
-      (vends[v] = vends[v] || []).push(i.brand || "(브랜드 없음)");
-    });
-    const vl = Object.keys(vends).sort().map(v =>
-      `<div>🏭 <b>${esc(v)}</b> — ${esc([...new Set(vends[v])].join(", "))} · 상품 ${vends[v].length}개</div>`).join("");
     const off = pbRaw.off || [];
     const sheetList = (pbRaw.sheets || []).map(sh =>
       `<label style="display:flex;align-items:center;gap:6px;margin-top:3px;cursor:pointer">
          <input type="checkbox" class="pbsheet" data-n="${esc(sh.name)}"${off.indexOf(sh.name) < 0 ? " checked" : ""}>
          <span>${esc(sh.name)} <span style="color:var(--muted)">· ${sh.count}줄 · ${sh.kind === "ship" ? "배송비 방식" : "가격"}</span></span>
        </label>`).join("");
-    const sm = pbook.shipModes || {};
-    const smList = Object.keys(sm).length
-      ? `<div style="margin-top:6px">🚚 ${Object.keys(sm).map(v => `${esc(v)}: ${esc(sm[v])}`).join(" · ")}</div>` : "";
     box.innerHTML =
       `<b>📗 ${esc(pbRaw.name)}</b> — 상품 ${pbook.items.length}개` +
-      (dated ? ` · 적용기간 있는 줄 ${dated}개` : "") +
-      `<div style="margin-top:4px">${vl}</div>${smList}` +
-      `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--line)">
-         <b>읽은 시트</b> <span style="color:var(--muted);font-size:11.5px">— 참고용 시트가 섞였으면 체크를 끄세요</span>
-         ${sheetList}</div>` +
-      (pbook.errors.length
-        ? `<div style="margin-top:6px;color:var(--danger)">⚠ 건너뛴 줄 ${pbook.errors.length}개<br>` +
-          pbook.errors.slice(0, 5).map(e =>
-            `· ${e.line}번째 줄 — ${esc(e.why)}${e.product ? " (" + esc(String(e.product).slice(0, 24)) + ")" : ""}`).join("<br>") +
-          (pbook.errors.length > 5 ? `<br>· 외 ${pbook.errors.length - 5}줄` : "") + `</div>`
-        : "") +
+      matchBoxHtml() +
+      `<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:12px">
+         읽은 시트 ${(pbRaw.sheets || []).length}장 · 자세히</summary>${sheetList}</details>` +
       `<div style="margin-top:6px"><button class="minibtn" id="pb-clear" style="padding:6px 10px;font-size:12px">공급가표 지우기</button></div>`;
     box.querySelectorAll(".pbsheet").forEach(cb => cb.onchange = async () => {
       const nm = cb.dataset.n;
@@ -237,7 +266,7 @@ const ST = (() => {
       maps[sig] = m; await DB.set("settleMaps", maps);
       files = files.filter(f => f.name !== name);
       files.push({ name, cols: pv.columns, rows: pv.rows, map: m, sig });
-      drawFiles(); drawBrands(); refresh();
+      drawFiles(); drawPriceBook(); drawBrands(); refresh();
       msg("msg-s", "ok", `✔ ${name} — ${pv.rows.length}행 불러왔어요.`);
     };
     if (saved && MAP.ok(auto, FIELDS)) { await put(auto); return; }
@@ -256,7 +285,7 @@ const ST = (() => {
         <span class="vfile">${f.rows.length}행</span></div>`).join("");
     box.querySelectorAll(".vdel").forEach(b => b.onclick = () => {
       files.splice(Number(b.dataset.i), 1);
-      drawFiles(); drawBrands(); refresh();
+      drawFiles(); drawPriceBook(); drawBrands(); refresh();
     });
   }
 
@@ -316,31 +345,36 @@ const ST = (() => {
   /* 공급가표를 태워 업체를 확정한다. 업체가 정해져야 계산 방식을 고를 수 있어서 계산보다 먼저 한다. */
   function resolveVendors(rows) {
     const bv = hasBook() ? brandVendorMap() : {};
+    const valid = vendorNames();          // 업체명은 공급가표 기준
     rows.forEach(r => {
       r.m = hasBook() ? QO.matchPrice(pbook, r, aliases) : null;
-      // 수동 배정이 있으면 그게 먼저다 — 사람이 고친 걸 자동 배정이 덮으면 안 된다
+      // 수동 배정이 먼저다 — 단, 업체 목록에 있는 이름일 때만 (브랜드 이름이 업체로 새는 걸 막는다)
       const fixed = r.brand && brandFix[r.brand];
       const fromBook = r.m && r.m.ok && r.m.item && r.m.item.vendor;
-      r.vendor = fixed || fromBook || bv[QO.normPriceText(r.brand)] || r.vendor || r.brand || "";
+      r.vendor = (fixed && valid.indexOf(fixed) >= 0 ? fixed : "")
+        || fromBook || bv[QO.normPriceText(r.brand)] || "";
+      // ※ 브랜드로 되돌리지 않는다. 업체를 모르면 '미지정'으로 남겨 화면에서 배정하게 한다.
     });
   }
 
   /* =================================================================
      업체별 브랜드 선택 — 발주 탭과 같은 방식. 바꾸면 기억한다.
      ================================================================= */
-  /* 업체 목록 — 공급가표의 업체명 + 직접 추가한 업체 + 이미 배정에 쓰인 이름.
-     ※ 브랜드를 업체로 쓰지 않는다. 업체(플라스머·디에스피)가 위, 브랜드가 그 안이다. */
+  /* 업체 목록 — 공급가표의 '업체명' 열이 기준이다 (+ 직접 추가한 업체).
+     ※ 브랜드 배정값은 여기 넣지 않는다. 넣으면 잘못 배정된 브랜드 이름이
+       그대로 업체로 올라와서 '마이푸드메이트' 같은 브랜드가 업체처럼 보인다. */
   function vendorNames() {
     const out = [];
     const add = v => { v = String(v || "").trim(); if (v && out.indexOf(v) < 0) out.push(v); };
     pbook.items.forEach(it => add(it.vendor));
-    Object.keys(brandFix).forEach(b => add(brandFix[b]));
     extraVendors.forEach(add);
     return out.sort();
   }
-  /* 브랜드가 어느 업체 것인지 — 직접 지정 > 공급가표 */
+  /* 브랜드가 어느 업체 것인지 — 직접 지정 > 공급가표.
+     직접 지정이 업체 목록에 없는 이름이면(표가 바뀌었거나 잘못 눌렀거나) 무시하고 자동 배정으로 돌아간다. */
   function ownerOf(brand) {
-    if (brandFix[brand]) return brandFix[brand];
+    const fixed = brandFix[brand];
+    if (fixed && vendorNames().indexOf(fixed) >= 0) return fixed;
     const bv = brandVendorMap();
     return bv[QO.normPriceText(brand)] || "";
   }
@@ -537,6 +571,28 @@ const ST = (() => {
     if (unshipped.length)
       warn(`송장이 없어 이번 정산에서 뺀 주문이 ${unshipped.length}건 (수량 ${unshipped.reduce((s, r) => s + (r.qty || 0), 0)}) 있어요`,
            "출고되면 다음 정산에 포함됩니다");
+
+    /* 이월 추적 — 지난 정산에서 미출고였던 건이 이번에 출고됐는지.
+       (7월 주문인데 8월에 출고된 건은 8월 정산으로 넘어와야 한다) */
+    if (carry.list.length) {
+      const nowNos = {};
+      rows.forEach(r => { const k = s(r.orderNo); if (k) nowNos[k] = r; });
+      const shipNos = {};
+      shipped.forEach(r => { const k = s(r.orderNo); if (k) shipNos[k] = r; });
+      const 이월됨 = carry.list.filter(c => shipNos[c.orderNo]);
+      const 아직 = carry.list.filter(c => !nowNos[c.orderNo]);
+      const 여전히미출고 = carry.list.filter(c => nowNos[c.orderNo] && !shipNos[c.orderNo]);
+      const when = carry.at ? new Date(carry.at).toISOString().slice(0, 10) : "";
+      if (이월됨.length)
+        issues.push({ level: "info",
+          why: `지난 정산(${when})에서 미출고였던 ${이월됨.length}건이 이번에 출고돼 포함됐어요`,
+          detail: "이월 처리된 건입니다 — 지난달에 중복 지급하지 않았는지 확인하세요" });
+      if (아직.length)
+        warn(`지난 정산의 미출고 ${아직.length}건이 이번 파일에 아예 없어요`,
+             `주문번호 ${아직.slice(0, 5).map(c => c.orderNo).join(", ")}${아직.length > 5 ? " 외 " + (아직.length - 5) + "건" : ""} — 아직 출고 전인지 확인하세요`);
+      if (여전히미출고.length)
+        warn(`지난 정산의 미출고 ${여전히미출고.length}건이 이번에도 송장이 없어요`, "출고가 계속 밀리고 있습니다");
+    }
     // 출고된 건은 하나도 빠짐없이 담겨야 한다
     if (shipCount !== outCount)
       err(`출고 ${shipCount}건 중 ${outCount}건만 업체 정산에 담겼어요`, `${shipCount - outCount}건이 사라졌습니다`);
@@ -1059,7 +1115,12 @@ const ST = (() => {
     $("run-s").onclick = async () => {
       const b = $("run-s");
       b.classList.add("loading"); b.disabled = true;
-      try { calc(); msg("msg-s", "ok", "✔ 뽑았습니다. 아래에서 업체별 정산내역을 확인하세요."); }
+      try {
+        calc();
+        // 이번 미출고 목록을 남겨 다음 달에 이월 여부를 알려준다
+        if (result) saveCarry(result.unshipped || []).catch(() => {});
+        msg("msg-s", "ok", "✔ 뽑았습니다. 아래에서 업체별 정산내역을 확인하세요.");
+      }
       catch (e) { msg("msg-s", "err", "⚠ " + e.message); }
       finally { b.classList.remove("loading"); b.disabled = false; }
     };

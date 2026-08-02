@@ -172,6 +172,16 @@ const readFile = f => new Promise((res, rej) => {
   r.readAsArrayBuffer(f);
 });
 
+/* 버전 표기 — qo-version.js 한 곳에서 읽어 배지와 푸터에 같이 넣는다.
+   손으로 여러 곳을 고치다 하나를 빠뜨리는 일을 막으려고 이렇게 해뒀다. */
+(function showVersion() {
+  const v = (typeof APP_VER !== "undefined" && APP_VER) ? "v" + APP_VER : "";
+  if (!v) return;
+  const a = $("app-ver"), b = $("app-ver-foot");
+  if (a) a.textContent = v;
+  if (b) b.textContent = v;
+})();
+
 /* ---------------- 탭 ---------------- */
 const TABS = ["o", "i", "c", "s"];
 TABS.forEach(t => { const b = $("tab-" + t); if (b) b.onclick = () => switchTab(t); });

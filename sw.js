@@ -3,9 +3,10 @@
    → 재배포하면 새로고침만으로 바로 최신 코드가 뜬다. */
 // 회사 설정을 그대로 읽어 캐시 이름을 회사별로 분리한다
 // (같은 도메인에 여러 회사를 올려도 캐시가 서로를 지우지 않게)
-importScripts("qo-config.js");
-const CACHE = "quickorder" + (CONFIG.tenant ? "-" + CONFIG.tenant : "") + "-v6.1";
-const ASSETS = ["./", "./index.html", "./qo-config.js", "./qo-lock.js", "./qo-logic.js", "./qo-gmail.js", "./qo-sync.js", "./qo-app.js",
+// 버전은 qo-version.js 한 곳에서만 정한다 (배포할 때마다 끝자리를 올린다)
+importScripts("qo-config.js", "qo-version.js");
+const CACHE = "quickorder" + (CONFIG.tenant ? "-" + CONFIG.tenant : "") + "-v" + APP_VER;
+const ASSETS = ["./", "./index.html", "./qo-config.js", "./qo-version.js", "./qo-lock.js", "./qo-logic.js", "./qo-gmail.js", "./qo-sync.js", "./qo-app.js",
   "./qo-cs.js", "./qo-settle.js",
   "./manifest.json", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 // 절대 안 바뀌는 외부 라이브러리는 캐시 우선(빠름)

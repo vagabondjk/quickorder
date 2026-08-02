@@ -809,8 +809,12 @@ function buildPriceBook(rows, opts) {
     const brand = String(r.brand === null || r.brand === undefined ? "" : r.brand).trim();
     const product = String(r.product === null || r.product === undefined ? "" : r.product).trim();
     const option = String(r.option === null || r.option === undefined ? "" : r.option).trim();
-    if (!brand && !product && (r.price === undefined || r.price === null || r.price === "")) return;  // 빈 줄
-    if (!product) { errors.push({ line, why: "상품명이 비어 있어요", brand }); return; }
+    // 상품명이 없으면 상품 줄이 아니다 (빈 줄·소계 줄·머리말 등) — 조용히 넘어간다.
+    // 예전엔 이걸 오류로 띄웠는데, 엑셀 아래쪽 빈 줄까지 잔뜩 잡혀서 시끄럽기만 했다.
+    if (!product) return;
+    // 공급가 칸이 아예 비어 있으면 상품 줄이 아니다 ('* 배송비 포함으로…' 같은 안내문 줄).
+    // 오류로 볼 건 '가격 칸에 뭔가 적혀 있는데 숫자가 아닌' 경우뿐이다.
+    if (r.price === undefined || r.price === null || String(r.price).trim() === "") return;
     const price = toPriceNumber(r.price);
     if (price === null) { errors.push({ line, why: "공급단가를 숫자로 읽을 수 없어요", brand, product, option, raw: r.price }); return; }
     if (price <= 0) { errors.push({ line, why: "공급단가가 0 이하예요", brand, product, option, price }); return; }
