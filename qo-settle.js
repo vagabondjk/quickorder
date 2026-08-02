@@ -906,9 +906,13 @@ const ST = (() => {
     const ws = wb.addWorksheet(safe(v.vendor));
     const src = QO.vendorSheetColumns(
       [...new Set(v.rows.map(r => r.srcCols).filter(Boolean))]);
-    const anyShip = v.rows.some(r => r.shipTotal);
+    // 배송비를 개당 단가에 합칠 수 있는 업체(개당 정산)는 '공급가(배송비 포함)' 한 열로 끝낸다.
+    // 주문당 1회로 붙는 업체만 배송비를 따로 적는다.
+    const perOrderShip = v.rows.reduce((s2, r) => s2 + (r.shipMode === "건당" ? (r.shipTotal || 0) : 0), 0);
+    const mergedShip = v.rows.some(r => r.shipMode !== "건당" && r.ship);
     // 열 이름에 실제 업체명을 넣는다 ('업체→랩노마드' 가 아니라 '플라스머→랩노마드')
-    const head = src.concat([`${v.vendor}→${CO()} 공급가`]).concat(anyShip ? ["배송비"] : []).concat(["정산금액"]);
+    const head = src.concat([`${v.vendor}→${CO()} 공급가${mergedShip ? "(배송비 포함)" : ""}`])
+      .concat(perOrderShip ? ["배송비"] : []).concat(["정산금액"]);
     const nCol = head.length;
 
     const p = (result && result.period) || { label: "" };
@@ -926,8 +930,10 @@ const ST = (() => {
       const idx = {};
       (r.srcCols || []).forEach((h, i) => { const t = String(h || "").trim(); if (t && idx[t] === undefined) idx[t] = i; });
       const line = src.map(h => (idx[h] === undefined ? "" : (r.raw ? r.raw[idx[h]] : "")));
-      line.push(r.priced === false ? "미확정" : (r.unitCost == null ? "" : Math.round(r.unitCost)));
-      if (anyShip) line.push(Math.round(r.shipTotal || 0));
+      // 개당 정산이면 배송비를 단가에 합쳐 적는다 (공급가 × 수량 = 정산금액 이 되게)
+      const merged = r.shipMode === "건당" ? 0 : Math.round(r.ship || 0);
+      line.push(r.priced === false ? "미확정" : (r.unitCost == null ? "" : Math.round(r.unitCost) + merged));
+      if (perOrderShip) line.push(r.shipMode === "건당" ? Math.round(r.shipTotal || 0) : 0);
       line.push(Math.round(r.pay || 0));
       ws.addRow(line);
     });
@@ -939,8 +945,8 @@ const ST = (() => {
       const row = ws.addRow(cells);
       row.font = { bold: true, color: color ? { argb: color } : undefined };
     };
-    add("공급가 합계", v.pay - (v.ship || 0));
-    if (v.ship) add("배송비 합계", v.ship);
+    add(mergedShip ? "공급가 합계 (배송비 포함)" : "공급가 합계", v.pay - perOrderShip);
+    if (perOrderShip) add("배송비 합계", perOrderShip);
     if (v.ded) add("CS 차감", -v.ded, "FFCC0000");
     add("정산금액", v.final, "FF1A56DB");
     if (v.unpriced) {

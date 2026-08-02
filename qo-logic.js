@@ -1131,8 +1131,12 @@ function settleSheetRow(r, internal) {
   const n = v => Math.round(Number(v) || 0);
   // 단가를 못 찾은 줄을 업체 쪽에 '0원'으로만 보이면 오해를 사므로 '미확정'으로 적는다
   const notPriced = r.priced === false || r.matched === false;
+  // '배송비 포함 공급가 그대로 정산'(개당)인 업체는 배송비를 단가에 합쳐 적는다.
+  // 그래야 공급단가 × 수량 = 지급액 으로 눈에 맞아떨어진다.
+  // '주문당 1회'(건당)는 개당 단가에 못 합치므로 그대로 둔다.
+  const perUnitShip = r.shipMode === "건당" ? 0 : n(r.ship);
   const unit = notPriced ? "미확정"
-    : (r.unitCost === null || r.unitCost === undefined ? "" : n(r.unitCost));
+    : (r.unitCost === null || r.unitCost === undefined ? "" : n(r.unitCost) + perUnitShip);
   const base = [r.date || "", r.mall || "", r.orderNo || "", r.product || "", r.option || "", Number(r.qty) || 0];
   if (!internal) return base.concat([unit, n(r.pay)]);
   const revenue = r.amount === undefined || r.amount === null ? r.revenue : r.amount;
