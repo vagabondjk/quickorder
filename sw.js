@@ -4,7 +4,7 @@
 // 회사 설정을 그대로 읽어 캐시 이름을 회사별로 분리한다
 // (같은 도메인에 여러 회사를 올려도 캐시가 서로를 지우지 않게)
 importScripts("qo-config.js");
-const CACHE = "quickorder" + (CONFIG.tenant ? "-" + CONFIG.tenant : "") + "-v5.5";
+const CACHE = "quickorder" + (CONFIG.tenant ? "-" + CONFIG.tenant : "") + "-v6.1";
 const ASSETS = ["./", "./index.html", "./qo-config.js", "./qo-lock.js", "./qo-logic.js", "./qo-gmail.js", "./qo-sync.js", "./qo-app.js",
   "./qo-cs.js", "./qo-settle.js",
   "./manifest.json", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];

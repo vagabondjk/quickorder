@@ -12,7 +12,9 @@ const SYNC = (() => {
     "replySenders", "replyKeywords", "replyExclude",
     // v6.0 — CS·정산
     "csItems", "csMaps", "csSenders", "csKeywords", "csExclude",
-    "settleRules", "settleMaps", "stSenders", "stKeywords", "stExclude"];
+    "settleRules", "settleMaps", "stSenders", "stKeywords", "stExclude",
+    // v6.1 — 업체별 공급가표. 이게 빠지면 기기를 바꿨을 때 단가와 연결표가 통째로 사라진다
+    "priceBook", "priceAliases", "settleBrandVendor"];
   const STAMP_KEY = CONFIG.ls("qo_sync_stamp");   // 이 기기가 마지막으로 반영/업로드한 시각
   const TIME_KEY = CONFIG.ls("qo_sync_time");     // 마지막 동기화 시각(표시용)
 
