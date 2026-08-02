@@ -893,9 +893,9 @@ const ST = (() => {
     // 배송비를 개당 단가에 합칠 수 있는 업체(개당 정산)는 '공급가(배송비 포함)' 한 열로 끝낸다.
     // 주문당 1회로 붙는 업체만 배송비를 따로 적는다.
     const perOrderShip = v.rows.reduce((s2, r) => s2 + (r.shipMode === "건당" ? (r.shipTotal || 0) : 0), 0);
-    const mergedShip = v.rows.some(r => r.shipMode !== "건당" && r.ship);
-    // 열 이름에 실제 업체명을 넣는다 ('업체→랩노마드' 가 아니라 '플라스머→랩노마드')
-    const head = src.concat([`${v.vendor}→${CO()} 공급가${mergedShip ? "(배송비 포함)" : ""}`])
+    // 열 이름에 실제 업체명을 넣는다 ('업체→랩노마드' 가 아니라 '플라스머→랩노마드').
+    // 개당 업체는 배송비가 단가에 이미 합쳐져 있지만 '(배송비 포함)' 이라고 적지 않는다 — 업체 요청.
+    const head = src.concat([`${v.vendor}→${CO()} 공급가`])
       .concat(perOrderShip ? ["배송비"] : []).concat(["정산금액"]);
     const nCol = head.length;
 
@@ -929,7 +929,7 @@ const ST = (() => {
       const row = ws.addRow(cells);
       row.font = { bold: true, color: color ? { argb: color } : undefined };
     };
-    add(mergedShip ? "공급가 합계 (배송비 포함)" : "공급가 합계", v.pay - perOrderShip);
+    add("공급가 합계", v.pay - perOrderShip);
     if (perOrderShip) add("배송비 합계", perOrderShip);
     if (v.ded) add("CS 차감", -v.ded, "FFCC0000");
     add("정산금액", v.final, "FF1A56DB");
