@@ -713,6 +713,17 @@ const ST = (() => {
         saved: known, history: (S.vendorSent || {})[ek] || [],
         domains: (S.vendorDomains || {})[ek] || [], query: v.vendor !== "(업체 미지정)" ? v.vendor : "",
       });
+      // 발주 탭에서 못 끌어왔으면 왜 그런지 알려준다 (업체 이름이 서로 다르면 못 찾는다)
+      if (!known) {
+        const saved = Object.keys(S.vendorEmails || {}).filter(k => (S.vendorEmails || {})[k]);
+        if (saved.length) {
+          const note = document.createElement("div");
+          note.style.cssText = "font-size:11px;color:var(--muted);margin-top:4px;line-height:1.6";
+          note.innerHTML = `① 발주 탭에 저장된 업체: ${saved.map(k => esc(k)).join(", ")}` +
+            `<br>이름이 <b>${esc(v.vendor)}</b> 와 달라서 못 불러왔어요. 여기에 적으면 발주 탭에도 같이 저장됩니다.`;
+          row.querySelector(".cands").after(note);
+        }
+      }
       // 여기서 고친 이메일은 ① 발주 탭과 같은 곳에 저장한다 (한 번만 적으면 양쪽에서 쓴다)
       inp.onchange = inp.onblur = async () => {
         const val = inp.value.trim();
@@ -753,10 +764,26 @@ const ST = (() => {
     if (em[vendor]) return vendor;
     const n = QO.normPriceText(vendor);
     if (!n) return vendor;
-    for (const k in em) if (QO.normPriceText(k) === n) return k;
-    const sent = S.vendorSent || {};
-    for (const k in sent) if (QO.normPriceText(k) === n) return k;
-    for (const f of (S.forms || [])) if (QO.normPriceText(f.name) === n) return f.name;
+    // 후보: 이메일이 저장된 이름 + 발송 이력 + ① 발주 탭의 업체 양식 이름
+    const cand = [];
+    const push = k => { const t = String(k || "").trim(); if (t && cand.indexOf(t) < 0) cand.push(t); };
+    Object.keys(em).forEach(push);
+    Object.keys(S.vendorSent || {}).forEach(push);
+    (S.forms || []).forEach(f => push(f.name));
+    // ① 이름이 같다(띄어쓰기·괄호만 다른 경우 포함)
+    for (const k of cand) if (QO.normPriceText(k) === n) return k;
+    // ② 한쪽이 다른 쪽에 들어 있다 — '플라스머' ↔ '플라스머 발주양식' 같은 경우.
+    //   여러 개가 걸리면 어느 것인지 알 수 없으니 고르지 않는다.
+    const hit = cand.filter(k => {
+      const kn = QO.normPriceText(k);
+      return kn && (kn.indexOf(n) >= 0 || n.indexOf(kn) >= 0);
+    });
+    if (hit.length === 1) return hit[0];
+    if (hit.length > 1) {
+      // 이메일이 실제로 저장돼 있는 것을 우선한다
+      const withMail = hit.filter(k => em[k]);
+      if (withMail.length === 1) return withMail[0];
+    }
     return vendor;
   }
 
@@ -900,11 +927,35 @@ const ST = (() => {
     const nCol = head.length;
 
     const p = (result && result.period) || { label: "" };
+    const totalQty = v.rows.reduce((s2, r) => s2 + (r.qty || 0), 0);
+    /* 파일을 열자마자 보이도록 최종 내역을 맨 위 D·E 열에 올린다.
+       (아래 표 끝에도 같은 합계를 남겨 둔다 — 데이터 끝에서 바로 확인할 수 있게) */
+    const tops = [["판매수량", totalQty, "0"]];
+    tops.push(["공급가 합계", v.pay - perOrderShip, "#,##0"]);
+    if (perOrderShip) tops.push(["배송비 합계", perOrderShip, "#,##0"]);
+    if (v.ded) tops.push(["교환·반품 차감", -v.ded, "#,##0"]);
+    tops.push(["정산금액", v.final, "#,##0"]);
+
     ws.addRow([`${v.vendor} 정산서${p.label ? " — " + p.label : ""}`]);
     ws.getRow(1).font = { bold: true, size: 14 };
     ws.addRow([stampLine(`${v.rows.length}건`)]);
     ws.addRow(["※ 아래 금액은 모두 부가세가 포함된 금액입니다."]);
+    while (ws.rowCount < tops.length) ws.addRow([]);   // 요약이 길면 줄을 더 만든다
     ws.addRow([]);
+    // D=4, E=5 에 항목/금액. 마지막 줄(정산금액)은 굵게·파랗게
+    tops.forEach((t, i) => {
+      const row = ws.getRow(i + 1);
+      const label = row.getCell(4), val = row.getCell(5);
+      label.value = t[0]; val.value = Math.round(t[1]);
+      const last = i === tops.length - 1;
+      const font = { bold: true, size: last ? 13 : 11 };
+      if (last) font.color = { argb: "FF1A56DB" };
+      label.font = font; val.font = font;
+      // 셀 서식은 새 객체로 만들어 넣는다 (공유 객체를 고치면 다른 칸까지 번진다)
+      val.style = Object.assign({}, val.style, { numFmt: t[2] });
+      label.alignment = { horizontal: "right", vertical: "middle" };
+      val.alignment = { horizontal: "right", vertical: "middle" };
+    });
     ws.addRow(head);
     const hr = ws.lastRow.number;
     ws.getRow(hr).font = { bold: true };
@@ -951,6 +1002,12 @@ const ST = (() => {
     });
     for (let n = src.length + 1; n <= nCol; n++) { ws.getColumn(n).width = 14; ws.getColumn(n).numFmt = "#,##0"; }
     alignSheet(ws, nCol, src.length, hr);
+    // alignSheet 는 열 단위로 정렬을 덮어쓴다 → 상단 요약은 그 뒤에 다시 오른쪽으로
+    tops.forEach((t, i) => {
+      const row = ws.getRow(i + 1);
+      row.getCell(4).alignment = { horizontal: "right", vertical: "middle" };
+      row.getCell(5).alignment = { horizontal: "right", vertical: "middle" };
+    });
     return ws;
   }
 

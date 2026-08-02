@@ -1284,9 +1284,30 @@ async function fillRecipients(container, inp, opts) {
         container.appendChild(s);
       }
     } else if (!doms.length) {
+      // 도메인을 안 넣어뒀어도 메일함에서 찾을 수 있게 버튼을 준다.
+      // (도메인이 있으면 위에서 자동으로 걸러 보여주고, 없으면 찾은 주소를 그대로 보여준다)
+      const b = document.createElement("button");
+      b.className = "cand ghost"; b.textContent = "📬 메일에서 주소 찾기";
+      b.onclick = async () => {
+        const old = b.textContent;
+        b.textContent = "찾는 중…"; b.disabled = true;
+        try { await ensureGmail(); } catch (e) { b.textContent = old; b.disabled = false; return; }
+        try {
+          const found = await GMAIL.searchAddresses({ query: opts.query, max: 30 });
+          const list = found.map(f => f.email).filter(Boolean);
+          b.remove();
+          if (!list.length) {
+            const s2 = document.createElement("span");
+            s2.className = "candhint";
+            s2.textContent = `'${opts.query}' 로 주고받은 메일에서 주소를 못 찾았어요 — 직접 입력하세요`;
+            container.appendChild(s2);
+          } else list.slice(0, 12).forEach(addChip);
+        } catch (e) { b.textContent = "다시 시도"; b.disabled = false; }
+      };
+      container.appendChild(b);
       const s = document.createElement("span");
       s.className = "candhint";
-      s.textContent = "설정에서 이 업체의 메일 도메인을 넣으면, 메일함에서 받는사람을 자동으로 찾아줍니다.";
+      s.textContent = "설정에 이 업체의 메일 도메인을 넣어두면 다음부터 자동으로 찾아줍니다.";
       container.appendChild(s);
     } else {
       const b = document.createElement("button");
