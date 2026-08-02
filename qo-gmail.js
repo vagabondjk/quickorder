@@ -7,6 +7,8 @@ const GMAIL = (() => {
   const SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send " +
                  "https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive";  // drive = 읽기+쓰기(되쓰기용)
   const API = "https://gmail.googleapis.com/gmail/v1/users/me";
+  /* 공용 메일 도메인 — 업체 회사 도메인인지 가릴 때 쓴다 */
+  const FREEMAIL = /^(gmail|googlemail|naver|daum|hanmail|nate|kakao|hanmir|empas|korea|outlook|hotmail|live|msn|yahoo|icloud|me|proton|protonmail|aol|qq|163)\./i;
   // 회사별로 키를 분리 (같은 도메인에 여러 회사를 올려도 로그인이 섞이지 않게)
   const TKEY = CONFIG.ls("qo_gmail_token4");    // 토큰을 기기에 보관 → 로그인 유지
   const GKEY = CONFIG.ls("qo_gmail_granted4");  // 권한 승인 이력(토큰 만료 후 동의창 반복 방지)
@@ -308,6 +310,10 @@ const GMAIL = (() => {
     const ids = (listed.messages || []).map(m => m.id);
     let self = "";
     try { self = ((await profile()).emailAddress || "").toLowerCase(); } catch (e) {}
+    // 내 회사 도메인은 받는사람 후보가 아니다 (우리끼리 주고받은 주소가 섞여 올라온다).
+    // 다만 gmail 같은 공용 메일이면 도메인으로 거를 수 없으니 그대로 둔다.
+    const selfDom = (self.split("@")[1] || "").toLowerCase();
+    const ownDom = FREEMAIL.test(selfDom + ".") ? "" : selfDom;
     const tally = {};
     await Promise.all(ids.map(async id => {
       let msg;
@@ -318,12 +324,17 @@ const GMAIL = (() => {
         for (const addr of extractEmails(headerOf(msg, h))) {
           const lc = addr.toLowerCase();
           if (!lc || lc === self) continue;
+          if (ownDom && (lc.split("@")[1] || "") === ownDom) continue;
           if (/(no[-_.]?reply|mailer-daemon|postmaster|donotreply|notification)/i.test(lc)) continue;
-          tally[lc] = (tally[lc] || 0) + 1;
+          const t = tally[lc] = tally[lc] || { count: 0, from: 0 };
+          t.count++;
+          if (h === "From" || h === "Reply-To") t.from++;   // 보낸 사람이면 더 확실한 담당자
         }
       }
     }));
-    return Object.entries(tally).sort((a, b) => b[1] - a[1]).map(([email, count]) => ({ email, count }));
+    return Object.keys(tally)
+      .map(email => ({ email, count: tally[email].count, fromCount: tally[email].from }))
+      .sort((a, b) => b.count - a.count);
   }
 
   /* ---------- 구글 드라이브 (앱 전용 숨김 폴더 appDataFolder) ---------- */
