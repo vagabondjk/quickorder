@@ -703,9 +703,7 @@ const ST = (() => {
         <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)">여러 명에게 보내려면 쉼표로 구분</span>
           <button class="minibtn share">📤 카톡·공유</button><button class="minibtn pvbtn">미리보기</button><button class="minibtn dl">엑셀만 받기</button></div>
         <div class="setrow" style="margin-top:4px"><span class="fnlbl" style="flex:1;font-size:11px;color:var(--faint)"></span>
-          <button class="minibtn fn">✏️ 파일명 수정</button></div>
-        <div class="setrow" style="margin-top:4px"><span style="flex:1;font-size:11px;color:var(--faint)">계산에 쓰인 줄을 표로 봅니다</span>
-          <button class="minibtn pvv">👁 정산 내역</button></div>`;
+          <button class="minibtn fn">✏️ 파일명 수정</button></div>`;
       box.appendChild(row);
       const inp = row.querySelector("input");
       const ek = emailKey(v.vendor);            // ① 발주 탭에 저장된 업체 이메일을 같이 쓴다
@@ -744,7 +742,6 @@ const ST = (() => {
       row.querySelector(".dl").onclick = () => guard(async () => download(await vendorBuf(), fileName(v.vendor)));
       row.querySelector(".share").onclick = () => guard(async () => shareFile(await vendorBuf(), fileName(v.vendor)));
       row.querySelector(".pvbtn").onclick = () => guard(async () => openPreview(await vendorBuf(), v.vendor + " 정산서"));
-      row.querySelector(".pvv").onclick = () => showRows(v);
       row.querySelector(".dlbtn").onclick = () => sendOne(v, inp, row.querySelector(".dlbtn"));
     });
   }
@@ -835,21 +832,8 @@ const ST = (() => {
     });
   }
 
-  function showRows(v) {
-    const cols = ["정산일", "쇼핑몰", "주문번호", "상품명", "옵션", "수량",
-                  CO() + " 매출", "공급단가", CO() + " 마진", "지급액"];
-    const rows = v.rows.map(r => [r.date, r.mall, r.orderNo, r.product, r.option, r.qty,
-      Math.round(r.amount), r.priced === false ? "못 찾음" : (r.unitCost == null ? "" : Math.round(r.unitCost)),
-      Math.round(r.margin), Math.round(r.pay)]);
-    $("pv-modal-title").textContent = v.vendor + " 정산 내역";
-    $("pv-modal-sub").textContent = `${rows.length}건 · 지급액 ${won(v.final)}`
-      + (v.unpriced ? ` · ⚠ 단가 못 찾음 ${v.unpriced}건` : "");
-    const tbl = $("pv-modal-table");
-    tbl.innerHTML = `<thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead>`
-      + `<tbody>${rows.map(r => `<tr>${r.map((c, i) => `<td${i >= 5 ? ' class="num"' : ""}>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody>`;
-    $("pv-modal-foot").textContent = "";
-    $("pvmodal").classList.add("on");
-  }
+  /* '정산 내역' 화면 표는 뺐다 (2026-08-03) — 미리보기와 겹쳐서.
+     내부 숫자(매출·마진)는 업체 카드 위쪽 요약과 '전체 정산표 (내부용)' 에 있다. */
 
   /* =================================================================
      엑셀 / 메일
@@ -1088,19 +1072,20 @@ const ST = (() => {
       await ensureGmail();
       const buf = await buildExcel([v]);          // 업체용 — 매출·마진 없음
       const p = (result && result.period) || { label: "" };
-      const body = `안녕하세요, ${CONFIG.company}입니다.\n\n`
-        + (p.label ? `${p.label} 정산 내역을 보내드립니다. (작성일 ${QO.fmtDate(QO.todayStr())})\n\n`
-                   : `${QO.fmtDate(QO.todayStr())} 기준 정산 내역을 보내드립니다.\n\n`)
-        + `· 건수: ${v.rows.length}건 (수량 ${v.rows.reduce((s2, r) => s2 + (r.qty || 0), 0)}개)\n`
+      const qty = v.rows.reduce((s2, r) => s2 + (r.qty || 0), 0);
+      // 금액 요약은 자동으로 만들어 {요약} 자리에 넣는다 (문구는 설정에서 바꿀 수 있다)
+      const summary = `· 건수: ${v.rows.length}건 (수량 ${qty}개)\n`
         + `· 공급가 합계: ${won(v.pay)}\n`
         + (v.ded ? `· CS 차감(교환·반품): -${won(v.ded)}\n` : "")
-        + `· 지급액: ${won(v.final)} (부가세 포함)\n`
-        + (v.unpriced ? `\n※ 단가가 아직 확정되지 않은 ${v.unpriced}건은 이번 지급액에서 빠져 있습니다. 단가 확정 후 정산해 드리겠습니다.\n` : "")
-        + `\n자세한 내역은 첨부 파일을 확인해주세요.\n감사합니다.`;
+        + `· 지급액: ${won(v.final)} (부가세 포함)`
+        + (v.unpriced ? `\n\n※ 단가가 아직 확정되지 않은 ${v.unpriced}건은 이번 지급액에서 빠져 있습니다. 단가 확정 후 정산해 드리겠습니다.` : "");
+      const tpl = MAILTPL.render("settle", {
+        회사: CONFIG.company, 업체: v.vendor, 정산월: p.label || QO.fmtDate(QO.todayStr()),
+        날짜: QO.fmtDate(QO.todayStr()), 건수: v.rows.length, 수량: qty,
+        지급액: won(v.final), 요약: summary,
+      });
       await GMAIL.send({
-        to: to.join(", "),
-        subject: `[${CONFIG.company}] ${p.label ? p.label + " " : ""}정산서 - ${v.vendor} (작성 ${QO.fmtDate(QO.todayStr())})`,
-        body,
+        to: to.join(", "), subject: tpl.subject, body: tpl.body,
         attachments: [{ filename: fileName(v.vendor), data: buf }],
       });
       const ek = emailKey(v.vendor);              // ① 발주 탭과 같은 키로 이력을 쌓는다

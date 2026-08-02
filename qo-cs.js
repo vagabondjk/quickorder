@@ -537,12 +537,11 @@ const CS = (() => {
       await ensureGmail();
       const buf = await buildExcel(rows);
       const fname = `${QO.todayStr()}_${CONFIG.company}_${cleanVendor(vendor)}_CS내역.xlsx`;
-      const body = `안녕하세요, ${CONFIG.company}입니다.\n\n아래 CS 건 확인 부탁드립니다. (총 ${rows.length}건)\n\n`
-        + csText(rows) + `\n\n자세한 내용은 첨부 파일을 참고해주세요.\n감사합니다.`;
+      const tpl = MAILTPL.render("cs", { 회사: CONFIG.company, 업체: vendor,
+        날짜: QO.fmtDate(QO.todayStr()), 건수: rows.length });
+      const body = tpl.body + "\n" + csText(rows) + `\n\n자세한 내용은 첨부 파일을 참고해주세요.\n감사합니다.`;
       await GMAIL.send({
-        to: to.join(", "),
-        subject: `[${CONFIG.company}] CS 요청 ${rows.length}건 - ${QO.fmtDate(QO.todayStr())}`,
-        body,
+        to: to.join(", "), subject: tpl.subject, body,
         attachments: [{ filename: fname, data: buf }],
       });
       if (vendor !== "(업체 미지정)") {

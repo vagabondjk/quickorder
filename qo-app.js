@@ -172,6 +172,93 @@ const readFile = f => new Promise((res, rej) => {
   r.readAsArrayBuffer(f);
 });
 
+/* =====================================================================
+   메일 문구 — 발주서·송장·정산·CS 가 같이 쓴다.
+   기본 문구를 두되 사용자가 고치면 기억한다. {회사}·{업체} 처럼 중괄호로 값이 들어간다.
+   ===================================================================== */
+const MAILTPL = (() => {
+  const DEF = {
+    order:   { name: "발주서", subject: "[{회사}] {날짜}_발주서 송부",
+               body: "안녕하세요 발주서 송부드립니다. 감사합니다!",
+               vars: ["회사", "업체", "날짜", "건수"] },
+    invoice: { name: "송장 취합본", subject: "[{회사}] {날짜}_송장 취합본 송부",
+               body: "안녕하세요 송장 취합본 송부드립니다. 감사합니다!",
+               vars: ["회사", "업체", "날짜"] },
+    settle:  { name: "정산서", subject: "[{회사}] {정산월} 정산서 - {업체}",
+               body: "안녕하세요, {회사}입니다.\n\n{정산월} 정산 내역을 보내드립니다. (작성일 {날짜})\n\n{요약}\n\n자세한 내역은 첨부 파일을 확인해주세요.\n감사합니다.",
+               vars: ["회사", "업체", "정산월", "날짜", "건수", "수량", "지급액", "요약"] },
+    cs:      { name: "CS 요청", subject: "[{회사}] CS 요청 {건수}건 - {날짜}",
+               body: "안녕하세요, {회사}입니다.\n\n아래 CS 건 확인 부탁드립니다. (총 {건수}건)\n",
+               vars: ["회사", "업체", "날짜", "건수"] },
+  };
+  let saved = {};
+  async function load() { saved = (await DB.get("mailTemplates", {})) || {}; }
+  const get = k => Object.assign({}, DEF[k], saved[k] || {});
+  /* {키} 를 값으로 바꾼다. 모르는 키는 그대로 둔다(지워버리면 왜 빠졌는지 알 수 없다). */
+  function fill(s, vars) {
+    return String(s == null ? "" : s).replace(/\{([^}\s]+)\}/g,
+      (m, k) => (vars && vars[k] !== undefined && vars[k] !== null ? String(vars[k]) : m));
+  }
+  function render(kind, vars) {
+    const t = get(kind);
+    return { subject: fill(t.subject, vars), body: fill(t.body, vars) };
+  }
+
+  let cur = null;
+  function open(kind, sample) {
+    cur = { kind, sample: sample || {} };
+    const d = DEF[kind], t = get(kind);
+    $("tpl-title").textContent = `${d.name} 메일 문구`;
+    $("tpl-sub").textContent = "여기서 고친 제목·본문을 앞으로 계속 씁니다.";
+    $("tpl-subject").value = t.subject;
+    $("tpl-body").value = t.body;
+    $("tpl-vars").innerHTML = "쓸 수 있는 값: " +
+      d.vars.map(v => `<b>{${esc(v)}}</b>`).join(" · ") + " — 보낼 때 실제 값으로 바뀝니다";
+    preview();
+    $("tplmodal").classList.add("on");
+  }
+  function preview() {
+    if (!cur) return;
+    const s = fill($("tpl-subject").value, cur.sample);
+    const b = fill($("tpl-body").value, cur.sample);
+    $("tpl-preview").textContent = "미리보기\n제목: " + s + "\n\n" + b;
+  }
+  function close() { $("tplmodal").classList.remove("on"); cur = null; }
+
+  $("tpl-subject").oninput = $("tpl-body").oninput = preview;
+  $("tpl-close").onclick = close;
+  $("tplmodal").onclick = e => { if (e.target === $("tplmodal")) close(); };
+  $("tpl-reset").onclick = () => {
+    if (!cur) return;
+    $("tpl-subject").value = DEF[cur.kind].subject;
+    $("tpl-body").value = DEF[cur.kind].body;
+    preview();
+  };
+  $("tpl-save").onclick = async () => {
+    if (!cur) return;
+    saved[cur.kind] = { subject: $("tpl-subject").value, body: $("tpl-body").value };
+    await DB.set("mailTemplates", saved);
+    close();
+  };
+  /* 각 탭의 '✏️ 메일 문구' 버튼 */
+  document.querySelectorAll("[data-mailtpl]").forEach(b => b.onclick = () => {
+    const k = b.dataset.mailtpl;
+    open(k, sampleVars(k));
+  });
+  function sampleVars(kind) {
+    const co = (typeof CONFIG !== "undefined" && CONFIG.company) || "우리회사";
+    const base = { 회사: co, 업체: "○○업체", 날짜: QO.fmtDate(QO.todayStr()), 건수: "12", 수량: "18" };
+    if (kind === "settle") {
+      const p = (window.ST && ST.result() && ST.result().period) || null;
+      base.정산월 = (p && p.label) || "2026년 7월";
+      base.지급액 = "1,234,000원";
+      base.요약 = "· 건수: 12건 (수량 18개)\n· 공급가 합계: 1,200,000원\n· 지급액: 1,234,000원 (부가세 포함)";
+    }
+    return base;
+  }
+  return { load, get, render, open };
+})();
+
 /* 버전 표기 — qo-version.js 한 곳에서 읽어 배지와 푸터에 같이 넣는다.
    손으로 여러 곳을 고치다 하나를 빠뜨리는 일을 막으려고 이렇게 해뒀다. */
 (function showVersion() {
@@ -854,6 +941,7 @@ async function loadForms() {
   S.vendorDomains = await DB.get("vendorDomains", {});
   S.invEmails = await DB.get("invEmails", "");
   S.invSent = await DB.get("invSent", []);
+  await MAILTPL.load();                     // 저장해둔 메일 문구
   drawForms(); buildVendorBrands(); refreshO();
 }
 function drawForms() {
@@ -1096,8 +1184,8 @@ function showResultO(results, skipped, verify) {
       try {
         await ensureGmail();
         const ymd = QO.todayStr().slice(2);
-        await GMAIL.send({ to: list.join(", "), subject: `[${CONFIG.company}] ${ymd}_발주서 송부`,
-          body: "안녕하세요 발주서 송부드립니다. 감사합니다!",
+        const tpl = MAILTPL.render("order", { 회사: CONFIG.company, 업체: r.supplier, 날짜: ymd, 건수: r.count });
+        await GMAIL.send({ to: list.join(", "), subject: tpl.subject, body: tpl.body,
           attachments: [{ filename: r.filename, data: r.buf }] });
         S.vendorEmails[r.supplier] = inp.value.trim(); await DB.set("vendorEmails", S.vendorEmails);
         await recordSent(r.supplier, list);      // 보낸 주소들을 이력에 기억
@@ -1375,8 +1463,8 @@ function showResultI(out, buf, filename) {
     try {
       await ensureGmail();
       const ymd = QO.todayStr().slice(2);
-      await GMAIL.send({ to: list.join(", "), subject: `[${CONFIG.company}] ${ymd}_송장 취합본 송부`,
-        body: "안녕하세요 송장 취합본 송부드립니다. 감사합니다!",
+      const tpl = MAILTPL.render("invoice", { 회사: CONFIG.company, 날짜: ymd, 업체: "" });
+      await GMAIL.send({ to: list.join(", "), subject: tpl.subject, body: tpl.body,
         attachments: [{ filename, data: buf }] });
       S.invEmails = $("inv-to").value.trim(); await DB.set("invEmails", S.invEmails);
       await recordSentInv(list);      // 보낸 곳 이력에 기억
