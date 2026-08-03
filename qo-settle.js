@@ -856,7 +856,7 @@ const ST = (() => {
         const okey = QO.priceRowKey(r.brand, r.product, r.option);
         if (sel.value) {
           aliases[okey] = sel.value;
-          // 나중에 '상품 연결표'에서 사람이 읽을 수 있게 원래 이름을 같이 남긴다
+          // 나중에 '상품명 매칭관리'에서 사람이 읽을 수 있게 원래 이름을 같이 남긴다
           aliasInfo[okey] = { brand: r.brand || "", product: r.product || "", option: r.option || "" };
         } else { delete aliases[okey]; delete aliasInfo[okey]; }
         await DB.set("priceAliases", aliases);
@@ -868,7 +868,7 @@ const ST = (() => {
   }
 
   /* =================================================================
-     상품 연결표 — 자동으로 못 붙어서 사람이 골라준 매칭을 다시 보고 고친다.
+     상품명 매칭관리 — 자동으로 못 붙어서 사람이 골라준 매칭을 다시 보고 고친다.
      여기가 틀리면 그 상품 지급액이 통째로 틀리는데, 한 번 저장하면 계속 쓰여서
      들여다볼 방법이 없으면 잘못된 연결이 몇 달을 간다.
      ================================================================= */
