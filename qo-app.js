@@ -513,17 +513,22 @@ async function drvPick(files) {
 
 /* --- ① 쇼핑몰 주문 파일 --- */
 // 폴더 탐색으로 골라서 바로 변환 (고른 파일은 '바로 가져오기' 대상으로도 자동 지정)
-$("drive-order").onclick = () => openDrivePicker({
-  key: "order", title: "드라이브에서 발주서 가져오기", multiple: false,
-  onPick: async files => {
-    const f = files[0];
-    const r = await GMAIL.driveFetchExcel(f.id);
-    await DB.set("driveOrderFile", { id: f.id, name: r.name });
-    await setOrderFromBuf(r.buf, r.name);
-    drawDriveRecent();
-    msg("msg-o", "ok", `✔ 드라이브에서 가져왔어요: ${r.name}`);
-  },
-});
+// ※ 별도 버튼은 없앴다 — '지정 파일 · 다른 파일로 변경' 으로 같은 일을 한다.
+//    설정 등 다른 데서 부를 수 있게 함수는 남겨 둔다.
+function pickOrderFromDrive() {
+  return openDrivePicker({
+    key: "order", title: "드라이브에서 발주서 가져오기", multiple: false,
+    onPick: async files => {
+      const f = files[0];
+      const r = await GMAIL.driveFetchExcel(f.id);
+      await DB.set("driveOrderFile", { id: f.id, name: r.name });
+      await setOrderFromBuf(r.buf, r.name);
+      drawDriveRecent();
+      msg("msg-o", "ok", `✔ 드라이브에서 가져왔어요: ${r.name}`);
+    },
+  });
+}
+if ($("drive-order")) $("drive-order").onclick = pickOrderFromDrive;
 // '바로 가져올 파일' 지정/변경 — 가져오지 않고 대상만 지정
 function pickOrderPin() {
   openDrivePicker({

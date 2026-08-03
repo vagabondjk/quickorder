@@ -333,11 +333,15 @@
     <div class="card">
       <h2><span class="n">1</span>쇼핑몰 주문 파일</h2>
       <p class="hint">메일·드라이브·파일에서 불러오세요.</p>
-      <button class="go" id="drive-again" style="display:none;margin:0 0 4px;font-size:15px;padding:14px;background:var(--ok);color:#fff">📥 발주서 바로 가져오기</button>
-      <div class="pinrow" id="order-pinrow" style="display:none">지정 파일: <b id="order-pinname">-</b> <button class="minibtn" id="order-pin-change">변경</button> <button class="minibtn" id="order-pin-clear">해제</button></div>
+      <button class="go" id="drive-again" style="display:none;margin:0 0 6px;font-size:15px;padding:14px;background:var(--ok);color:#fff">📁 구글 드라이브에서 발주서 바로 가져오기</button>
+      <div class="pinrow" id="order-pinrow" style="display:none;font-size:12.5px;background:var(--card2);
+        border:1px solid var(--line);border-radius:10px;padding:9px 10px;margin:0 0 8px">
+        <span style="flex:1;min-width:0">지정 파일: <b id="order-pinname">-</b></span>
+        <button class="minibtn" id="order-pin-change" style="padding:9px 16px;font-size:12.5px;font-weight:800;
+          background:var(--brand-soft);color:var(--brand);border-color:var(--brand)">📁 다른 파일로 변경</button>
+        <button class="minibtn" id="order-pin-clear">해제</button></div>
       <button class="minibtn" id="order-pin-set" style="margin:0 0 8px">📌 바로 가져올 발주서 파일 지정</button>
       <button class="go" id="mail-order" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 발주서 가져오기</button>
-      <button class="go" id="drive-order" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📁 드라이브에서 발주서 선택</button>
       <div class="setrow"><span id="gmail-who-o">메일 연결 확인 중…</span></div>
       <div class="setrow"><span id="order-filter">발주서 검색: onekglobal.co.kr · 키워드 랩노마드</span><button class="minibtn" id="order-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-order" style="margin-top:8px">
