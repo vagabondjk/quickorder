@@ -1154,13 +1154,28 @@ function isPriceHeader(h) {
   if (!s) return false;
   return /tag가|tag|원가|판매가|소비자가|공급가|공급단가|정산금액|결제금액|주문금액|매출|마진|수익|이익|단가|금액|수수료|할인|부가세|세액/.test(s);
 }
-/* 업체용 표에 남길 열 목록. 원래 파일의 열 순서를 지키고, 가격 열과 빈 헤더만 걷어낸다. */
+/* 우리 내부에서만 쓰는 열 — 업체용 정산서에서는 뺀다 (2026-08-04 지정).
+   수집일자·모델명은 우리 관리용이고, 주문번호 두 개는 우리 시스템/몰 쪽 번호다.
+   ※ 여기서 뺀 열은 업체가 볼 수 없다. 늘리거나 줄일 때는 업체가 자기 주문과
+     대조할 수 있는 정보(수취인·상품명·옵션·수량)가 남는지 확인할 것. */
+function isInternalHeader(h) {
+  const s = String(h === null || h === undefined ? "" : h).replace(/\s/g, "");
+  if (!s) return false;
+  if (/^(주문)?수집일자$/.test(s)) return true;
+  if (/^모델명$/.test(s)) return true;
+  if (/^배송메[세시]지$/.test(s)) return true;
+  if (/사방넷/.test(s)) return true;                       // 주문번호(사방넷)
+  if (/주문번호/.test(s) && /쇼핑몰|몰/.test(s)) return true; // 주문번호(쇼핑몰)
+  return false;
+}
+/* 업체용 표에 남길 열 목록. 원래 파일의 열 순서를 지키고,
+   가격 열·내부 전용 열·빈 헤더를 걷어낸다. */
 function vendorSheetColumns(colLists) {
   const out = [];
   (colLists || []).forEach(cols => (cols || []).forEach(h => {
     const t = String(h === null || h === undefined ? "" : h).trim();
     if (!t) return;
-    if (isPriceHeader(t)) return;
+    if (isPriceHeader(t) || isInternalHeader(t)) return;
     if (out.indexOf(t) < 0) out.push(t);
   }));
   return out;
@@ -1265,5 +1280,5 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, todayStr, fmtDate,
   normPriceText, toPriceNumber, priceKeyParts, priceRowKey, buildPriceBook, matchPrice,
   rankPriceCandidates, settle, settleCheck,
-  settleSheetHead, settleSheetRow, isPriceHeader, vendorSheetColumns, carryNote };
+  settleSheetHead, settleSheetRow, isPriceHeader, isInternalHeader, vendorSheetColumns, carryNote };
 });

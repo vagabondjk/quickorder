@@ -703,8 +703,7 @@ const ST = (() => {
         <div class="setrow" style="margin-top:4px"><span class="fnlbl" style="flex:1;font-size:11px;color:var(--faint)"></span>
           <button class="minibtn tpl">${mailtplLabel("settle", v.vendor)}</button><button class="minibtn fn">✏️ 파일명 수정</button></div>`;
       box.appendChild(row);
-      bindMailtplBtn(row.querySelector(".tpl"), "settle", v.vendor,
-        { 업체: v.vendor, 건수: v.rows.length, 수량: v.qty, 지급액: won(v.final) });
+      bindMailtplBtn(row.querySelector(".tpl"), "settle", v.vendor, mailVars(v));
       const inp = row.querySelector("input");
       const ek = emailKey(v.vendor);            // ① 발주 탭에 저장된 업체 이메일을 같이 쓴다
       const known = (S.vendorEmails || {})[ek] || "";
@@ -1257,6 +1256,23 @@ const ST = (() => {
     return await wb.xlsx.writeBuffer();
   }
 
+  /* 정산 메일에 채워 넣을 값 — 실제로 보낼 때와 '메일내용 수정' 미리보기가
+     같은 함수를 쓴다. 미리보기에 견본 숫자가 나오면 진짜 금액인 줄 알고 헷갈린다. */
+  function mailVars(v) {
+    const p = (result && result.period) || { label: "" };
+    const qty = v.rows.reduce((s2, r) => s2 + (r.qty || 0), 0);
+    const summary = `· 건수: ${v.rows.length}건 (수량 ${qty}개)\n`
+      + `· 공급가 합계: ${won(v.pay)}\n`
+      + (v.ded ? `· CS 차감(교환·반품): -${won(v.ded)}\n` : "")
+      + `· 지급액: ${won(v.final)} (부가세 포함)`
+      + (v.unpriced ? `\n\n※ 단가가 아직 확정되지 않은 ${v.unpriced}건은 이번 지급액에서 빠져 있습니다. 단가 확정 후 정산해 드리겠습니다.` : "");
+    return {
+      회사: CONFIG.company, 업체: v.vendor, 정산월: p.label || QO.fmtDate(QO.todayStr()),
+      날짜: QO.fmtDate(QO.todayStr()), 건수: v.rows.length, 수량: qty,
+      지급액: won(v.final), 요약: summary,
+    };
+  }
+
   async function sendOne(v, inp, btn) {
     const to = parseEmails(inp.value);
     if (!to.length) { alert("받는사람 이메일을 입력해주세요."); return; }
@@ -1265,19 +1281,7 @@ const ST = (() => {
     try {
       await ensureGmail();
       const buf = await buildExcel([v]);          // 업체용 — 매출·마진 없음
-      const p = (result && result.period) || { label: "" };
-      const qty = v.rows.reduce((s2, r) => s2 + (r.qty || 0), 0);
-      // 금액 요약은 자동으로 만들어 {요약} 자리에 넣는다 (문구는 설정에서 바꿀 수 있다)
-      const summary = `· 건수: ${v.rows.length}건 (수량 ${qty}개)\n`
-        + `· 공급가 합계: ${won(v.pay)}\n`
-        + (v.ded ? `· CS 차감(교환·반품): -${won(v.ded)}\n` : "")
-        + `· 지급액: ${won(v.final)} (부가세 포함)`
-        + (v.unpriced ? `\n\n※ 단가가 아직 확정되지 않은 ${v.unpriced}건은 이번 지급액에서 빠져 있습니다. 단가 확정 후 정산해 드리겠습니다.` : "");
-      const tpl = MAILTPL.render("settle", {
-        회사: CONFIG.company, 업체: v.vendor, 정산월: p.label || QO.fmtDate(QO.todayStr()),
-        날짜: QO.fmtDate(QO.todayStr()), 건수: v.rows.length, 수량: qty,
-        지급액: won(v.final), 요약: summary,
-      });
+      const tpl = MAILTPL.render("settle", mailVars(v));
       await GMAIL.send({
         to: to.join(", "), subject: tpl.subject, body: tpl.body,
         attachments: [{ filename: fileName(v.vendor), data: buf }],

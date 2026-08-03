@@ -210,9 +210,9 @@ const MAILTPL = (() => {
   }
 
   let cur = null;
-  function open(kind, sample, vendor, after) {
+  function open(kind, sample, vendor, after, real) {
     const v = (vendor || "").trim();
-    cur = { kind, vendor: v, sample: sample || {}, after };
+    cur = { kind, vendor: v, sample: sample || {}, after, real: !!real };
     const d = DEF[kind], t = get(kind, v);
     $("tpl-title").textContent = v ? `${v} — ${d.name} 메일 내용` : `${d.name} 메일 내용 (공통)`;
     $("tpl-sub").textContent = v
@@ -229,7 +229,9 @@ const MAILTPL = (() => {
     if (!cur) return;
     const s = fill($("tpl-subject").value, cur.sample);
     const b = fill($("tpl-body").value, cur.sample);
-    $("tpl-preview").textContent = "미리보기\n제목: " + s + "\n\n" + b;
+    // 견본 숫자를 실제 금액으로 오해하지 않게 제목을 다르게 적는다
+    const head = cur.real ? "미리보기 (실제 값)" : "미리보기 — 아래 숫자는 예시입니다";
+    $("tpl-preview").textContent = head + "\n제목: " + s + "\n\n" + b;
   }
   function close() { $("tplmodal").classList.remove("on"); cur = null; }
 
@@ -288,8 +290,9 @@ function bindMailtplBtn(btn, kind, vendor, extraVars) {
   if (!btn) return;
   btn.title = "이 업체에게 보낼 메일 제목·본문을 따로 정합니다";
   btn.onclick = () => {
+    // 업체 카드에서 열면 그 업체의 진짜 숫자로 미리 보여준다 (견본 금액이면 오해를 산다)
     const sample = Object.assign(MAILTPL.sampleVars(kind), { 업체: vendor }, extraVars || {});
-    MAILTPL.open(kind, sample, vendor, () => { btn.innerHTML = mailtplLabel(kind, vendor); });
+    MAILTPL.open(kind, sample, vendor, () => { btn.innerHTML = mailtplLabel(kind, vendor); }, true);
   };
 }
 
