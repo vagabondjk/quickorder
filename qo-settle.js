@@ -1268,6 +1268,7 @@ const ST = (() => {
       + (v.unpriced ? `\n\n※ 단가가 아직 확정되지 않은 ${v.unpriced}건은 이번 지급액에서 빠져 있습니다. 단가 확정 후 정산해 드리겠습니다.` : "");
     return {
       회사: CONFIG.company, 업체: v.vendor, 정산월: p.label || QO.fmtDate(QO.todayStr()),
+      정산기간: periodRange(),        // 그 달 1일~말일 (엑셀 머리말과 같은 값)
       날짜: QO.fmtDate(QO.todayStr()), 건수: v.rows.length, 수량: qty,
       지급액: won(v.final), 요약: summary,
     };
@@ -1438,7 +1439,7 @@ const ST = (() => {
   }
 
   init();
-  return { onShow, drawFilter: drawFilterLine, markSettled, calc, result: () => result,
+  return { onShow, drawFilter: drawFilterLine, markSettled, calc, result: () => result, periodRange,
            /* 검증용 — 업체용 정산서(합계 수식·머리말)를 화면 없이 만들어 볼 수 있게 열어둔다 */
            _make: (r, v) => { result = r; const wb = new ExcelJS.Workbook(); vendorSheet(wb, v); return wb; } };
 })();
