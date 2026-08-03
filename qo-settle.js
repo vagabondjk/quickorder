@@ -1053,7 +1053,18 @@ const ST = (() => {
     };
     const qtyVals = [];
 
-    v.rows.forEach(r => {
+    /* 주문일이 이른 것부터 적는다 — 업체가 자기 출고 순서대로 훑을 수 있게.
+       원본 v.rows 는 합계·검산이 함께 쓰므로 복사본을 정렬한다.
+       주문일이 비어 있으면 수집일자로 대신하고, 그것도 없으면 원래 순서를 지킨다. */
+    const dkey = r => String(r.orderDate || r.date || "").replace(/\D/g, "");
+    const sorted = v.rows.map((r, i) => ({ r, i })).sort((a, b) => {
+      const x = dkey(a.r), y = dkey(b.r);
+      if (x && y && x !== y) return x < y ? -1 : 1;
+      if (!!x !== !!y) return x ? -1 : 1;      // 날짜 없는 줄은 뒤로
+      return a.i - b.i;                        // 같으면 원래 순서 유지
+    }).map(o => o.r);
+
+    sorted.forEach(r => {
       const idx = {};
       (r.srcCols || []).forEach((h, i) => { const t = String(h || "").trim(); if (t && idx[t] === undefined) idx[t] = i; });
       const line = src.map(h => (idx[h] === undefined ? "" : (r.raw ? r.raw[idx[h]] : "")));
