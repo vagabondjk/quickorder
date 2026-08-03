@@ -559,7 +559,8 @@ $("order-pin-clear").onclick = async () => {
 };
 // 지정한 발주서를 한 번에(폴더 탐색 없이) 최신본으로 가져와 바로 변환 프로세스로
 $("drive-again").onclick = async function () {
-  const f = await DB.get("driveOrderFile", null); if (!f || !f.id) return;
+  const f = await DB.get("driveOrderFile", null);
+  if (!f || !f.id) { pickOrderPin(true); return; }   // 지정된 게 없으면 드라이브에서 고르게
   this.disabled = true; const orig = this.innerHTML; this.textContent = "가져오는 중…";
   msg("msg-o", "", "");
   try {
@@ -573,9 +574,11 @@ $("drive-again").onclick = async function () {
 async function drawDriveRecent() {
   const f = await DB.get("driveOrderFile", null);
   const has = !!(f && f.id);
-  $("drive-again").style.display = has ? "block" : "none";
+  // 퀵로딩 버튼은 항상 보인다. 지정 파일이 없으면 누를 때 드라이브에서 고르게 한다
+  // (지정 전에는 숨겨져 있어서 드라이브로 갈 길이 아예 없었다)
+  $("drive-again").style.display = "block";
   $("order-pinrow").style.display = has ? "flex" : "none";
-  $("order-pin-set").style.display = has ? "none" : "block";
+  $("order-pin-set").style.display = "none";
   if (has) { $("order-pinname").textContent = f.name; }
 }
 
@@ -650,7 +653,8 @@ $("sab-pin-clear").onclick = async () => {
 };
 // 지정한 송장취합양식을 한 번에 최신본으로 가져오기
 $("sab-again").onclick = async function () {
-  const f = await DB.get("driveSabFile", null); if (!f || !f.id) return;
+  const f = await DB.get("driveSabFile", null);
+  if (!f || !f.id) { pickSabPin(true); return; }      // 지정된 게 없으면 드라이브에서 고르게
   this.disabled = true; const orig = this.innerHTML; this.textContent = "가져오는 중…";
   msg("msg-i", "", "");
   try {
@@ -663,9 +667,9 @@ $("sab-again").onclick = async function () {
 async function drawSabRecent() {
   const f = await DB.get("driveSabFile", null);
   const has = !!(f && f.id);
-  $("sab-again").style.display = has ? "block" : "none";
+  $("sab-again").style.display = "block";      // 항상 보인다 (위 drawDriveRecent 주석 참고)
   $("sab-pinrow").style.display = has ? "flex" : "none";
-  $("sab-pin-set").style.display = has ? "none" : "block";
+  $("sab-pin-set").style.display = "none";
   if (has) { $("sab-pinname").textContent = f.name; }
 }
 
