@@ -284,10 +284,13 @@ const ST = (() => {
   function drawFiles() {
     const box = $("st-files");
     if (!files.length) { box.innerHTML = ""; return; }
-    box.innerHTML = files.map((f, i) => `<div class="vrow on">
-        <div class="vtop"><b>📄 ${esc(f.name)}</b><button class="vdel" data-i="${i}">✕</button></div>
-        <span class="vfile">${f.rows.length}행</span></div>`).join("")
-      + `<div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)">올린 정산 파일을 모두 비웁니다</span>
+    // 한 줄에 하나씩, 폭을 다 써서 파일명이 잘리지 않게 (칩으로 나열하면 이름이 잘렸다)
+    box.innerHTML = files.map((f, i) => `<div style="display:flex;align-items:center;gap:8px;
+        padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:var(--card2);margin-bottom:5px">
+        <span style="flex:1;min-width:0;font-size:12.5px;line-height:1.45;word-break:break-all">📄 <b>${esc(f.name)}</b>
+          <span style="color:var(--muted)"> · ${f.rows.length}행</span></span>
+        <button class="minibtn vdel" data-i="${i}" style="flex:none">✕</button></div>`).join("")
+      + `<div style="display:flex;justify-content:flex-end;margin-top:2px">
            <button class="minibtn" id="st-clear-all">전체 해제</button></div>`;
     box.querySelectorAll(".vdel").forEach(b => b.onclick = () => {
       files.splice(Number(b.dataset.i), 1);

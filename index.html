@@ -333,7 +333,7 @@
     <div class="card">
       <h2><span class="n">1</span>쇼핑몰 주문 파일</h2>
       <p class="hint">메일·드라이브·파일에서 불러오세요.</p>
-      <button class="go" id="drive-again" style="display:none;margin:0 0 6px;font-size:15px;padding:14px;background:var(--ok);color:#fff">📁 구글 드라이브에서 발주서 바로 가져오기</button>
+      <button class="go" id="drive-again" style="display:none;margin:0 0 6px;font-size:15px;padding:14px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <div class="pinrow" id="order-pinrow" style="display:none;font-size:12.5px;background:var(--card2);
         border:1px solid var(--line);border-radius:10px;padding:9px 10px;margin:0 0 8px">
         <span style="flex:1;min-width:0">지정 파일: <b id="order-pinname">-</b></span>
@@ -341,11 +341,11 @@
           background:var(--brand-soft);color:var(--brand);border-color:var(--brand)">📁 다른 파일로 변경</button>
         <button class="minibtn" id="order-pin-clear">해제</button></div>
       <button class="minibtn" id="order-pin-set" style="margin:0 0 8px">📌 바로 가져올 발주서 파일 지정</button>
-      <button class="go" id="mail-order" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 발주서 가져오기</button>
+      <button class="go" id="mail-order" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 퀵로딩</button>
       <div class="setrow"><span id="gmail-who-o">메일 연결 확인 중…</span></div>
       <div class="setrow"><span id="order-filter">발주서 검색: onekglobal.co.kr · 키워드 랩노마드</span><button class="minibtn" id="order-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-order" style="margin-top:8px">
-        PC에서 파일 선택 또는 끌어오기
+        디바이스 파일 선택 또는 끌어오기
         <b id="order-name"></b>
         <input type="file" id="f-order" accept=".xlsx,.xlsm">
       </label>
@@ -377,7 +377,7 @@
       <h2><span class="n">2</span>업체 양식</h2>
       <p class="hint">한 번 올려두면 다음부터 체크만 하면 됩니다.</p>
       <div class="vlist" id="vlist"><div class="empty">불러오는 중…</div></div>
-      <button class="go" id="drive-tpl" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📁 드라이브에서 업체 양식 가져오기</button>
+      <button class="go" id="drive-tpl" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <label class="drop" id="drop-tpl" style="margin-top:10px;padding:14px">
         ＋ 업체 양식 추가
         <input type="file" id="f-tpl" accept=".xlsx,.xlsm" multiple>
@@ -405,7 +405,7 @@
   <div class="pane" id="pane-i">
     <div class="card">
       <h2><span class="n">1</span>송장취합양식</h2>
-      <button class="go" id="sab-again" style="display:none;margin:0 0 6px;font-size:15px;padding:14px;background:var(--ok);color:#fff">📁 구글 드라이브에서 송장취합양식 바로 가져오기</button>
+      <button class="go" id="sab-again" style="display:none;margin:0 0 6px;font-size:15px;padding:14px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <div class="pinrow" id="sab-pinrow" style="display:none;font-size:12.5px;background:var(--card2);
         border:1px solid var(--line);border-radius:10px;padding:9px 10px;margin:0 0 8px">
         <span style="flex:1;min-width:0">지정 파일: <b id="sab-pinname">-</b></span>
@@ -413,9 +413,9 @@
           background:var(--brand-soft);color:var(--brand);border-color:var(--brand)">📁 다른 파일로 변경</button>
         <button class="minibtn" id="sab-pin-clear">해제</button></div>
       <button class="minibtn" id="sab-pin-set" style="margin:0 0 8px">📌 바로 가져올 송장취합양식 파일 지정</button>
-      <button class="go" id="mail-sab" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 송장취합양식 가져오기</button>
+      <button class="go" id="mail-sab" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 퀵로딩</button>
       <label class="drop" id="drop-sab">
-        PC에서 파일 선택 또는 끌어오기
+        디바이스 파일 선택 또는 끌어오기
         <b id="sab-name"></b>
         <input type="file" id="f-sab" accept=".xlsx,.xlsm">
       </label>
@@ -428,8 +428,8 @@
     <div class="card">
       <h2><span class="n">2</span>업체 회신 송장</h2>
       <p class="hint">여러 개 불러올 수 있습니다.</p>
-      <button class="go" id="mail-rep" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 회신 송장 가져오기</button>
-      <button class="go" id="drive-rep" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📁 드라이브에서 회신 송장 가져오기</button>
+      <button class="go" id="mail-rep" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 퀵로딩</button>
+      <button class="go" id="drive-rep" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <div class="setrow"><span id="reply-filter">회신 검색조건: 송장, 운송장, 회신</span><button class="minibtn" id="reply-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-rep" style="padding:14px;margin-top:8px">
         ＋ 회신 송장 파일 추가
@@ -454,11 +454,11 @@
     <div class="card">
       <h2><span class="n">1</span>CS 불러오기</h2>
       <p class="hint">사방넷·쇼핑몰 어드민 엑셀, 메일 문의, 직접 등록을 한 곳에 모읍니다.</p>
-      <button class="go" id="cs-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 CS 가져오기</button>
-      <button class="go" id="cs-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📁 드라이브에서 CS 파일 가져오기</button>
+      <button class="go" id="cs-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 퀵로딩</button>
+      <button class="go" id="cs-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <div class="setrow"><span id="cs-filter">CS 검색: 문의, 교환, 반품, 취소</span><button class="minibtn" id="cs-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-cs" style="margin-top:8px;padding:16px">
-        CS 엑셀 선택 또는 끌어다 놓기
+        디바이스 파일 선택 또는 끌어오기
         <b id="cs-fname"></b>
         <input type="file" id="f-cs" accept=".xlsx,.xlsm" multiple>
       </label>
@@ -493,10 +493,10 @@
     <div class="card">
       <h2><span class="n">1</span>쇼핑몰 정산 파일</h2>
       <p class="hint">몰에서 확정된 정산 내역을 올리세요. 여러 몰·여러 파일 가능합니다.</p>
-      <button class="go" id="st-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px">📁 구글 드라이브에서 파일 바로 가져오기</button>
-      <button class="go" id="st-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📧 메일에서 정산 파일 가져오기</button>
+      <button class="go" id="st-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
+      <button class="go" id="st-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 퀵로딩</button>
       <label class="drop" id="drop-st" style="margin-top:8px;padding:16px">
-        PC에서 파일 선택 또는 끌어오기
+        디바이스 파일 선택 또는 끌어오기
         <b id="st-fname"></b>
         <input type="file" id="f-st" accept=".xlsx,.xlsm" multiple>
       </label>
@@ -508,9 +508,9 @@
       <h2><span class="n">2</span>업체별 공급가표</h2>
       <p class="hint">업체에 지급할 <b>상품별 단가</b>입니다. 한 번 올리면 기억합니다. 주문 파일에는 이 단가가 없어서 따로 올려야 합니다.<br><b>단가는 부가세 포함 금액</b>으로 넣어주세요 — 지급액 = 단가 × 수량 으로 그대로 계산합니다.</p>
       <button class="go" id="st-pb-tpl" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📄 공급가표 양식 내려받기</button>
-      <button class="go" id="pb-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📁 드라이브에서 공급가표 가져오기</button>
+      <button class="go" id="pb-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <label class="drop" id="drop-pb" style="margin-top:0;padding:16px">
-        공급가표 엑셀 선택 또는 끌어다 놓기
+        디바이스 파일 선택 또는 끌어오기
         <b id="pb-fname"></b>
         <input type="file" id="f-pb" accept=".xlsx,.xlsm">
       </label>

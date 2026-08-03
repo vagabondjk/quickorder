@@ -969,10 +969,38 @@ async function loadForms() {
   await MAILTPL.load();                     // 저장해둔 메일 문구
   drawForms(); buildVendorBrands(); refreshO();
 }
+/* 이름이 비슷한 것끼리 묶어 중복을 찾는다.
+   '디에스피' 와 '디에스피_발주양식' 처럼 같은 업체를 두 번 올린 경우를 잡는다.
+   자동으로 지우지는 않는다 — 파일 자체가 다를 수 있어서 판단은 사람이 한다.
+   items: [{name, ...}] 형태면 되고, 이름은 nameOf 로 뽑는다. */
+function dupNameGroups(items, nameOf) {
+  const norm = s => String(s || "").replace(/[\s_\-().\[\]]/g, "").toLowerCase();
+  const groups = [];
+  (items || []).forEach(it => {
+    const n = norm(nameOf ? nameOf(it) : it.name);
+    if (!n) return;
+    const g = groups.find(x => x.key.indexOf(n) >= 0 || n.indexOf(x.key) >= 0);
+    if (g) { g.items.push(it); if (n.length < g.key.length) g.key = n; }
+    else groups.push({ key: n, items: [it] });
+  });
+  return groups.filter(g => g.items.length > 1);
+}
+/* 중복 경고 상자를 목록 맨 위에 붙인다 */
+function addDupWarning(box, groups, nameOf, tail) {
+  if (!groups.length) return;
+  const w = document.createElement("div");
+  w.className = "msg show warn";
+  w.innerHTML = "⚠ 같은 업체가 두 번 등록된 것 같아요.<br>"
+    + groups.map(g => "· " + g.items.map(x => `<b>${esc(nameOf(x))}</b>`).join(" / ")).join("<br>")
+    + `<br><span style="color:var(--muted)">${esc(tail)}</span>`;
+  box.appendChild(w);
+}
 function drawForms() {
   const box = $("vlist");
   if (!S.forms.length) { box.innerHTML = '<div class="empty">저장된 업체 양식이 없습니다.<br>아래에서 추가하세요.</div>'; return; }
   box.innerHTML = "";
+  addDupWarning(box, dupNameGroups(S.forms, f => f.name), f => f.name,
+    "브랜드 선택에도 두 번 나옵니다. 안 쓰는 쪽은 ✕ 로 지우거나 ‘이름수정’ 으로 구분해 주세요.");
   S.forms.forEach(f => {
     const el = document.createElement("div");
     el.className = "vrow" + (f.checked ? " on" : "");
@@ -1452,6 +1480,9 @@ async function addReps(files) {
 }
 function drawReps() {
   const box = $("replist"); box.innerHTML = "";
+  // 같은 업체 회신이 두 번 들어오면 송장이 겹쳐 들어갈 수 있어 먼저 알려준다
+  addDupWarning(box, dupNameGroups(S.reps, r => QO.nameFromFilename(r.name)),
+    r => QO.nameFromFilename(r.name), "같은 업체 회신이 두 번 들어와 있습니다. 최신 것만 남기고 ✕ 로 지워주세요.");
   S.reps.forEach((r, i) => {
     const el = document.createElement("div");
     el.className = "vrow on";
