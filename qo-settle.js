@@ -197,9 +197,7 @@ const ST = (() => {
       <b style="color:var(--danger)">⚠ 공급가표에 없는 상품 ${keys.length}종 · ${total}건</b>
       <div style="margin-top:5px;font-size:12.5px;line-height:1.7">${
         keys.slice(0, 10).map(k => `· ${esc(k.slice(0, 52))} <b>${miss[k]}건</b>`).join("<br>")}${
-        keys.length > 10 ? `<br>· 외 ${keys.length - 10}종` : ""}</div>
-      <div style="margin-top:5px;font-size:11.5px;color:var(--muted)">
-        공급가표에 추가하거나, 아래 ‘정산내역 추출’ 후 화면에서 연결해주세요.</div></div>`;
+        keys.length > 10 ? `<br>· 외 ${keys.length - 10}종` : ""}</div></div>`;
   }
 
   /* 올려둔 공급가표가 있다는 걸 한눈에 — 초록 상자 + 작은 '해제' 버튼.
@@ -677,8 +675,7 @@ const ST = (() => {
        <div class="totline" style="border-top:1px solid var(--line);margin-top:6px;padding-top:8px">
          <b>업체 지급 합계</b><span style="color:var(--brand)">${won(t.final)}</span></div>
        <div class="synchint" style="margin-top:6px">${t.count}건${
-         result.noVendor ? ` · <b style="color:var(--danger)">업체 미지정 ${result.noVendor}건</b> — 상품명에서 브랜드를 못 찾았어요. ① 발주 탭에서 브랜드-업체를 한 번 지정하면 다음부터 자동입니다.` : ""}${
-         result.loose ? ` · 이름이 조금 달라 비슷한 것으로 찾은 줄 ${result.loose}건` : ""}</div>` +
+         result.noVendor ? ` · <b style="color:var(--danger)">업체 미지정 ${result.noVendor}건</b>` : ""}</div>` +
       checkBoxHtml(result.check) +
       (up.length ? unpricedBoxHtml(upKinds, kindKeys, up.length) : "");
     if (up.length) bindAliasPickers();
@@ -696,14 +693,13 @@ const ST = (() => {
         ${v.unpricedAmount ? `<div class="totline" style="font-size:12px;color:var(--danger)"><span>└ 단가 못 찾은 건</span><span>${won(v.unpricedAmount)}</span></div>` : ""}
         <div class="totline" style="font-size:12px"><span>${esc(CO())} 마진</span><span>${won(v.margin)} <span style="color:var(--muted)">(${rateOf(v.margin, v.amount)})</span></span></div>
         ${v.unpriced ? `<div class="totline" style="font-size:12px;color:var(--danger)"><span>⚠ 단가 못 찾음</span><span>${v.unpriced}건 (0원 처리)</span></div>` : ""}
-        ${v.loose ? `<div class="totline" style="font-size:12px;color:var(--muted)"><span>비슷한 이름으로 찾음</span><span>${v.loose}건</span></div>` : ""}
         ${v.ded ? `<div class="totline" style="font-size:12px;color:var(--danger)"><span>CS 차감 ${v.dedRows.length}건</span><span>− ${won(v.ded)}</span></div>` : ""}
         <div class="totline" style="font-size:13px"><b>지급액</b><span style="color:var(--brand)">${won(v.final)}</span></div>
         <div class="rmail"><input type="email" placeholder="업체 이메일 (쉼표로 여러 명)" autocapitalize="off" spellcheck="false">
           <button class="dlbtn">메일 보내기</button></div>
         <div class="cands"></div>
         <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)"></span>
-          <button class="minibtn share">📤 카톡·공유</button><button class="minibtn pvbtn">미리보기</button><button class="minibtn dl">엑셀만 받기</button></div>
+          <button class="minibtn share">📤 카톡·공유</button><button class="minibtn pvbtn">미리보기</button><button class="minibtn dl">엑셀 받기</button></div>
         <div class="setrow" style="margin-top:4px"><span class="fnlbl" style="flex:1;font-size:11px;color:var(--faint)"></span>
           <button class="minibtn tpl">${mailtplLabel("settle", v.vendor)}</button><button class="minibtn fn">✏️ 파일명 수정</button></div>`;
       box.appendChild(row);
@@ -717,17 +713,6 @@ const ST = (() => {
         saved: known, history: (S.vendorSent || {})[ek] || [],
         domains: (S.vendorDomains || {})[ek] || [], query: v.vendor !== "(업체 미지정)" ? v.vendor : "",
       });
-      // 발주 탭에서 못 끌어왔으면 왜 그런지 알려준다 (업체 이름이 서로 다르면 못 찾는다)
-      if (!known) {
-        const saved = Object.keys(S.vendorEmails || {}).filter(k => (S.vendorEmails || {})[k]);
-        if (saved.length) {
-          const note = document.createElement("div");
-          note.style.cssText = "font-size:11px;color:var(--muted);margin-top:4px;line-height:1.6";
-          note.innerHTML = `① 발주 탭에 저장된 업체: ${saved.map(k => esc(k)).join(", ")}` +
-            `<br>이름이 <b>${esc(v.vendor)}</b> 와 달라서 못 불러왔어요. 여기에 적으면 발주 탭에도 같이 저장됩니다.`;
-          row.querySelector(".cands").after(note);
-        }
-      }
       // 여기서 고친 이메일은 ① 발주 탭과 같은 곳에 저장한다 (한 번만 적으면 양쪽에서 쓴다)
       inp.onchange = inp.onblur = async () => {
         const val = inp.value.trim();
@@ -830,8 +815,6 @@ const ST = (() => {
   function unpricedBoxHtml(kinds, keys, total) {
     return `<div style="margin-top:10px;padding:10px;border:1px solid var(--danger);border-radius:8px">
       <b style="color:var(--danger)">⚠ 공급가표에서 단가를 못 찾은 ${total}건 — 지급액 0 원으로 뒀습니다</b>
-      <div style="margin-top:4px;font-size:12px;color:var(--muted)">
-        이름이 서로 달라서 그렇습니다. 아래에서 한 번만 이어주면 다음 달부터 자동입니다.</div>
       ${keys.map((k, i) => `
         <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line)">
           <div style="font-size:12.5px"><b>${esc(kinds[k].row.product.slice(0, 60))}</b>
@@ -883,10 +866,7 @@ const ST = (() => {
   }
   function aliasBoxHtml() {
     const keys = Object.keys(aliases).filter(k => aliases[k]);
-    if (!keys.length) {
-      return `<div class="empty">아직 손으로 이어준 상품이 없습니다.<br>
-        정산을 돌렸을 때 단가를 못 찾은 상품이 나오면, 거기서 고른 연결이 여기 쌓입니다.</div>`;
-    }
+    if (!keys.length) return `<div class="empty">손으로 이어준 상품이 없습니다.</div>`;
     const byKey = {}; bookChoices().forEach(c => { byKey[c.key] = c; });
     return keys.map((k, i) => {
       const o = aliasOrderLabel(k);
@@ -919,9 +899,7 @@ const ST = (() => {
   }
   function drawAliasBox() {
     const n = Object.keys(aliases).filter(k => aliases[k]).length;
-    $("alias-sub").textContent = n
-      ? `손으로 이어준 상품 ${n}개입니다. 잘못 이어졌으면 여기서 바로 바꿀 수 있습니다.`
-      : "";
+    $("alias-sub").textContent = n ? `${n}개` : "";
     $("alias-list").innerHTML = aliasBoxHtml();
     $("alias-list").querySelectorAll(".aliasedit").forEach(sel => {
       sel.onchange = async () => {
@@ -1062,10 +1040,29 @@ const ST = (() => {
     ws.getRow(hr).font = { bold: true };
     ws.getRow(hr).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEFF3FB" } };
 
+    /* 수량 열 — 원본 파일을 읽을 때 셀 값이 전부 문자열("1")로 넘어온다.
+       그대로 적으면 엑셀이 '텍스트로 저장된 숫자'로 보고 SUM 이 0 이 된다.
+       값이 온전히 숫자일 때만 진짜 숫자로 바꿔 적는다 (우편번호·전화번호처럼
+       앞자리 0 이 뜻을 갖는 열은 건드리면 안 되므로 수량 열만).  */
+    const qi = src.findIndex(h => /수량/.test(String(h || "")) && !/재고|누계|누적/.test(String(h || "")));
+    const toNum = x => {
+      if (typeof x === "number") return isFinite(x) ? x : null;
+      const t = String(x == null ? "" : x).trim();
+      if (!/^\d+(\.\d+)?$/.test(t) || /^0\d/.test(t)) return null;   // 앞자리 0 은 손대지 않는다
+      const n = Number(t);
+      return isFinite(n) ? n : null;
+    };
+    const qtyVals = [];
+
     v.rows.forEach(r => {
       const idx = {};
       (r.srcCols || []).forEach((h, i) => { const t = String(h || "").trim(); if (t && idx[t] === undefined) idx[t] = i; });
       const line = src.map(h => (idx[h] === undefined ? "" : (r.raw ? r.raw[idx[h]] : "")));
+      if (qi >= 0) {
+        const n = toNum(line[qi]);
+        if (n !== null) line[qi] = n;
+        qtyVals.push(n);
+      }
       // 개당 정산이면 배송비를 단가에 합쳐 적는다 (공급가 × 수량 = 정산금액 이 되게)
       const merged = r.shipMode === "건당" ? 0 : Math.round(r.ship || 0);
       line.push(r.priced === false ? "미확정" : (r.unitCost == null ? "" : Math.round(r.unitCost) + merged));
@@ -1109,17 +1106,12 @@ const ST = (() => {
       const parts = [cSupply, cShip, cDed].filter(Boolean).map(c => c.address);
       put(cFinal, parts.join("+"), v.final);
 
-      // 판매수량 = 원본 수량 열의 합. 열을 못 찾거나 글자가 섞여 합이 안 맞으면 숫자 그대로 둔다.
-      const qi = src.findIndex(h => /수량/.test(String(h || "")) && !/재고|누계|누적/.test(String(h || "")));
-      if (qi >= 0 && topCells["판매수량"]) {
-        const raw = v.rows.map(r => {
-          const idx = (r.srcCols || []).indexOf(src[qi]);
-          return idx < 0 ? NaN : Number(r.raw ? r.raw[idx] : NaN);
-        });
-        const sum = raw.reduce((s2, n) => s2 + (isFinite(n) ? n : 0), 0);
-        if (raw.every(n => isFinite(n)) && Math.round(sum) === Math.round(totalQty))
-          put(topCells["판매수량"], `SUM(${rng(L(qi + 1))})`, totalQty);
-      }
+      // 판매수량 = 원본 수량 열의 합.
+      // 한 줄이라도 숫자로 못 바꿔 텍스트로 남았으면 SUM 이 그 줄을 빼먹으니 수식을 걸지 않는다.
+      if (qi >= 0 && topCells["판매수량"] && qtyVals.length === v.rows.length
+          && qtyVals.every(n => n !== null)
+          && Math.round(qtyVals.reduce((s2, n) => s2 + n, 0)) === Math.round(totalQty))
+        put(topCells["판매수량"], `SUM(${rng(L(qi + 1))})`, totalQty);
       // 위쪽 요약은 아래 합계 칸을 그대로 가리킨다 — 두 곳이 어긋날 수 없다
       const link = (name, cell) => { if (cell && topCells[name]) topCells[name].value = { formula: cell.address, result: Math.round(cell.value.result != null ? cell.value.result : cell.value) }; };
       link("공급가 합계", cSupply);

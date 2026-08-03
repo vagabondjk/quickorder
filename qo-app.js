@@ -1323,7 +1323,7 @@ function showResultO(results, skipped, verify) {
         value="${esc(S.vendorEmails[r.supplier] || "")}" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
         <button class="dlbtn send">메일 보내기</button></div>
       <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)"></span>
-        <button class="minibtn share">📤 카톡·공유</button><button class="minibtn pvbtn">미리보기</button><button class="minibtn dl">엑셀만 받기</button></div>
+        <button class="minibtn share">📤 카톡·공유</button><button class="minibtn pvbtn">미리보기</button><button class="minibtn dl">엑셀 받기</button></div>
       <div class="setrow" style="margin-top:4px"><span style="flex:1;font-size:11px;color:var(--faint)"></span>
         <button class="minibtn tpl">${mailtplLabel("order", r.supplier)}</button><button class="minibtn fn">✏️ 파일명 수정</button></div>`;
     const inp = el.querySelector("input");
@@ -1399,7 +1399,7 @@ async function recordSentInv(emails) {
   await DB.set("invSent", S.invSent);
 }
 
-/* 받는사람 후보 칩 (발주/송장 공용)
+/* 받는사람 추천 칩 (발주/송장 공용)
    opts = { saved:"주소들", history:[주소...], domains:[도메인...], query:"메일검색어" }
    ⓐ저장(기본) ⓑ이전 발송 ⓒ메일에서 찾은 주소(query+도메인 있을 때, 도메인 필터) → 클릭 선택 */
 /* 메일함에서 찾은 주소를 '업체 담당자일 확률' 순으로 정리한다.
@@ -1449,7 +1449,7 @@ async function fillRecipients(container, inp, opts) {
   const chosenSet = () => new Set(parseEmails(inp.value).map(e => e.toLowerCase()));
   const seen = new Set();
   const lbl = document.createElement("span");
-  lbl.className = "candlbl"; lbl.textContent = "받는사람 후보:";
+  lbl.className = "candlbl"; lbl.textContent = "받는사람 추천:";
   container.appendChild(lbl);
 
   function refreshStates() {
@@ -1686,7 +1686,7 @@ function showResultI(out, buf, filename) {
     <div class="rmail"><input type="text" id="inv-to" placeholder="받는 사람 이메일 (여러 개는 쉼표로)"
       value="${esc(S.invEmails || "")}" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button class="dlbtn" id="send-inv">메일 보내기</button></div>
-    <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)"></span><button class="minibtn" id="share-inv">📤 카톡·공유</button><button class="minibtn" id="pv-inv">미리보기</button><button class="minibtn" id="dl-inv">엑셀만 받기</button></div>
+    <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)"></span><button class="minibtn" id="share-inv">📤 카톡·공유</button><button class="minibtn" id="pv-inv">미리보기</button><button class="minibtn" id="dl-inv">엑셀 받기</button></div>
     <div class="setrow" style="margin-top:4px"><span style="flex:1;font-size:11px;color:var(--faint)"></span><button class="minibtn" id="tpl-inv">✏️ 메일내용 수정</button></div>
     ${S.sabDrive ? `<button class="go" id="drv-writeback" style="margin-top:10px;font-size:14px;padding:12px;background:var(--ok);color:#fff">📥 드라이브 양식(${esc(S.sabDrive.name)})에 송장 기입</button>
       <div id="drv-wb-msg" style="font-size:11.5px;color:var(--muted);margin-top:6px;text-align:center"></div>` : ""}</div>`;
@@ -1709,7 +1709,7 @@ function showResultI(out, buf, filename) {
       } catch (e) { this.disabled = false; this.textContent = orig; $("drv-wb-msg").textContent = "⚠ 기입 실패: " + e.message; }
     };
   }
-  // 받는사람 후보: 마지막 발송(기본) + 이전 이력 + '발주서 보내는 곳'(주문 메일 발신자) 주소
+  // 받는사람 추천: 마지막 발송(기본) + 이전 이력 + '발주서 보내는 곳'(주문 메일 발신자) 주소
   //  → 발주서 검색조건의 발신 도메인으로 메일을 찾아 그 발신자 주소를 후보로 띄움
   (async () => {
     let senders = [];
