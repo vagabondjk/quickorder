@@ -286,11 +286,23 @@ const ST = (() => {
     if (!files.length) { box.innerHTML = ""; return; }
     box.innerHTML = files.map((f, i) => `<div class="vrow on">
         <div class="vtop"><b>📄 ${esc(f.name)}</b><button class="vdel" data-i="${i}">✕</button></div>
-        <span class="vfile">${f.rows.length}행</span></div>`).join("");
+        <span class="vfile">${f.rows.length}행</span></div>`).join("")
+      + `<div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)">올린 정산 파일을 모두 비웁니다</span>
+           <button class="minibtn" id="st-clear-all">전체 해제</button></div>`;
     box.querySelectorAll(".vdel").forEach(b => b.onclick = () => {
       files.splice(Number(b.dataset.i), 1);
+      result = null; $("result-s").style.display = "none";
       drawFiles(); drawPriceBook(); drawBrands(); refresh();
     });
+    const all = $("st-clear-all");
+    if (all) all.onclick = () => {
+      files = []; result = null;
+      $("st-fname").textContent = "";
+      const fi = $("f-st"); if (fi) fi.value = "";
+      $("result-s").style.display = "none";
+      msg("msg-s", "", "");
+      drawFiles(); drawPriceBook(); drawBrands(); refresh();
+    };
   }
 
   /* =================================================================

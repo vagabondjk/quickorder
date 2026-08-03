@@ -529,20 +529,29 @@ function pickOrderFromDrive() {
   });
 }
 if ($("drive-order")) $("drive-order").onclick = pickOrderFromDrive;
-// '바로 가져올 파일' 지정/변경 — 가져오지 않고 대상만 지정
-function pickOrderPin() {
+/* '바로 가져올 파일' 지정/변경.
+   ※ '변경'은 지정만 바꾸고 끝내면 안 된다 — 지정은 8월인데 아래 불러온 파일은 7월인
+     상태가 되어 헷갈린다. 바꿨으면 그 파일을 바로 불러온다. */
+function pickOrderPin(alsoFetch) {
   openDrivePicker({
-    key: "order", title: "바로 가져올 발주서 파일 지정", multiple: false,
+    key: "order", title: alsoFetch ? "다른 발주서 파일로 변경" : "바로 가져올 발주서 파일 지정", multiple: false,
     onPick: async files => {
       const f = files[0];
       await DB.set("driveOrderFile", { id: f.id, name: f.name });
       drawDriveRecent();
-      msg("msg-o", "ok", `✔ 바로 가져올 발주서로 지정했어요: ${f.name}`);
+      if (!alsoFetch) { msg("msg-o", "ok", `✔ 바로 가져올 발주서로 지정했어요: ${f.name}`); return; }
+      msg("msg-o", "", "");
+      try {
+        await ensureGmail();
+        const r = await GMAIL.driveFetchExcel(f.id);
+        await setOrderFromBuf(r.buf, r.name);
+        msg("msg-o", "ok", `✔ ${r.name} (으)로 바꿔서 가져왔어요 · 아래에서 날짜 고르고 변환하세요`);
+      } catch (e) { msg("msg-o", "err", "가져오기 실패: " + e.message); }
     },
   });
 }
-$("order-pin-set").onclick = pickOrderPin;
-$("order-pin-change").onclick = pickOrderPin;
+$("order-pin-set").onclick = () => pickOrderPin(false);
+$("order-pin-change").onclick = () => pickOrderPin(true);
 $("order-pin-clear").onclick = async () => {
   await DB.set("driveOrderFile", null);
   drawDriveRecent();
@@ -600,29 +609,40 @@ async function loadSabFromDrive(fileId) {
   return r;
 }
 // 폴더 탐색으로 골라 가져오기 (고른 파일은 '바로 가져오기' 대상으로도 자동 지정)
-$("drive-sab").onclick = () => openDrivePicker({
-  key: "sab", title: "드라이브에서 송장취합양식 가져오기", multiple: false,
-  onPick: async files => {
-    const r = await loadSabFromDrive(files[0].id);
-    await DB.set("driveSabFile", { id: files[0].id, name: r.name });
-    drawSabRecent();
-    msg("msg-i", "ok", `✔ 드라이브에서 송장취합양식을 가져왔어요: ${r.name}`);
-  },
-});
+// ※ 별도 버튼은 없앴다 — '지정 파일 · 다른 파일로 변경' 으로 같은 일을 한다.
+function pickSabFromDrive() {
+  return openDrivePicker({
+    key: "sab", title: "드라이브에서 송장취합양식 가져오기", multiple: false,
+    onPick: async files => {
+      const r = await loadSabFromDrive(files[0].id);
+      await DB.set("driveSabFile", { id: files[0].id, name: r.name });
+      drawSabRecent();
+      msg("msg-i", "ok", `✔ 드라이브에서 송장취합양식을 가져왔어요: ${r.name}`);
+    },
+  });
+}
+if ($("drive-sab")) $("drive-sab").onclick = pickSabFromDrive;
 // '바로 가져올 파일' 지정/변경 — 가져오지 않고 대상만 지정
-function pickSabPin() {
+function pickSabPin(alsoFetch) {
   openDrivePicker({
-    key: "sab", title: "바로 가져올 송장취합양식 파일 지정", multiple: false,
+    key: "sab", title: alsoFetch ? "다른 송장취합양식으로 변경" : "바로 가져올 송장취합양식 파일 지정", multiple: false,
     onPick: async files => {
       const f = files[0];
       await DB.set("driveSabFile", { id: f.id, name: f.name });
       drawSabRecent();
-      msg("msg-i", "ok", `✔ 바로 가져올 송장취합양식으로 지정했어요: ${f.name}`);
+      if (!alsoFetch) { msg("msg-i", "ok", `✔ 바로 가져올 송장취합양식으로 지정했어요: ${f.name}`); return; }
+      // 바꿨으면 바로 불러온다 (지정만 바뀌고 화면은 이전 파일인 상태를 막는다)
+      msg("msg-i", "", "");
+      try {
+        await ensureGmail();
+        const r = await loadSabFromDrive(f.id);
+        msg("msg-i", "ok", `✔ ${r.name} (으)로 바꿔서 가져왔어요`);
+      } catch (e) { msg("msg-i", "err", "가져오기 실패: " + e.message); }
     },
   });
 }
-$("sab-pin-set").onclick = pickSabPin;
-$("sab-pin-change").onclick = pickSabPin;
+$("sab-pin-set").onclick = () => pickSabPin(false);
+$("sab-pin-change").onclick = () => pickSabPin(true);
 $("sab-pin-clear").onclick = async () => {
   await DB.set("driveSabFile", null);
   drawSabRecent();
@@ -1054,7 +1074,38 @@ function updCnt(wrap, f) {
   wrap.querySelector(".cnt").textContent = n ? `${n}개 선택` : "선택 없음 → 건너뜀";
 }
 
+/* 불러온 파일 '해제' — 드롭 영역에 파일이 올라와 있을 때만 버튼을 보여준다.
+   잘못된 파일을 올렸을 때 새로고침하지 않고 비울 수 있게. */
+function updateClearRows() {
+  const a = $("order-clear-row"); if (a) a.style.display = S.orderBuf ? "flex" : "none";
+  const b = $("sab-clear-row"); if (b) b.style.display = S.sabBuf ? "flex" : "none";
+}
+async function clearOrderFile() {
+  S.orderWb = null; S.orderBuf = null; S.orderName = "";
+  S.brands = []; S.dateSel = [];
+  $("order-name").textContent = "";
+  $("drop-order").classList.remove("on");
+  const fi = $("f-order"); if (fi) fi.value = "";
+  const dw = $("date-wrap"); if (dw) dw.style.display = "none";
+  const ro = $("result-o"); if (ro) ro.style.display = "none";
+  msg("msg-o", "", "");
+  buildVendorBrands(); refreshO(); updateClearRows();
+}
+function clearSabFile() {
+  S.sabBuf = null; S.sabName = ""; S.sabDrive = null;
+  $("sab-name").textContent = "";
+  $("drop-sab").classList.remove("on");
+  const fi = $("f-sab"); if (fi) fi.value = "";
+  $("sab-preview").style.display = "none";
+  const ri = $("result-i"); if (ri) ri.style.display = "none";
+  msg("msg-i", "", "");
+  refreshI(); updateClearRows();
+}
+if ($("order-clear")) $("order-clear").onclick = clearOrderFile;
+if ($("sab-clear")) $("sab-clear").onclick = clearSabFile;
+
 function refreshO() {
+  updateClearRows();
   let ok = !!S.orderBuf && S.forms.some(f => f.checked);
   if (ok && S.brands.length) ok = S.forms.some(f => f.checked && (S.sel[f.name] || []).length);
   if (ok && S.dateAll.length && !S.dateSel.length) ok = false;
@@ -1415,7 +1466,7 @@ function drawReps() {
   if (S.reps.length) $("drop-rep").classList.add("on"); else $("drop-rep").classList.remove("on");
   refreshI();
 }
-function refreshI() { $("run-i").disabled = !(S.sabBuf && S.reps.length); }
+function refreshI() { $("run-i").disabled = !(S.sabBuf && S.reps.length); updateClearRows(); }
 
 $("run-i").onclick = async function () {
   busy("run-i", "run-i-lbl", true, "취합 중…");

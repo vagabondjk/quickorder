@@ -345,10 +345,13 @@
       <div class="setrow"><span id="gmail-who-o">메일 연결 확인 중…</span></div>
       <div class="setrow"><span id="order-filter">발주서 검색: onekglobal.co.kr · 키워드 랩노마드</span><button class="minibtn" id="order-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-order" style="margin-top:8px">
-        주문 파일 선택 또는 끌어다 놓기
+        PC에서 파일 선택 또는 끌어오기
         <b id="order-name"></b>
         <input type="file" id="f-order" accept=".xlsx,.xlsm">
       </label>
+      <div class="setrow" id="order-clear-row" style="display:none;margin-top:4px">
+        <span style="flex:1;font-size:11px;color:var(--faint)">불러온 주문 파일을 비웁니다</span>
+        <button class="minibtn" id="order-clear">해제</button></div>
 
       <div id="date-wrap" style="display:none;margin-top:14px">
         <div class="pvhead">
@@ -402,16 +405,23 @@
   <div class="pane" id="pane-i">
     <div class="card">
       <h2><span class="n">1</span>송장취합양식</h2>
-      <button class="go" id="sab-again" style="display:none;margin:0 0 4px;font-size:15px;padding:14px;background:var(--ok);color:#fff">📥 송장취합양식 바로 가져오기</button>
-      <div class="pinrow" id="sab-pinrow" style="display:none">지정 파일: <b id="sab-pinname">-</b> <button class="minibtn" id="sab-pin-change">변경</button> <button class="minibtn" id="sab-pin-clear">해제</button></div>
+      <button class="go" id="sab-again" style="display:none;margin:0 0 6px;font-size:15px;padding:14px;background:var(--ok);color:#fff">📁 구글 드라이브에서 송장취합양식 바로 가져오기</button>
+      <div class="pinrow" id="sab-pinrow" style="display:none;font-size:12.5px;background:var(--card2);
+        border:1px solid var(--line);border-radius:10px;padding:9px 10px;margin:0 0 8px">
+        <span style="flex:1;min-width:0">지정 파일: <b id="sab-pinname">-</b></span>
+        <button class="minibtn" id="sab-pin-change" style="padding:9px 16px;font-size:12.5px;font-weight:800;
+          background:var(--brand-soft);color:var(--brand);border-color:var(--brand)">📁 다른 파일로 변경</button>
+        <button class="minibtn" id="sab-pin-clear">해제</button></div>
       <button class="minibtn" id="sab-pin-set" style="margin:0 0 8px">📌 바로 가져올 송장취합양식 파일 지정</button>
       <button class="go" id="mail-sab" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 송장취합양식 가져오기</button>
-      <button class="go" id="drive-sab" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📁 드라이브에서 송장취합양식 가져오기</button>
       <label class="drop" id="drop-sab">
-        송장취합양식 선택 또는 끌어다 놓기
+        PC에서 파일 선택 또는 끌어오기
         <b id="sab-name"></b>
         <input type="file" id="f-sab" accept=".xlsx,.xlsm">
       </label>
+      <div class="setrow" id="sab-clear-row" style="display:none;margin-top:4px">
+        <span style="flex:1;font-size:11px;color:var(--faint)">불러온 송장취합양식을 비웁니다</span>
+        <button class="minibtn" id="sab-clear">해제</button></div>
       <button class="minibtn" id="sab-preview" style="display:none;margin-top:8px">송장취합양식 미리보기</button>
     </div>
 
