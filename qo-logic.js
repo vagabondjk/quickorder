@@ -467,6 +467,28 @@ function countOrders(orderWb, opts) {
 /* ===================================================================
    송장 취합 : 업체 회신 → 송장취합양식
    =================================================================== */
+/* 송장번호처럼 보이는 값인지.
+   업체가 송장 칸에 '휴가라 8/6에 입력하겠습니다' 같은 문장을 적어 보내는 일이 있는데,
+   빈칸이 아니라는 이유로 '기입 완료'로 세면 안 된다.
+   송장번호는 숫자(가끔 영문 섞임) 8~20자리다. 한글이 들어가면 송장이 아니다. */
+function looksLikeInvoice(v) {
+  const s = String(v === null || v === undefined ? "" : v).trim();
+  if (!s) return false;
+  if (/[가-힣]/.test(s)) return false;                 // 한글이 있으면 문장
+  const bare = s.replace(/[\s\-.]/g, "");
+  if (!/^[A-Za-z0-9]+$/.test(bare)) return false;
+  if (bare.length < 8 || bare.length > 20) return false;
+  return /\d{6,}/.test(bare);                          // 숫자가 최소 6자리는 있어야
+}
+/* 택배사 칸도 이름이 아니라 문장이 들어오는 경우가 있다 */
+function looksLikeCarrier(v) {
+  const s = String(v === null || v === undefined ? "" : v).trim();
+  if (!s) return true;                                  // 비어 있는 건 여기서 안 따진다
+  if (s.length > 15) return false;
+  if (/\d{5,}/.test(s)) return false;                   // 숫자 덩어리 = 송장이 잘못 들어감
+  return true;
+}
+
 function collectInvoices(sabangWb, replies, opts) {
   opts = opts || {};
   const log = opts.log || function () {};
@@ -519,6 +541,8 @@ function collectInvoices(sabangWb, replies, opts) {
   const cleanInv = v => {
     const s = String(v == null ? "" : v).trim();
     if (!s) return v;
+    // 송장이 아니라 메모·문장이면 손대지 않는다 ("휴가로 8/6에 입력" → "86" 이 되면 안 된다)
+    if (/[가-힣]/.test(s)) return v;
     const out = /[A-Za-z]/.test(s) ? s.replace(/[\s\-.·]/g, "") : s.replace(/\D/g, "");
     if (!out) return v;          // 숫자가 하나도 없는 값 → 원본 유지
     return out === s ? v : out;
@@ -607,7 +631,7 @@ function collectInvoices(sabangWb, replies, opts) {
   const bfm = best.fm, bhr = best.hr, bws = best.ws, bd = dims(bws);
   const keyPresent = KEY_FIELDS.filter(f => bfm[f] !== undefined);
   const cellStr = (r, f) => { const v = getV(bws, r, bfm[f]); return v == null ? "" : String(v).trim(); };
-  const missing = [];
+  const missing = [], odd = [];
   let orderRows = 0;
   for (let r = bhr + 1; r <= bd.rows; r++) {
     // 주문행 판정: 핵심 식별항목 중 하나라도 값이 있으면 실제 주문행
@@ -615,6 +639,20 @@ function collectInvoices(sabangWb, replies, opts) {
     if (!hasKey) continue;
     orderRows++;
     const invCell = getV(bws, r, bfm.INVOICE);   // 채운 뒤 값
+    // 송장 칸에 송장이 아닌 값(문장 등)이 들어온 행 — 빈칸이 아니라고 넘기면 안 된다
+    if (!isBlank(invCell) || bfm.CARRIER !== undefined) {
+      const carCell = bfm.CARRIER === undefined ? "" : getV(bws, r, bfm.CARRIER);
+      const badInv = !isBlank(invCell) && !looksLikeInvoice(invCell);
+      const badCar = !isBlank(carCell) && !looksLikeCarrier(carCell);
+      if (badInv || badCar) {
+        const it = { row: r, invoice: isBlank(invCell) ? "" : String(invCell).trim(),
+                     carrier: isBlank(carCell) ? "" : String(carCell).trim(),
+                     badInvoice: badInv, badCarrier: badCar };
+        it.label = ["RECIPIENT", "PRODUCT", "ORDERER"]
+          .map(f => (bfm[f] === undefined ? "" : cellStr(r, f))).filter(Boolean).join(" · ") || `${r}행`;
+        odd.push(it);
+      }
+    }
     if (isBlank(invCell)) {
       const item = { row: r };
       // 항목별로 담아 UI에서 표로 보여줄 수 있게
@@ -627,12 +665,14 @@ function collectInvoices(sabangWb, replies, opts) {
     }
   }
   const missingCount = missing.length;
+  const oddCount = odd.length;
 
   const already = best.already || 0;
   const per = best.per.concat(errors);
-  log(`대상 시트 '${best.ws.name}' · 총 ${best.total}건 기입 · 회신 ${srcInvoice} / 취합본 ${writtenInvoice} · 주문행 ${orderRows} / 빈칸(누락) ${missingCount}`);
+  log(`대상 시트 '${best.ws.name}' · 총 ${best.total}건 기입 · 회신 ${srcInvoice} / 취합본 ${writtenInvoice} · 주문행 ${orderRows} / 빈칸(누락) ${missingCount} / 송장 아닌 값 ${oddCount}`);
   return { total: best.total, per, srcInvoice, writtenInvoice, gap: srcInvoice - writtenInvoice - already, already,
     perSrc, sheet: best.ws.name, orderRows, missingCount, missing: missing.slice(0, 500),
+    oddCount, odd: odd.slice(0, 500),
     ambiguous: best.ambiguous || [] };
 }
 
@@ -1222,7 +1262,7 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   toDateValue, isDateHeader, hasDateFormat, hasTimeFormat,
   findDateColumns, defaultDateColumn, orderDateInfo, formatPhone, stripHyphen,
   valueTransformForHeader, nameFromFilename, normKey,
-  convert, collectInvoices, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, todayStr, fmtDate,
+  convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, todayStr, fmtDate,
   normPriceText, toPriceNumber, priceKeyParts, priceRowKey, buildPriceBook, matchPrice,
   rankPriceCandidates, settle, settleCheck,
   settleSheetHead, settleSheetRow, isPriceHeader, vendorSheetColumns, carryNote };

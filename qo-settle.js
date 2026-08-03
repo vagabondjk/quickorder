@@ -722,8 +722,10 @@ const ST = (() => {
         <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)"></span>
           <button class="minibtn share">📤 카톡·공유</button><button class="minibtn pvbtn">미리보기</button><button class="minibtn dl">엑셀만 받기</button></div>
         <div class="setrow" style="margin-top:4px"><span class="fnlbl" style="flex:1;font-size:11px;color:var(--faint)"></span>
-          <button class="minibtn fn">✏️ 파일명 수정</button></div>`;
+          <button class="minibtn tpl">${mailtplLabel("settle", v.vendor)}</button><button class="minibtn fn">✏️ 파일명 수정</button></div>`;
       box.appendChild(row);
+      bindMailtplBtn(row.querySelector(".tpl"), "settle", v.vendor,
+        { 업체: v.vendor, 건수: v.rows.length, 수량: v.qty, 지급액: won(v.final) });
       const inp = row.querySelector("input");
       const ek = emailKey(v.vendor);            // ① 발주 탭에 저장된 업체 이메일을 같이 쓴다
       const known = (S.vendorEmails || {})[ek] || "";

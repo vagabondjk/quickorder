@@ -193,23 +193,31 @@ const MAILTPL = (() => {
   };
   let saved = {};
   async function load() { saved = (await DB.get("mailTemplates", {})) || {}; }
-  const get = k => Object.assign({}, DEF[k], saved[k] || {});
+  /* 저장 키 — 공통은 "order", 업체별은 "order@@플라스머".
+     업체마다 문구가 달라야 할 때가 있어서, 공통 문구 위에 업체 것을 덮어쓴다. */
+  const vkey = (k, v) => k + "@@" + String(v == null ? "" : v).trim();
+  const hasVendor = (k, v) => !!(v && saved[vkey(k, v)]);
+  const get = (k, v) => Object.assign({}, DEF[k], saved[k] || {}, (v && saved[vkey(k, v)]) || {});
   /* {키} 를 값으로 바꾼다. 모르는 키는 그대로 둔다(지워버리면 왜 빠졌는지 알 수 없다). */
   function fill(s, vars) {
     return String(s == null ? "" : s).replace(/\{([^}\s]+)\}/g,
       (m, k) => (vars && vars[k] !== undefined && vars[k] !== null ? String(vars[k]) : m));
   }
-  function render(kind, vars) {
-    const t = get(kind);
+  /* vendor 를 주면 그 업체 전용 문구를 먼저 쓴다 (없으면 공통) */
+  function render(kind, vars, vendor) {
+    const t = get(kind, vendor !== undefined ? vendor : (vars && vars.업체));
     return { subject: fill(t.subject, vars), body: fill(t.body, vars) };
   }
 
   let cur = null;
-  function open(kind, sample) {
-    cur = { kind, sample: sample || {} };
-    const d = DEF[kind], t = get(kind);
-    $("tpl-title").textContent = `${d.name} 메일 문구`;
-    $("tpl-sub").textContent = "여기서 고친 제목·본문을 앞으로 계속 씁니다.";
+  function open(kind, sample, vendor, after) {
+    const v = (vendor || "").trim();
+    cur = { kind, vendor: v, sample: sample || {}, after };
+    const d = DEF[kind], t = get(kind, v);
+    $("tpl-title").textContent = v ? `${v} — ${d.name} 메일 내용` : `${d.name} 메일 내용 (공통)`;
+    $("tpl-sub").textContent = v
+      ? `${v} 에게 보낼 때만 이 문구를 씁니다. (되돌리기를 누르면 공통 문구로 돌아갑니다)`
+      : "여기서 고친 제목·본문을 앞으로 계속 씁니다.";
     $("tpl-subject").value = t.subject;
     $("tpl-body").value = t.body;
     $("tpl-vars").innerHTML = "쓸 수 있는 값: " +
@@ -228,22 +236,34 @@ const MAILTPL = (() => {
   $("tpl-subject").oninput = $("tpl-body").oninput = preview;
   $("tpl-close").onclick = close;
   $("tplmodal").onclick = e => { if (e.target === $("tplmodal")) close(); };
+  /* 되돌리기 — 업체별 창이면 공통 문구로, 공통 창이면 기본 문구로 */
   $("tpl-reset").onclick = () => {
     if (!cur) return;
-    $("tpl-subject").value = DEF[cur.kind].subject;
-    $("tpl-body").value = DEF[cur.kind].body;
+    const base = cur.vendor ? get(cur.kind) : DEF[cur.kind];
+    $("tpl-subject").value = base.subject;
+    $("tpl-body").value = base.body;
     preview();
   };
   $("tpl-save").onclick = async () => {
     if (!cur) return;
-    saved[cur.kind] = { subject: $("tpl-subject").value, body: $("tpl-body").value };
+    const val = { subject: $("tpl-subject").value, body: $("tpl-body").value };
+    if (cur.vendor) {
+      const common = get(cur.kind);
+      // 공통과 똑같아졌으면 업체 전용을 지운다 (안 그러면 공통을 고쳐도 이 업체만 옛 문구가 남는다)
+      if (val.subject === common.subject && val.body === common.body) delete saved[vkey(cur.kind, cur.vendor)];
+      else saved[vkey(cur.kind, cur.vendor)] = val;
+    } else {
+      saved[cur.kind] = val;
+    }
+    const after = cur.after;
     await DB.set("mailTemplates", saved);
     close();
+    if (typeof after === "function") after();
   };
-  /* 각 탭의 '✏️ 메일 문구' 버튼 */
+  /* 각 탭의 '✏️ 메일내용 수정' 버튼 (공통) */
   document.querySelectorAll("[data-mailtpl]").forEach(b => b.onclick = () => {
     const k = b.dataset.mailtpl;
-    open(k, sampleVars(k));
+    open(k, sampleVars(k), b.dataset.mailtplVendor || "");
   });
   function sampleVars(kind) {
     const co = (typeof CONFIG !== "undefined" && CONFIG.company) || "우리회사";
@@ -256,8 +276,22 @@ const MAILTPL = (() => {
     }
     return base;
   }
-  return { load, get, render, open };
+  return { load, get, render, open, hasVendor, sampleVars };
 })();
+
+/* 업체별 '메일내용 수정' 버튼 — 발주서·송장취합·정산이 같이 쓴다.
+   업체 전용 문구가 저장돼 있으면 라벨로 티를 낸다 (안 그러면 왜 문구가 다른지 알 수 없다). */
+function mailtplLabel(kind, vendor) {
+  return MAILTPL.hasVendor(kind, vendor) ? "✏️ 메일내용 수정 <b>*</b>" : "✏️ 메일내용 수정";
+}
+function bindMailtplBtn(btn, kind, vendor, extraVars) {
+  if (!btn) return;
+  btn.title = "이 업체에게 보낼 메일 제목·본문을 따로 정합니다";
+  btn.onclick = () => {
+    const sample = Object.assign(MAILTPL.sampleVars(kind), { 업체: vendor }, extraVars || {});
+    MAILTPL.open(kind, sample, vendor, () => { btn.innerHTML = mailtplLabel(kind, vendor); });
+  };
+}
 
 /* 버전 표기 — qo-version.js 한 곳에서 읽어 배지와 푸터에 같이 넣는다.
    손으로 여러 곳을 고치다 하나를 빠뜨리는 일을 막으려고 이렇게 해뒀다. */
@@ -1240,8 +1274,9 @@ function showResultO(results, skipped, verify) {
       <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)"></span>
         <button class="minibtn share">📤 카톡·공유</button><button class="minibtn pvbtn">미리보기</button><button class="minibtn dl">엑셀만 받기</button></div>
       <div class="setrow" style="margin-top:4px"><span style="flex:1;font-size:11px;color:var(--faint)"></span>
-        <button class="minibtn fn">✏️ 파일명 수정</button></div>`;
+        <button class="minibtn tpl">${mailtplLabel("order", r.supplier)}</button><button class="minibtn fn">✏️ 파일명 수정</button></div>`;
     const inp = el.querySelector("input");
+    bindMailtplBtn(el.querySelector(".tpl"), "order", r.supplier, { 업체: r.supplier, 건수: r.count });
     fillRecipients(el.querySelector(".cands"), inp, {
       saved: S.vendorEmails[r.supplier], history: S.vendorSent[r.supplier],
       domains: parseDomains(S.vendorDomains[r.supplier]), query: r.supplier });
@@ -1557,12 +1592,31 @@ function showResultI(out, buf, filename) {
 
   // (나) 취합본 빈칸(누락) 점검 — 주문행인데 송장이 안 채워진 행 → 표로 보여줌
   if (out.orderRows !== undefined) {
-    if (out.missingCount === 0) {
+    if (out.missingCount === 0 && !out.oddCount) {
       h += `<div class="msg show ok" style="margin-top:8px">✔ 취합본 빈칸 없음 — 주문 ${out.orderRows}행 전부 송장 기입 완료</div>`;
+    } else if (out.missingCount === 0) {
+      h += `<div class="msg show ok" style="margin-top:8px">✔ 취합본 빈칸 없음 — 주문 ${out.orderRows}행</div>`;
     } else {
       h += `<div class="msg show err" style="margin-top:8px">⚠ 취합본 송장 빈칸 <b>${out.missingCount}건</b> / 주문 ${out.orderRows}행 — 아래 주문은 업체 회신에 송장이 없습니다</div>`;
       h += missingTable(out.missing || [], out.missingCount);
     }
+  }
+
+  // (나-2) 송장 자리에 송장이 아닌 값(문장·메모)이 들어간 행
+  //        빈칸이 아니라는 이유로 '기입 완료'로 넘어가면 안 된다. 두 줄만 보여주고 나머지는 펼치기.
+  if (out.oddCount) {
+    const odd = out.odd || [];
+    const oddLine = o => {
+      const bits = [];
+      if (o.badCarrier && o.carrier) bits.push(`택배사: ${esc(o.carrier)}`);
+      if (o.badInvoice && o.invoice) bits.push(`송장: ${esc(o.invoice)}`);
+      return `<div style="padding:5px 0;border-top:1px solid var(--line)"><b>${o.row}행</b> ${esc(o.label || "")}<br>
+        <span style="color:var(--err)">${bits.join(" · ")}</span></div>`;
+    };
+    const head = odd.slice(0, 2), rest = odd.slice(2);
+    h += `<div class="msg show err" style="margin-top:8px;text-align:left">⚠ 송장 형태가 아닌 값 <b>${out.oddCount}건</b> — 택배사·송장 칸에 송장번호 대신 문구가 들어가 있습니다. 아직 출고되지 않은 주문일 수 있으니 확인하세요.
+      ${head.map(oddLine).join("")}
+      ${rest.length ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-weight:600">나머지 ${rest.length}건 펼쳐보기</summary>${rest.map(oddLine).join("")}</details>` : ""}</div>`;
   }
 
   // (다) 모호 매칭 — 동일 정보 주문이 여러 개라 어느 행에 넣을지 자동 확정 못한 경우(확인 필요)
@@ -1582,9 +1636,11 @@ function showResultI(out, buf, filename) {
       value="${esc(S.invEmails || "")}" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button class="dlbtn" id="send-inv">메일 보내기</button></div>
     <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)"></span><button class="minibtn" id="share-inv">📤 카톡·공유</button><button class="minibtn" id="pv-inv">미리보기</button><button class="minibtn" id="dl-inv">엑셀만 받기</button></div>
+    <div class="setrow" style="margin-top:4px"><span style="flex:1;font-size:11px;color:var(--faint)"></span><button class="minibtn" id="tpl-inv">✏️ 메일내용 수정</button></div>
     ${S.sabDrive ? `<button class="go" id="drv-writeback" style="margin-top:10px;font-size:14px;padding:12px;background:var(--ok);color:#fff">📥 드라이브 양식(${esc(S.sabDrive.name)})에 송장 기입</button>
       <div id="drv-wb-msg" style="font-size:11.5px;color:var(--muted);margin-top:6px;text-align:center"></div>` : ""}</div>`;
   $("rlist-i").innerHTML = h;
+  $("tpl-inv").onclick = () => MAILTPL.open("invoice", MAILTPL.sampleVars("invoice"));
   $("pv-inv").onclick = () => openPreview(buf, "송장 취합본");
   $("dl-inv").onclick = () => download(buf, filename);
   $("share-inv").onclick = () => shareFile(buf, filename);
