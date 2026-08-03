@@ -172,7 +172,7 @@ const ST = (() => {
   /* 정산 파일 ↔ 공급가표 매칭 결과 한 줄.
      다 맞으면 성공 표시만, 안 맞는 게 있으면 어떤 상품이 몇 건인지만 보여준다. */
   function matchBoxHtml() {
-    if (!files.length) return `<div style="margin-top:6px;color:var(--muted)">정산 파일을 올리면 상품이 다 맞는지 확인해 드립니다.</div>`;
+    if (!files.length) return "";
     const rows = allRows();
     if (!rows.length) return "";
     const miss = {};
@@ -202,7 +202,7 @@ const ST = (() => {
     const box = $("pb-state");
     if (!box) return;
     if (!hasBook()) {
-      box.innerHTML = "공급가표를 올리면 상품별 지급 단가로 정산합니다.";
+      box.innerHTML = "";
       return;
     }
     const off = pbRaw.off || [];
@@ -215,7 +215,7 @@ const ST = (() => {
       `<b>📗 ${esc(pbRaw.name)}</b> — 상품 ${pbook.items.length}개` +
       matchBoxHtml() +
       `<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:12px">
-         읽은 시트 ${(pbRaw.sheets || []).length}장 · 자세히</summary>${sheetList}</details>` +
+         읽은 시트 ${(pbRaw.sheets || []).length}장</summary>${sheetList}</details>` +
       `<div style="margin-top:6px"><button class="minibtn" id="pb-clear" style="padding:6px 10px;font-size:12px">공급가표 지우기</button></div>`;
     box.querySelectorAll(".pbsheet").forEach(cb => cb.onchange = async () => {
       const nm = cb.dataset.n;
@@ -417,8 +417,7 @@ const ST = (() => {
     const addBtn = `<button class="minibtn" id="st-add-vendor" style="margin-top:8px">＋ 업체 추가</button>`;
 
     if (!vendors.length) {
-      box.innerHTML = `<div class="pvfoot">공급가표를 올리면 업체가 자동으로 잡힙니다.
-        먼저 업체를 직접 만들어도 됩니다.</div>${addBtn}`;
+      box.innerHTML = addBtn;
       $("st-brand-foot").textContent = `브랜드 ${brands.length}개: ` + brands.join(", ");
       bindAddVendor();
       return;
@@ -463,7 +462,7 @@ const ST = (() => {
     const none = brands.filter(b => !ownerOf(b));
     $("st-brand-foot").textContent = none.length
       ? `아직 업체가 정해지지 않은 브랜드: ${none.join(", ")} — 해당 업체 칸에서 눌러 배정하세요.`
-      : "브랜드를 눌러 다른 업체로 옮길 수 있습니다. 옮기면 기억합니다.";
+      : "";
   }
   function bindAddVendor() {
     const b = $("st-add-vendor");
@@ -720,7 +719,7 @@ const ST = (() => {
         <div class="rmail"><input type="email" placeholder="업체 이메일 (쉼표로 여러 명)" autocapitalize="off" spellcheck="false">
           <button class="dlbtn">메일 보내기</button></div>
         <div class="cands"></div>
-        <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)">여러 명에게 보내려면 쉼표로 구분</span>
+        <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)"></span>
           <button class="minibtn share">📤 카톡·공유</button><button class="minibtn pvbtn">미리보기</button><button class="minibtn dl">엑셀만 받기</button></div>
         <div class="setrow" style="margin-top:4px"><span class="fnlbl" style="flex:1;font-size:11px;color:var(--faint)"></span>
           <button class="minibtn fn">✏️ 파일명 수정</button></div>`;
