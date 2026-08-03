@@ -364,7 +364,7 @@ async function setOrder(file) {
 /* =================================================================
    구글 드라이브 파일 선택기 (폴더 탐색 + 검색 + 링크) — 발주서/업체양식/송장양식/회신 공용
    ================================================================= */
-const DRV = { multiple: false, onPick: null, path: [], sel: new Map() };
+const DRV = { multiple: false, onPick: null, path: [], sel: new Map(), home: null };
 const GSHEET = "application/vnd.google-apps.spreadsheet";
 const GFOLDER = "application/vnd.google-apps.folder";
 
@@ -422,44 +422,91 @@ function drvNeedLogin() {
   };
   d.appendChild(b); box.appendChild(d);
 }
-/* 시작 위치: ①고정한 기본 폴더 → ②마지막에 본 폴더 → ③내 드라이브 최상위 */
+/* 최상위(홈) 폴더 — 회사 작업 폴더가 드라이브 한참 안쪽에 있어서,
+   매번 '내 드라이브'부터 파고들지 않게 여기를 바닥으로 삼는다.
+   홈을 정해두면 '상위' 버튼도 홈 위로는 안 올라간다. 용도(key)와 무관하게 하나만 쓴다. */
+const DRV_ROOT = { id: "root", name: "내 드라이브" };
+const drvBase = () => (DRV.home && DRV.home.id ? { id: DRV.home.id, name: DRV.home.name } : Object.assign({}, DRV_ROOT));
+/* 홈이 정해져 있으면 조상 사슬을 홈에서 잘라낸다 (홈 밖의 폴더면 그대로 둔다) */
+function drvTrim(chain) {
+  const path = [Object.assign({}, DRV_ROOT)].concat(chain || []);
+  if (!(DRV.home && DRV.home.id)) return path;
+  const i = path.findIndex(p => p.id === DRV.home.id);
+  return i >= 0 ? path.slice(i) : path;
+}
+/* 시작 위치: ①고정한 기본 폴더 → ②마지막에 고른 폴더 → ③최상위(홈) 폴더 → ④내 드라이브 */
 async function drvStart() {
-  const all = DRV.key ? await DB.get("driveFolders", {}) : {};
+  const all = await DB.get("driveFolders", {});
+  DRV.home = all[":home"] || null;
   const pinned = DRV.key ? all[DRV.key] : null;
   const last = DRV.key ? all[DRV.key + ":last"] : null;
-  const go = (pinned && pinned.id) ? pinned : (last && last.id ? last : null);
+  const go = (pinned && pinned.id) ? pinned : (last && last.id ? last : (DRV.home && DRV.home.id ? DRV.home : null));
   if (go) {
     // 실제 드라이브 상위 폴더들을 따라 경로를 만든다 → '상위' 버튼이 제대로 동작
-    DRV.path = [{ id: "root", name: "내 드라이브" }, { id: go.id, name: go.name }];
+    DRV.path = [drvBase()];
+    if (go.id !== DRV.path[0].id) DRV.path.push({ id: go.id, name: go.name });
     drvOpen(go.id);
     GMAIL.driveAncestors(go.id).then(chain => {
       if (chain && chain.length) {
-        DRV.path = [{ id: "root", name: "내 드라이브" }].concat(chain);
+        DRV.path = drvTrim(chain);
         drvCrumb();
         $("drv-up").style.display = DRV.path.length > 1 ? "" : "none";
       }
     }).catch(() => {});
   } else {
-    DRV.path = [{ id: "root", name: "내 드라이브" }];
+    DRV.path = [Object.assign({}, DRV_ROOT)];
     drvOpen("root");
   }
   drvFolderInfo();
 }
 async function drvFolderInfo() {
-  const saved = DRV.key ? (await DB.get("driveFolders", {}))[DRV.key] : null;
-  $("drv-folder-info").textContent = saved && saved.id
-    ? `기본 폴더: ${saved.name}`
-    : "기본 폴더 없음 — 폴더를 연 뒤 [기본 폴더로]를 누르면 다음부터 바로 열립니다";
+  const all = await DB.get("driveFolders", {});
+  DRV.home = all[":home"] || null;
+  const saved = DRV.key ? all[DRV.key] : null;
+  const bits = [];
+  bits.push(DRV.home && DRV.home.id ? `최상위: ${DRV.home.name}` : "최상위 미지정");
+  if (saved && saved.id) bits.push(`기본 폴더: ${saved.name}`);
+  $("drv-folder-info").textContent = bits.join(" · ");
 }
+/* 지금 보고 있는 폴더 — 최상위/기본 폴더로 지정할 수 있는지 확인해서 돌려준다 */
+function drvCurFolder() {
+  const cur = DRV.path[DRV.path.length - 1];
+  if (!cur || cur.id === "root" || cur.id === "shared") {
+    $("drv-msg").textContent = "⚠ 폴더를 하나 열고 눌러주세요 (내 드라이브 최상위는 지정 불가)";
+    return null;
+  }
+  return cur;
+}
+$("drv-sethome").onclick = async () => {
+  const all = await DB.get("driveFolders", {});
+  const cur = DRV.path[DRV.path.length - 1];
+  // 이미 그 폴더가 최상위인데 또 누르면 해제 (해제 버튼을 따로 두지 않으려고)
+  if (DRV.home && cur && DRV.home.id === cur.id) {
+    delete all[":home"];
+    await DB.set("driveFolders", all);
+    DRV.home = null; drvFolderInfo(); drvCrumb();
+    $("drv-up").style.display = DRV.path.length > 1 ? "" : "none";
+    $("drv-msg").textContent = "최상위 지정을 풀었어요. 이제 내 드라이브까지 올라갈 수 있습니다.";
+    return;
+  }
+  const f = drvCurFolder(); if (!f) return;
+  all[":home"] = { id: f.id, name: f.name };
+  await DB.set("driveFolders", all);
+  DRV.home = all[":home"];
+  DRV.path = drvTrim(DRV.path.slice(1));      // 홈보다 위는 잘라낸다
+  drvCrumb();
+  $("drv-up").style.display = DRV.path.length > 1 ? "" : "none";
+  drvFolderInfo();
+  $("drv-msg").textContent = `✔ 최상위 폴더로 저장했어요: ${f.name}\n앞으로 모든 탭에서 여기부터 시작합니다.`;
+};
 $("drv-setfolder").onclick = async () => {
   if (!DRV.key) return;
-  const cur = DRV.path[DRV.path.length - 1];
-  if (!cur || cur.id === "root") { $("drv-msg").textContent = "⚠ 폴더를 하나 열고 눌러주세요 (내 드라이브 최상위는 지정 불가)"; return; }
+  const f = drvCurFolder(); if (!f) return;
   const all = await DB.get("driveFolders", {});
-  all[DRV.key] = { id: cur.id, name: cur.name };
+  all[DRV.key] = { id: f.id, name: f.name };
   await DB.set("driveFolders", all);
   drvFolderInfo();
-  $("drv-msg").textContent = `✔ 기본 폴더로 저장했어요: ${cur.name}`;
+  $("drv-msg").textContent = `✔ 기본 폴더로 저장했어요: ${f.name}`;
 };
 function drvCrumb() {
   const c = $("drv-crumb"); c.innerHTML = "";
@@ -495,20 +542,13 @@ async function drvOpen(folderId) {
       if (folderId === "root") items = [{ id: "shared", name: "공유 문서함", mimeType: GFOLDER }].concat(items);
     }
     drvRender(items, true);
-    // 마지막으로 본 폴더 기억 → 다음에 그 자리에서 시작 (매번 최상위부터 안 파고들게)
-    if (DRV.key && folderId !== "root" && folderId !== "shared") {
-      const cur = DRV.path[DRV.path.length - 1];
-      const all = await DB.get("driveFolders", {});
-      all[DRV.key + ":last"] = { id: folderId, name: cur ? cur.name : "" , path: DRV.path.slice() };
-      await DB.set("driveFolders", all);
-    }
   } catch (e) {
     if (/popup|로그인|권한|401|403|NEED_LOGIN/i.test(e.message || "")) { drvNeedLogin(); $("drv-msg").textContent = ""; }
     else { box.innerHTML = ""; $("drv-msg").textContent = "⚠ " + e.message; }
   }
 }
 async function drvSearch(q) {
-  if (!q || !q.trim()) { DRV.path = [{ id: "root", name: "내 드라이브" }]; return drvOpen("root"); }
+  if (!q || !q.trim()) { DRV.path = [drvBase()]; return drvOpen(DRV.path[0].id); }
   const box = $("drv-list"); box.innerHTML = '<div class="empty">찾는 중…</div>';
   $("drv-crumb").innerHTML = `<span>검색: “${esc(q)}”</span>`;
   try { drvRender(await GMAIL.driveSearch(q, 50), false); }
@@ -541,8 +581,19 @@ async function drvPick(files) {
   $("drv-msg").textContent = "가져오는 중…";
   try {
     if (DRV.onPick) await DRV.onPick(files);
+    await drvRememberFolder();          // 실제로 파일을 고른 폴더만 기억한다
     $("drvmodal").classList.remove("on");
   } catch (e) { $("drv-msg").textContent = "⚠ " + e.message; }
+}
+/* 파일을 고른 그 폴더를 기억 → 다음에 열면 거기서 시작.
+   (둘러보기만 한 폴더까지 기억하면, 잠깐 다른 데를 봤을 뿐인데 시작 위치가 바뀐다) */
+async function drvRememberFolder() {
+  if (!DRV.key) return;
+  const cur = DRV.path[DRV.path.length - 1];
+  if (!cur || cur.id === "root" || cur.id === "shared") return;
+  const all = await DB.get("driveFolders", {});
+  all[DRV.key + ":last"] = { id: cur.id, name: cur.name };
+  await DB.set("driveFolders", all);
 }
 
 /* --- ① 쇼핑몰 주문 파일 --- */

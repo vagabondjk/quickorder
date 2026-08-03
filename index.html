@@ -499,7 +499,8 @@
 
     <div class="card">
       <h2><span class="n">2</span>업체별 공급가표</h2>
-      <button class="go" id="st-pb-tpl" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)">📄 공급가표 양식 내려받기</button>
+      <div class="setrow" style="margin:0 0 8px"><span style="flex:1"></span>
+        <button class="minibtn" id="st-pb-tpl">📄 업체공급가표 양식 받기</button></div>
       <button class="go" id="pb-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <label class="drop" id="drop-pb" style="margin-top:0;padding:16px">
         디바이스 파일 선택 또는 끌어오기
@@ -637,8 +638,8 @@
       <div id="drv-crumb" class="drvcrumb"></div>
     </div>
     <div class="mlist drvlist" id="drv-list"></div>
-    <div class="setrow"><span id="drv-folder-info">기본 폴더가 없습니다 — 폴더를 열고 오른쪽 버튼을 누르면 다음부터 바로 열립니다.</span>
-      <button class="minibtn" id="drv-setfolder">📌 기본 폴더로</button></div>
+    <div class="setrow"><span id="drv-folder-info"></span>
+      <button class="minibtn" id="drv-sethome">🏠 여기를 최상위로</button><button class="minibtn" id="drv-setfolder">📌 기본 폴더로</button></div>
     <details class="drvadv">
       <summary>이름으로 검색 · 공유 링크로 가져오기</summary>
       <div style="display:flex;gap:7px;margin-top:8px">
