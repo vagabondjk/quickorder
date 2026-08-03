@@ -63,6 +63,7 @@ const ST = (() => {
   let pbRaw = null;      // {name, at, sheets:[{name,kind,map,rows}], off:[시트명]}
   let pbook = { items: [], errors: [] };
   let aliases = {};      // 연결표 — {주문키: 공급가표키}. 이름이 달라 자동으로 못 붙는 상품을 이어준다
+  let aliasInfo = {};    // 연결표에 쓴 원래 상품명 {주문키:{brand,product,option}} — 키만으론 사람이 못 읽는다
   let brandFix = {};     // 브랜드 → 업체 수동 배정 (공급가표 자동 배정보다 우선). 한 번 정하면 기억한다
   let extraVendors = []; // 공급가표에 없어도 직접 만든 업체
   let carry = { at: 0, list: [] };   // 지난 정산에서 송장이 없어 뺀 주문 (이월 추적용)
@@ -74,12 +75,15 @@ const ST = (() => {
     return isFinite(n) ? n : 0;
   };
   const won = n => (Math.round(n || 0)).toLocaleString("ko-KR") + "원";
+  /* 마진율 = 마진 ÷ 매출. 내부용 정산표 엑셀과 같은 식이라 화면·파일 숫자가 어긋나지 않는다. */
+  const rateOf = (margin, amount) => (amount ? Math.round((margin || 0) / amount * 1000) / 10 + "%" : "-");
 
   async function load() {
     maps = await DB.get("settleMaps", {}) || {};
     extraVendors = await DB.get("settleVendors", []) || [];
     pbRaw = await DB.get("priceBook", null);
     aliases = await DB.get("priceAliases", {}) || {};
+    aliasInfo = await DB.get("priceAliasInfo", {}) || {};
     brandFix = await DB.get("settleBrandVendor", {}) || {};
     // 지난 정산에서 '송장 없어 뺀' 목록. 이번에 출고됐으면 이월 건으로 알려준다.
     carry = await DB.get("settleCarry", { at: 0, list: [] }) || { at: 0, list: [] };
@@ -198,41 +202,22 @@ const ST = (() => {
         공급가표에 추가하거나, 아래 ‘정산내역 추출’ 후 화면에서 연결해주세요.</div></div>`;
   }
 
+  /* 올려둔 공급가표가 있다는 걸 한눈에 — 초록 상자 + 작은 '해제' 버튼.
+     공급가표는 한 번 올려두고 몇 달을 쓰는 파일이라, 지금 뭐가 걸려 있는지가 제일 중요하다. */
+  function drawPbLoaded() {
+    const row = $("pb-loaded"); if (!row) return;
+    const on = hasBook();
+    row.style.display = on ? "" : "none";
+    if (on) $("pb-fname").textContent = "📗 " + (pbRaw.name || "공급가표") + " — 올려둔 파일";
+  }
   function drawPriceBook() {
+    drawPbLoaded();
     const box = $("pb-state");
     if (!box) return;
-    if (!hasBook()) {
-      box.innerHTML = "";
-      return;
-    }
-    const off = pbRaw.off || [];
-    const sheetList = (pbRaw.sheets || []).map(sh =>
-      `<label style="display:flex;align-items:center;gap:6px;margin-top:3px;cursor:pointer">
-         <input type="checkbox" class="pbsheet" data-n="${esc(sh.name)}"${off.indexOf(sh.name) < 0 ? " checked" : ""}>
-         <span>${esc(sh.name)} <span style="color:var(--muted)">· ${sh.count}줄 · ${sh.kind === "ship" ? "배송비 방식" : "가격"}</span></span>
-       </label>`).join("");
-    box.innerHTML =
-      `<b>📗 ${esc(pbRaw.name)}</b> — 상품 ${pbook.items.length}개` +
-      matchBoxHtml() +
-      `<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:12px">
-         읽은 시트 ${(pbRaw.sheets || []).length}장</summary>${sheetList}</details>` +
-      `<div style="margin-top:6px"><button class="minibtn" id="pb-clear" style="padding:6px 10px;font-size:12px">공급가표 지우기</button></div>`;
-    box.querySelectorAll(".pbsheet").forEach(cb => cb.onchange = async () => {
-      const nm = cb.dataset.n;
-      const cur = (pbRaw.off || []).filter(x => x !== nm);
-      if (!cb.checked) cur.push(nm);
-      pbRaw.off = cur;
-      await savePriceBook();
-      drawPriceBook(); drawBrands();
-      if (result) calc();
-    });
-    const cl = $("pb-clear");
-    if (cl) cl.onclick = async () => {
-      if (!confirm("공급가표를 지울까요?\n지우면 업체 지급액은 마진율 방식으로 계산됩니다.")) return;
-      pbRaw = null; await DB.set("priceBook", null);
-      rebuildBook(); drawPriceBook(); drawBrands(); if (result) calc();
-      msg("msg-pb", "ok", "공급가표를 지웠어요.");
-    };
+    // 파일명·상품수·시트 목록은 뺐다 (2026-08-04) — 위 초록 상자와 동어반복이다.
+    // 시트 켜고 끄기도 같이 빠졌다. '최저가 기준 방식'처럼 업체명 열이 없는 참고 시트는
+    // addPriceBook 이 알아서 제외하므로 평소엔 손댈 일이 없다.
+    box.innerHTML = hasBook() ? matchBoxHtml() : "";
   }
 
   /* 빈 양식 내려받기 — 뭘 적어야 하는지 바로 보이게 예시를 한 줄 넣는다 */
@@ -687,7 +672,7 @@ const ST = (() => {
          <span style="color:var(--muted);font-size:11.5px"> · 주문일 ${esc(QO.fmtDate(per.from))} ~ ${esc(QO.fmtDate(per.to))} · 작성일 ${esc(QO.fmtDate(QO.todayStr()))}</span></div>` : "") +
       `<div class="totline"><b>${result.usedBook ? "몰 매출 합계" : "몰 정산금액 합계"}</b><span>${won(t.amount)}</span></div>
        ${t.unpricedAmount ? `<div class="totline" style="font-size:12px;color:var(--danger)"><span>└ 단가 못 찾은 건 (지급·마진에서 빠짐)</span><span>${won(t.unpricedAmount)}</span></div>` : ""}
-       <div class="totline"><b>${esc(CO())} 마진</b><span style="color:var(--ok)">${won(t.margin)}</span></div>
+       <div class="totline"><b>${esc(CO())} 마진</b><span style="color:var(--ok)">${won(t.margin)} <span style="color:var(--muted);font-weight:600">(${rateOf(t.margin, t.amount)})</span></span></div>
        ${t.ded ? `<div class="totline"><b>CS 차감 (교환·반품)</b><span style="color:var(--danger)">− ${won(t.ded)}</span></div>` : ""}
        <div class="totline" style="border-top:1px solid var(--line);margin-top:6px;padding-top:8px">
          <b>업체 지급 합계</b><span style="color:var(--brand)">${won(t.final)}</span></div>
@@ -698,10 +683,8 @@ const ST = (() => {
       (up.length ? unpricedBoxHtml(upKinds, kindKeys, up.length) : "");
     if (up.length) bindAliasPickers();
 
-    $("st-sumbox").innerHTML = result.vendors.map(v =>
-      `<div class="sumrow"><b>🏭 ${esc(v.vendor)}</b>
-        <span style="color:var(--muted);font-size:11.5px">${v.rows.length}건</span>
-        <span class="pay">${won(v.final)}</span></div>`).join("");
+    // 업체별 요약 줄은 뺐다 (2026-08-04) — 바로 아래 업체 카드에 같은 숫자가 또 나온다
+    $("st-sumbox").innerHTML = "";
 
     const box = $("st-vendors");
     box.innerHTML = "";
@@ -711,7 +694,7 @@ const ST = (() => {
       row.innerHTML = `<div class="rtop"><b style="flex:1">🏭 ${esc(v.vendor)}</b><span class="cnt">${v.rows.length}건</span></div>
         <div class="totline" style="font-size:12px"><span>${result.usedBook ? "매출" : "정산금액"}</span><span>${won(v.amount)}</span></div>
         ${v.unpricedAmount ? `<div class="totline" style="font-size:12px;color:var(--danger)"><span>└ 단가 못 찾은 건</span><span>${won(v.unpricedAmount)}</span></div>` : ""}
-        <div class="totline" style="font-size:12px"><span>${esc(CO())} 마진</span><span>${won(v.margin)}</span></div>
+        <div class="totline" style="font-size:12px"><span>${esc(CO())} 마진</span><span>${won(v.margin)} <span style="color:var(--muted)">(${rateOf(v.margin, v.amount)})</span></span></div>
         ${v.unpriced ? `<div class="totline" style="font-size:12px;color:var(--danger)"><span>⚠ 단가 못 찾음</span><span>${v.unpriced}건 (0원 처리)</span></div>` : ""}
         ${v.loose ? `<div class="totline" style="font-size:12px;color:var(--muted)"><span>비슷한 이름으로 찾음</span><span>${v.loose}건</span></div>` : ""}
         ${v.ded ? `<div class="totline" style="font-size:12px;color:var(--danger)"><span>CS 차감 ${v.dedRows.length}건</span><span>− ${won(v.ded)}</span></div>` : ""}
@@ -829,8 +812,8 @@ const ST = (() => {
   }
   /* 후보 목록 — 이름이 겹치는 것만 위에, 나머지는 접어서 뒤에.
      21개를 통째로 늘어놓으면 못 고른다 (닭갈비면 닭갈비만 보여야 한다) */
-  function pickOptions(row) {
-    const opt = c => `<option value="${esc(c.key)}">${esc((c.brand ? c.brand + " · " : "") + c.product)}` +
+  function pickOptions(row, cur) {
+    const opt = c => `<option value="${esc(c.key)}"${c.key === cur ? " selected" : ""}>${esc((c.brand ? c.brand + " · " : "") + c.product)}` +
       `${c.option ? " [" + esc(c.option) + "]" : ""} — ${Math.round(c.price).toLocaleString("ko-KR")}원` +
       `${c.n > 1 ? " (기간별 " + c.n + "개)" : ""}</option>`;
     const all = bookChoices();
@@ -839,7 +822,7 @@ const ST = (() => {
     const top = ranked.map(x => byKey[x.item.key]).filter(Boolean);
     const topKeys = {}; top.forEach(c => { topKeys[c.key] = 1; });
     const rest = all.filter(c => !topKeys[c.key]);
-    let h = '<option value="">— 공급가표에서 고르기 —</option>';
+    let h = `<option value=""${cur ? "" : " selected"}>— 공급가표에서 고르기 —</option>`;
     if (top.length) h += `<optgroup label="이름이 비슷한 상품 ${top.length}개">` + top.map(opt).join("") + "</optgroup>";
     if (rest.length) h += `<optgroup label="${top.length ? "그 외 " : "전체 "}${rest.length}개">` + rest.map(opt).join("") + "</optgroup>";
     return h;
@@ -871,11 +854,88 @@ const ST = (() => {
       sel.onchange = async () => {
         const r = kinds[keys[Number(sel.dataset.i)]].row;
         const okey = QO.priceRowKey(r.brand, r.product, r.option);
-        if (sel.value) aliases[okey] = sel.value;
-        else delete aliases[okey];
+        if (sel.value) {
+          aliases[okey] = sel.value;
+          // 나중에 '상품 연결표'에서 사람이 읽을 수 있게 원래 이름을 같이 남긴다
+          aliasInfo[okey] = { brand: r.brand || "", product: r.product || "", option: r.option || "" };
+        } else { delete aliases[okey]; delete aliasInfo[okey]; }
         await DB.set("priceAliases", aliases);
+        await DB.set("priceAliasInfo", aliasInfo);
         calc();
         msg("msg-s", "ok", "✔ 연결했어요. 다시 계산했습니다.");
+      };
+    });
+  }
+
+  /* =================================================================
+     상품 연결표 — 자동으로 못 붙어서 사람이 골라준 매칭을 다시 보고 고친다.
+     여기가 틀리면 그 상품 지급액이 통째로 틀리는데, 한 번 저장하면 계속 쓰여서
+     들여다볼 방법이 없으면 잘못된 연결이 몇 달을 간다.
+     ================================================================= */
+  /* 주문 쪽 이름 — 저장해둔 게 있으면 그걸, 없으면 이번 달 주문에서 찾아본다 */
+  function aliasOrderLabel(okey) {
+    const inf = aliasInfo[okey];
+    if (inf && inf.product) return inf;
+    const rows = (result && result.rows) || [];
+    const hit = rows.find(r => QO.priceRowKey(r.brand, r.product, r.option) === okey);
+    if (hit) return { brand: hit.brand || "", product: hit.product || "", option: hit.option || "" };
+    return null;
+  }
+  function aliasBoxHtml() {
+    const keys = Object.keys(aliases).filter(k => aliases[k]);
+    if (!keys.length) {
+      return `<div class="empty">아직 손으로 이어준 상품이 없습니다.<br>
+        정산을 돌렸을 때 단가를 못 찾은 상품이 나오면, 거기서 고른 연결이 여기 쌓입니다.</div>`;
+    }
+    const byKey = {}; bookChoices().forEach(c => { byKey[c.key] = c; });
+    return keys.map((k, i) => {
+      const o = aliasOrderLabel(k);
+      const t = byKey[aliases[k]];
+      const left = o
+        ? `<b>${esc(o.product.slice(0, 70))}</b>${o.option ? `<span style="color:var(--muted)"> [${esc(o.option)}]</span>` : ""}
+           <div style="font-size:11.5px;color:var(--muted)">${esc(o.brand || "")}</div>`
+        : `<b style="color:var(--muted)">(이름을 못 읽는 옛 연결)</b>
+           <div style="font-size:11px;color:var(--faint);word-break:break-all">${esc(k.slice(0, 90))}</div>`;
+      const right = t
+        ? `<b style="color:var(--ok)">${esc((t.brand ? t.brand + " · " : "") + t.product)}</b>${t.option ? ` [${esc(t.option)}]` : ""}
+           <span style="color:var(--muted)"> — ${Math.round(t.price).toLocaleString("ko-KR")}원</span>`
+        : `<b style="color:var(--danger)">⚠ 지금 공급가표에 없는 항목입니다 — 다시 골라주세요</b>`;
+      return `<div style="padding:10px 0;border-top:1px solid var(--line)">
+        <div style="font-size:12.5px">${left}</div>
+        <div style="font-size:12.5px;margin-top:4px">↳ ${right}</div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <select class="aliasedit" data-k="${esc(k)}" style="flex:1;padding:7px;font-size:12.5px">${
+            pickOptions(o || { brand: "", product: "", option: "" }, aliases[k])}</select>
+          <button class="minibtn aliasdel" data-k="${esc(k)}" style="flex:none">연결 끊기</button>
+        </div></div>`;
+    }).join("");
+  }
+  async function saveAliases(why) {
+    await DB.set("priceAliases", aliases);
+    await DB.set("priceAliasInfo", aliasInfo);
+    drawAliasBox();
+    if (result) { calc(); }
+    $("alias-msg").textContent = why;
+  }
+  function drawAliasBox() {
+    const n = Object.keys(aliases).filter(k => aliases[k]).length;
+    $("alias-sub").textContent = n
+      ? `손으로 이어준 상품 ${n}개입니다. 잘못 이어졌으면 여기서 바로 바꿀 수 있습니다.`
+      : "";
+    $("alias-list").innerHTML = aliasBoxHtml();
+    $("alias-list").querySelectorAll(".aliasedit").forEach(sel => {
+      sel.onchange = async () => {
+        const k = sel.dataset.k;
+        if (!sel.value) { delete aliases[k]; delete aliasInfo[k]; return saveAliases("연결을 끊었습니다."); }
+        aliases[k] = sel.value;
+        await saveAliases("✔ 연결을 바꿨습니다. 정산을 다시 계산했어요.");
+      };
+    });
+    $("alias-list").querySelectorAll(".aliasdel").forEach(b => {
+      b.onclick = async () => {
+        const k = b.dataset.k;
+        delete aliases[k]; delete aliasInfo[k];
+        await saveAliases("연결을 끊었습니다. 이 상품은 다시 '단가 못 찾음'으로 나옵니다.");
       };
     });
   }
@@ -925,6 +985,19 @@ const ST = (() => {
              tag: from.slice(0, 4) + "-" + from.slice(4, 6) + "~" + to.slice(4, 6) };
   }
   const periodTag = () => (result && result.period && result.period.tag) || QO.todayStr().slice(0, 6);
+  /* 업체용 정산서에 적을 정산기간.
+     한 달 안에 들어오면 그 달 1일~말일로 적는다 — 주문이 7/3~7/29 에만 있어도
+     업체가 보는 정산 대상 기간은 '7월 한 달'이라서다. 달을 걸치면 실제 범위 그대로. */
+  function periodRange() {
+    const p = (result && result.period) || {};
+    if (!p.from || !p.to) return "";
+    const f = d => d.slice(0, 4) + "-" + d.slice(4, 6) + "-" + d.slice(6, 8);
+    if (p.from.slice(0, 6) !== p.to.slice(0, 6)) return `${f(p.from)} ~ ${f(p.to)}`;
+    const y = Number(p.from.slice(0, 4)), m = Number(p.from.slice(4, 6));
+    const end = new Date(y, m, 0).getDate();          // m 월의 0일 = 그 달 말일
+    const ym = p.from.slice(0, 4) + "-" + p.from.slice(4, 6);
+    return `${ym}-01 ~ ${ym}-${String(end).padStart(2, "0")}`;
+  }
   /* 파일 머리말에 공통으로 넣는 줄 */
   function stampLine(extra) {
     const p = (result && result.period) || { label: "" };
@@ -962,15 +1035,19 @@ const ST = (() => {
 
     ws.addRow([`${v.vendor} 정산서${p.label ? " — " + p.label : ""}`]);
     ws.getRow(1).font = { bold: true, size: 14 };
-    ws.addRow([stampLine(`${v.rows.length}건`)]);
+    // 업체용에는 작성일을 넣지 않는다 — 업체가 볼 것은 '어느 기간을 정산했는지'다
+    const pr = periodRange();
+    ws.addRow([(pr ? `정산기간 ${pr} (출고완료된 주문건 기준) · ` : "") + `${v.rows.length}건`]);
     ws.addRow(["※ 아래 금액은 모두 부가세가 포함된 금액입니다."]);
     while (ws.rowCount < tops.length) ws.addRow([]);   // 요약이 길면 줄을 더 만든다
     ws.addRow([]);
     // D=4, E=5 에 항목/금액. 마지막 줄(정산금액)은 굵게·파랗게
+    const topCells = {};                       // 나중에 실제 합계 수식으로 바꿔 넣는다
     tops.forEach((t, i) => {
       const row = ws.getRow(i + 1);
       const label = row.getCell(4), val = row.getCell(5);
       label.value = t[0]; val.value = Math.round(t[1]);
+      topCells[t[0]] = val;
       const last = i === tops.length - 1;
       const font = { bold: true, size: last ? 13 : 11 };
       if (last) font.color = { argb: "FF1A56DB" };
@@ -1006,11 +1083,50 @@ const ST = (() => {
       cells[moneyEnd - 2] = label; cells[moneyEnd - 1] = Math.round(val);
       const row = ws.addRow(cells);
       row.font = { bold: true, color: color ? { argb: color } : undefined };
+      return row.getCell(moneyEnd);
     };
-    add("공급가 합계", v.pay - perOrderShip);
-    if (perOrderShip) add("배송비 합계", perOrderShip);
-    if (v.ded) add("CS 차감", -v.ded, "FFCC0000");
-    add("정산금액", v.final, "FF1A56DB");
+    const cSupply = add("공급가 합계", v.pay - perOrderShip);
+    const cShip = perOrderShip ? add("배송비 합계", perOrderShip) : null;
+    const cDed = v.ded ? add("CS 차감", -v.ded, "FFCC0000") : null;
+    const cFinal = add("정산금액", v.final, "FF1A56DB");
+
+    /* ---- 합계에 실제 엑셀 수식을 건다 ----
+       숫자만 박아두면 업체가 줄을 지우거나 고쳐도 합계가 그대로라 서로 다른 값을 보게 된다.
+       계산 결과(result)도 같이 넣어 두면 수식을 계산하지 않는 뷰어에서도 숫자가 보인다.
+       ※ 수량 열은 원본 파일에서 온 값이라 숫자가 아닐 수 있다 → 합이 맞을 때만 수식으로 바꾼다. */
+    if (v.rows.length) {
+      const first = hr + 1, last = hr + v.rows.length;
+      const L = n => ws.getColumn(n).letter;
+      const payCol = L(moneyEnd);                                  // 정산금액
+      const shipCol = perOrderShip ? L(src.length + 2) : null;     // 배송비(건당 업체만)
+      const rng = c => `${c}${first}:${c}${last}`;
+      const put = (cell, formula, result) => { if (cell) cell.value = { formula, result: Math.round(result) }; };
+
+      // 공급가 합계 = 정산금액 합 − 배송비 합 (개당 업체는 배송비 열이 없어 그냥 합)
+      put(cSupply, shipCol ? `SUM(${rng(payCol)})-SUM(${rng(shipCol)})` : `SUM(${rng(payCol)})`, v.pay - perOrderShip);
+      put(cShip, `SUM(${rng(shipCol)})`, perOrderShip);
+      // 정산금액 = 위 합계 칸들을 더한다 (같은 수를 두 번 세지 않게 SUM 을 다시 쓰지 않는다)
+      const parts = [cSupply, cShip, cDed].filter(Boolean).map(c => c.address);
+      put(cFinal, parts.join("+"), v.final);
+
+      // 판매수량 = 원본 수량 열의 합. 열을 못 찾거나 글자가 섞여 합이 안 맞으면 숫자 그대로 둔다.
+      const qi = src.findIndex(h => /수량/.test(String(h || "")) && !/재고|누계|누적/.test(String(h || "")));
+      if (qi >= 0 && topCells["판매수량"]) {
+        const raw = v.rows.map(r => {
+          const idx = (r.srcCols || []).indexOf(src[qi]);
+          return idx < 0 ? NaN : Number(r.raw ? r.raw[idx] : NaN);
+        });
+        const sum = raw.reduce((s2, n) => s2 + (isFinite(n) ? n : 0), 0);
+        if (raw.every(n => isFinite(n)) && Math.round(sum) === Math.round(totalQty))
+          put(topCells["판매수량"], `SUM(${rng(L(qi + 1))})`, totalQty);
+      }
+      // 위쪽 요약은 아래 합계 칸을 그대로 가리킨다 — 두 곳이 어긋날 수 없다
+      const link = (name, cell) => { if (cell && topCells[name]) topCells[name].value = { formula: cell.address, result: Math.round(cell.value.result != null ? cell.value.result : cell.value) }; };
+      link("공급가 합계", cSupply);
+      link("배송비 합계", cShip);
+      link("교환·반품 차감", cDed);
+      link("정산금액", cFinal);
+    }
     if (v.unpriced) {
       ws.addRow([]);
       const w = ws.addRow([`※ 단가가 아직 확정되지 않은 ${v.unpriced}건은 이번 정산금액에서 빠져 있습니다. 단가 확정 후 정산해 드리겠습니다.`]);
@@ -1232,9 +1348,14 @@ const ST = (() => {
     });
     /* ---- 업체별 공급가표 ---- */
     const takePb = async f => {
-      $("pb-fname").textContent = "📄 " + f.name;
       try { await addPriceBook(await readFile(f), f.name); }
       catch (e) { msg("msg-pb", "err", "⚠ " + f.name + " — " + e.message); }
+    };
+    $("pb-clear").onclick = async () => {
+      if (!confirm("올려둔 공급가표를 해제할까요?\n해제하면 업체 지급액은 마진율 방식으로 계산됩니다.")) return;
+      pbRaw = null; await DB.set("priceBook", null);
+      rebuildBook(); drawPriceBook(); drawBrands(); if (result) calc();
+      msg("msg-pb", "ok", "공급가표를 해제했어요.");
     };
     $("f-pb").addEventListener("change", async function () {
       const fs = [...this.files]; this.value = "";
@@ -1245,12 +1366,19 @@ const ST = (() => {
       key: "pricebook", multiple: false, title: "드라이브에서 공급가표 가져오기",
       onPick: async fs => {
         for (const f of fs) {
-          $("pb-fname").textContent = "📄 " + f.name;
           try { const r = await GMAIL.driveFetchExcel(f.id); await addPriceBook(r.buf, r.name || f.name); }
           catch (e) { msg("msg-pb", "err", "⚠ " + f.name + " — " + e.message); }
         }
       },
     });
+    $("st-alias").onclick = () => {
+      if (!hasBook()) { msg("msg-pb", "warn", "공급가표를 먼저 올려주세요 — 연결할 상대가 있어야 보여드릴 수 있어요."); return; }
+      $("alias-msg").textContent = "";
+      drawAliasBox();
+      $("aliasmodal").classList.add("on");
+    };
+    $("alias-close").onclick = () => $("aliasmodal").classList.remove("on");
+    $("aliasmodal").onclick = e => { if (e.target === $("aliasmodal")) $("aliasmodal").classList.remove("on"); };
     $("st-pb-tpl").onclick = async () => {
       try { download(await priceBookTemplate(), "공급가표_양식.xlsx"); }
       catch (e) { msg("msg-pb", "err", "⚠ " + e.message); }
@@ -1314,6 +1442,8 @@ const ST = (() => {
   }
 
   init();
-  return { onShow, drawFilter: drawFilterLine, markSettled, calc, result: () => result };
+  return { onShow, drawFilter: drawFilterLine, markSettled, calc, result: () => result,
+           /* 검증용 — 업체용 정산서(합계 수식·머리말)를 화면 없이 만들어 볼 수 있게 열어둔다 */
+           _make: (r, v) => { result = r; const wb = new ExcelJS.Workbook(); vendorSheet(wb, v); return wb; } };
 })();
 window.ST = ST;

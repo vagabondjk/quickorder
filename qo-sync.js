@@ -14,7 +14,7 @@ const SYNC = (() => {
     "csItems", "csMaps", "csSenders", "csKeywords", "csExclude",
     "settleRules", "settleMaps", "stSenders", "stKeywords", "stExclude",
     // v6.1 — 업체별 공급가표. 이게 빠지면 기기를 바꿨을 때 단가와 연결표가 통째로 사라진다
-    "priceBook", "priceAliases", "settleBrandVendor", "settleVendors", "settleCarry",
+    "priceBook", "priceAliases", "priceAliasInfo", "settleBrandVendor", "settleVendors", "settleCarry",
     // v6.1.6 — 메일 문구
     "mailTemplates"];
   const STAMP_KEY = CONFIG.ls("qo_sync_stamp");   // 이 기기가 마지막으로 반영/업로드한 시각
