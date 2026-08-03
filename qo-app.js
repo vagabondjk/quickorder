@@ -395,7 +395,6 @@ async function openDrivePicker(opts) {
   $("drv-msg").textContent = ""; $("drv-q").value = ""; $("drv-link").value = "";
   $("drv-list").innerHTML = "";
   $("drvmodal").classList.add("on");
-  drvFolderInfo();
   // 로그인 안 돼 있으면: 조용한 갱신(팝업 없음) 시도 → 실패하면 '로그인' 버튼을 보여준다.
   // (자동으로 팝업을 띄우면 브라우저가 "Failed to open popup window"로 막아버림)
   if (GMAIL.needLogin()) { drvNeedLogin(); return; }   // 자동 팝업 금지 → 버튼으로 유도
@@ -422,25 +421,26 @@ function drvNeedLogin() {
   };
   d.appendChild(b); box.appendChild(d);
 }
-/* 최상위(홈) 폴더 — 회사 작업 폴더가 드라이브 한참 안쪽에 있어서,
-   매번 '내 드라이브'부터 파고들지 않게 여기를 바닥으로 삼는다.
-   홈을 정해두면 '상위' 버튼도 홈 위로는 안 올라간다. 용도(key)와 무관하게 하나만 쓴다. */
+/* 최상위 폴더 — 회사 작업 폴더가 '내 드라이브' 한참 안쪽에 있어서,
+   매번 위에서부터 파고들지 않게 여기를 바닥으로 삼는다.
+   여기가 정해지면 경로 표시가 이 폴더에서 시작하고 '상위' 버튼도 그 위로 안 올라간다.
+   ★ 버튼으로 지정하지 않는다 — 파일을 처음 고르면 '내 드라이브 바로 아래' 폴더가
+     자동으로 최상위가 된다. 탭(발주·송장·정산·CS)이 전부 같은 값을 쓴다. */
 const DRV_ROOT = { id: "root", name: "내 드라이브" };
 const drvBase = () => (DRV.home && DRV.home.id ? { id: DRV.home.id, name: DRV.home.name } : Object.assign({}, DRV_ROOT));
-/* 홈이 정해져 있으면 조상 사슬을 홈에서 잘라낸다 (홈 밖의 폴더면 그대로 둔다) */
+/* 최상위가 정해져 있으면 조상 사슬을 거기서 잘라낸다 (최상위 밖의 폴더면 그대로 둔다) */
 function drvTrim(chain) {
   const path = [Object.assign({}, DRV_ROOT)].concat(chain || []);
   if (!(DRV.home && DRV.home.id)) return path;
   const i = path.findIndex(p => p.id === DRV.home.id);
   return i >= 0 ? path.slice(i) : path;
 }
-/* 시작 위치: ①고정한 기본 폴더 → ②마지막에 고른 폴더 → ③최상위(홈) 폴더 → ④내 드라이브 */
+/* 시작 위치: ①마지막에 파일 고른 폴더 → ②최상위 폴더 → ③내 드라이브 */
 async function drvStart() {
   const all = await DB.get("driveFolders", {});
   DRV.home = all[":home"] || null;
-  const pinned = DRV.key ? all[DRV.key] : null;
   const last = DRV.key ? all[DRV.key + ":last"] : null;
-  const go = (pinned && pinned.id) ? pinned : (last && last.id ? last : (DRV.home && DRV.home.id ? DRV.home : null));
+  const go = (last && last.id) ? last : (DRV.home && DRV.home.id ? DRV.home : null);
   if (go) {
     // 실제 드라이브 상위 폴더들을 따라 경로를 만든다 → '상위' 버튼이 제대로 동작
     DRV.path = [drvBase()];
@@ -457,57 +457,7 @@ async function drvStart() {
     DRV.path = [Object.assign({}, DRV_ROOT)];
     drvOpen("root");
   }
-  drvFolderInfo();
 }
-async function drvFolderInfo() {
-  const all = await DB.get("driveFolders", {});
-  DRV.home = all[":home"] || null;
-  const saved = DRV.key ? all[DRV.key] : null;
-  const bits = [];
-  bits.push(DRV.home && DRV.home.id ? `최상위: ${DRV.home.name}` : "최상위 미지정");
-  if (saved && saved.id) bits.push(`기본 폴더: ${saved.name}`);
-  $("drv-folder-info").textContent = bits.join(" · ");
-}
-/* 지금 보고 있는 폴더 — 최상위/기본 폴더로 지정할 수 있는지 확인해서 돌려준다 */
-function drvCurFolder() {
-  const cur = DRV.path[DRV.path.length - 1];
-  if (!cur || cur.id === "root" || cur.id === "shared") {
-    $("drv-msg").textContent = "⚠ 폴더를 하나 열고 눌러주세요 (내 드라이브 최상위는 지정 불가)";
-    return null;
-  }
-  return cur;
-}
-$("drv-sethome").onclick = async () => {
-  const all = await DB.get("driveFolders", {});
-  const cur = DRV.path[DRV.path.length - 1];
-  // 이미 그 폴더가 최상위인데 또 누르면 해제 (해제 버튼을 따로 두지 않으려고)
-  if (DRV.home && cur && DRV.home.id === cur.id) {
-    delete all[":home"];
-    await DB.set("driveFolders", all);
-    DRV.home = null; drvFolderInfo(); drvCrumb();
-    $("drv-up").style.display = DRV.path.length > 1 ? "" : "none";
-    $("drv-msg").textContent = "최상위 지정을 풀었어요. 이제 내 드라이브까지 올라갈 수 있습니다.";
-    return;
-  }
-  const f = drvCurFolder(); if (!f) return;
-  all[":home"] = { id: f.id, name: f.name };
-  await DB.set("driveFolders", all);
-  DRV.home = all[":home"];
-  DRV.path = drvTrim(DRV.path.slice(1));      // 홈보다 위는 잘라낸다
-  drvCrumb();
-  $("drv-up").style.display = DRV.path.length > 1 ? "" : "none";
-  drvFolderInfo();
-  $("drv-msg").textContent = `✔ 최상위 폴더로 저장했어요: ${f.name}\n앞으로 모든 탭에서 여기부터 시작합니다.`;
-};
-$("drv-setfolder").onclick = async () => {
-  if (!DRV.key) return;
-  const f = drvCurFolder(); if (!f) return;
-  const all = await DB.get("driveFolders", {});
-  all[DRV.key] = { id: f.id, name: f.name };
-  await DB.set("driveFolders", all);
-  drvFolderInfo();
-  $("drv-msg").textContent = `✔ 기본 폴더로 저장했어요: ${f.name}`;
-};
 function drvCrumb() {
   const c = $("drv-crumb"); c.innerHTML = "";
   DRV.path.forEach((p, i) => {
@@ -586,13 +536,22 @@ async function drvPick(files) {
   } catch (e) { $("drv-msg").textContent = "⚠ " + e.message; }
 }
 /* 파일을 고른 그 폴더를 기억 → 다음에 열면 거기서 시작.
-   (둘러보기만 한 폴더까지 기억하면, 잠깐 다른 데를 봤을 뿐인데 시작 위치가 바뀐다) */
+   (둘러보기만 한 폴더까지 기억하면, 잠깐 다른 데를 봤을 뿐인데 시작 위치가 바뀐다)
+   같이 '최상위 폴더'도 정한다 — 지금 경로에서 내 드라이브 바로 아래 폴더.
+   버튼을 눌러 지정할 필요 없이, 한 번 파일을 고르면 다음부터 거기가 바닥이 된다. */
 async function drvRememberFolder() {
-  if (!DRV.key) return;
   const cur = DRV.path[DRV.path.length - 1];
   if (!cur || cur.id === "root" || cur.id === "shared") return;
   const all = await DB.get("driveFolders", {});
-  all[DRV.key + ":last"] = { id: cur.id, name: cur.name };
+  if (DRV.key) all[DRV.key + ":last"] = { id: cur.id, name: cur.name };
+  if (!(all[":home"] && all[":home"].id)) {
+    // path[0] 이 '내 드라이브'면 그 다음이 작업 폴더. 이미 최상위 안에서 시작했으면 path[0] 이 곧 최상위다.
+    const top = DRV.path[0] && DRV.path[0].id === "root" ? DRV.path[1] : DRV.path[0];
+    if (top && top.id && top.id !== "root" && top.id !== "shared") {
+      all[":home"] = { id: top.id, name: top.name };
+      DRV.home = all[":home"];
+    }
+  }
   await DB.set("driveFolders", all);
 }
 
