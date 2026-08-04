@@ -183,11 +183,79 @@ function bindDrop(id, cb) {
     if (f.length) cb(f);
   });
 }
-const readFile = f => new Promise((res, rej) => {
+let readFile = f => new Promise((res, rej) => {
   const r = new FileReader();
   r.onload = () => res(r.result); r.onerror = () => rej(r.error);
   r.readAsArrayBuffer(f);
 });
+
+/* =====================================================================
+   로딩 표시 — 엑셀을 읽고 쓰는 데 몇 초씩 걸리는데 화면이 그대로라
+   멈춘 줄 알고 다시 누르는 일이 있었다. 오래 걸리는 일에는 달리는 사람을 띄운다.
+
+   버튼마다 붙이지 않고 '느린 일' 자체를 감싼다 —
+   파일 읽기 · 엑셀 열기/저장 · 드라이브/메일 통신. 어디서 부르든 자동으로 뜬다.
+   겹쳐 불려도 세어서 마지막 하나가 끝날 때 닫는다.
+   250ms 안에 끝나면 아예 뜨지 않는다 (깜빡임 방지).
+   ===================================================================== */
+const BUSY = (() => {
+  let n = 0, timer = null, label = "";
+  const el = () => document.getElementById("busy");
+  function paint() {
+    const b = el(); if (!b) return;
+    const s = document.getElementById("busy-sub");
+    if (s) s.textContent = label || "";
+    b.classList.add("on");
+  }
+  function start(txt) {
+    n++; label = txt || label;
+    if (timer || el() && el().classList.contains("on")) return;
+    timer = setTimeout(() => { timer = null; if (n > 0) paint(); }, 250);
+  }
+  function end() {
+    n = Math.max(0, n - 1);
+    if (n) return;
+    label = "";
+    if (timer) { clearTimeout(timer); timer = null; }
+    const b = el(); if (b) b.classList.remove("on");
+  }
+  /* 함수 하나를 '로딩 뜨는 함수'로 바꿔 끼운다 */
+  function wrap(get, set, txt) {
+    const f = get();
+    if (typeof f !== "function" || f.__busy) return;
+    const g = function (...a) {
+      start(txt);
+      let r;
+      try { r = f.apply(this, a); }
+      catch (e) { end(); throw e; }
+      if (r && typeof r.then === "function") return r.then(v => { end(); return v; }, e => { end(); throw e; });
+      end(); return r;
+    };
+    g.__busy = true;
+    set(g);
+  }
+  function hook(obj, name, txt) {
+    if (!obj) return;
+    wrap(() => obj[name], v => { obj[name] = v; }, txt);
+  }
+  return { start, end, hook, wrap };
+})();
+// 파일 읽기
+BUSY.wrap(() => readFile, v => { readFile = v; }, "파일 읽는 중");
+// 엑셀 열기·저장 (제일 오래 걸린다)
+if (typeof QO !== "undefined") {
+  BUSY.hook(QO, "loadWorkbook", "엑셀 읽는 중");
+  BUSY.hook(QO, "saveWorkbook", "엑셀 만드는 중");
+  BUSY.hook(QO, "convert", "발주서 만드는 중");
+  BUSY.hook(QO, "collectInvoices", "송장 맞추는 중");
+}
+// 드라이브·메일 통신
+if (typeof GMAIL !== "undefined") {
+  ["driveFetchExcel", "driveListFolder", "driveListShared", "driveSearch", "driveUpdateFile"]
+    .forEach(k => BUSY.hook(GMAIL, k, "구글 드라이브 여는 중"));
+  ["listMails", "listTextMails", "getAttachment", "searchAddresses", "send"]
+    .forEach(k => BUSY.hook(GMAIL, k, "메일 확인하는 중"));
+}
 
 /* =====================================================================
    메일 문구 — 발주서·송장·정산·CS 가 같이 쓴다.

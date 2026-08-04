@@ -101,10 +101,17 @@ const ST = (() => {
     rewards.forEach(r => { if (r.base === "없음") { r.base = "매출"; r.rate = 0; } });
     // 업체 하나만 담던 옛 조건({vendor, brands})을 여러 업체({picks})로 옮긴다
     rewards.forEach(r => {
-      if (r.picks) return;
-      r.picks = {};
-      if (r.vendor) r.picks[r.vendor] = (r.brands || []).slice();
-      delete r.vendor; delete r.brands;
+      if (!r.picks) {
+        r.picks = {};
+        if (r.vendor) r.picks[r.vendor] = (r.brands || []).slice();
+        delete r.vendor; delete r.brands;
+      }
+      // 업체마다 기준·요율이 다를 수 있게 바꿨다. 배열이던 것을 객체로 옮긴다.
+      Object.keys(r.picks).forEach(v => {
+        const p = r.picks[v];
+        if (Array.isArray(p)) r.picks[v] = { brands: p.slice(), base: r.base || "매출", rate: Number(r.rate) || 0 };
+        else { p.brands = p.brands || []; p.base = p.base || "매출"; p.rate = Number(p.rate) || 0; }
+      });
     });
     // 지난 정산에서 '송장 없어 뺀' 목록. 이번에 출고됐으면 이월 건으로 알려준다.
     carry = await DB.get("settleCarry", { at: 0, list: [] }) || { at: 0, list: [] };
@@ -831,26 +838,43 @@ const ST = (() => {
          '업체 전체' = 그 업체의 모든 브랜드 (나중에 브랜드가 늘어도 따라간다). */
       const mine = Object.keys(picks);
       const boxes = mine.map(v => {
+        const p = picks[v] || {};
         const bs = brandsOfVendor(v);
-        const all = !(picks[v] || []).length;
+        const all = !(p.brands || []).length;
         const chips = bs.map(b => {
-          const sel = all || picks[v].indexOf(b) >= 0;
+          const sel = all || p.brands.indexOf(b) >= 0;
           return `<span class="brow${sel ? " on" : ""}" data-i="${i}" data-v="${esc(v)}" data-b="${esc(b)}">
             <span class="box">${sel ? "✓" : ""}</span>${esc(b)}</span>`;
         }).join("");
+        // 업체마다 기준(매출/이익)과 요율을 따로 정한다
+        const line = (v2 => { for (const x of ((result && result.vendors) || []))
+          for (const y of (x.rewardRows || [])) if (y.id === r.id && y.vendor === v2) return y;
+          return null; })(v);
         return `<div class="vendorbox" style="margin-top:6px;border-color:var(--brand)">
           <div class="vh" style="gap:6px">
             <span style="flex:1">🏭 ${esc(v)}</span>
             <span class="brow mdall${all ? " on" : ""}" data-i="${i}" data-v="${esc(v)}" style="flex:none">
               <span class="box">${all ? "✓" : ""}</span>업체 전체</span>
             <button class="minibtn mdvdel" data-i="${i}" data-v="${esc(v)}" style="flex:none">✕</button></div>
+          <div style="display:flex;gap:6px;align-items:center;padding:6px 0 2px">
+            <select class="mdvbase" data-i="${i}" data-v="${esc(v)}" style="flex:1;min-width:0;padding:6px;font-size:12px">
+              <option value="매출"${rewardBase(p) === "매출" ? " selected" : ""}>매출 대비</option>
+              <option value="이익"${rewardBase(p) === "이익" ? " selected" : ""}>이익 대비</option>
+            </select>
+            <input class="mdvrate" data-i="${i}" data-v="${esc(v)}" type="number" step="0.1" min="0"
+              value="${Number(p.rate) || 0}" style="flex:none;width:64px;padding:6px;text-align:right;
+              border:1px solid var(--line);border-radius:8px;background:var(--card);color:inherit;
+              font-family:inherit;font-size:12px">
+            <b style="flex:none;font-size:12px">%</b>
+            <b style="flex:none;font-size:12.5px;color:${line && line.reward ? "var(--brand)" : "var(--faint)"}">${
+              line ? won(line.reward) : "—"}</b></div>
           <div class="brands">${bs.length ? chips
             : `<span style="font-size:11.5px;color:var(--muted)">배정된 브랜드가 없습니다</span>`}</div></div>`;
       }).join("");
       const rest = vendors.filter(v => picks[v] === undefined);
       const adder = rest.length
         ? `<select class="mdadd" data-i="${i}" style="width:100%;margin-top:8px;padding:8px;font-size:12.5px">
-             <option value="">＋ 맡은 업체 추가…</option>
+             <option value="">＋ 담당업체 추가…</option>
              ${rest.map(v => `<option value="${esc(v)}">🏭 ${esc(v)}</option>`).join("")}
            </select>`
         : "";
@@ -860,18 +884,7 @@ const ST = (() => {
             style="flex:1;min-width:0;padding:7px 9px;border:1px solid var(--line);border-radius:8px;
                    background:var(--card2);color:inherit;font-family:inherit;font-size:13px;font-weight:700">
           <button class="minibtn mddel" data-i="${i}" style="flex:none">✕</button></div>
-        <div style="display:flex;gap:6px;align-items:center;padding:8px 0 2px">
-          <select class="mdbase" data-i="${i}" style="flex:1;padding:7px;font-size:12.5px">
-            <option value="매출"${rewardBase(r) === "매출" ? " selected" : ""}>매출 대비</option>
-            <option value="이익"${rewardBase(r) === "이익" ? " selected" : ""}>이익 대비</option>
-          </select>
-          <input class="mdrate" data-i="${i}" type="number" step="0.1" min="0" value="${Number(r.rate) || 0}"
-            style="flex:none;width:70px;padding:7px;text-align:right;border:1px solid var(--line);
-                   border-radius:8px;background:var(--card2);color:inherit;font-family:inherit;font-size:12.5px">
-          <b style="flex:none">%</b></div>
         ${boxes}${adder}
-        <div style="font-size:11px;color:var(--faint);padding-top:6px">${
-          hit && hit.reward ? `${rewardBase(r)} ${won(hit.baseAmount)} × ${r.rate}%` : ""}</div>
         <div class="totline" style="margin-top:6px;padding-top:8px;border-top:1px solid var(--line)">
           <b style="font-size:13.5px">${esc(r.md || "MD")} 리워드</b>
           <b style="font-size:17px;font-weight:800;color:${hit && hit.reward ? "var(--brand)" : "var(--faint)"}">${
@@ -883,7 +896,11 @@ const ST = (() => {
     // 드롭다운에서 고르면 그 업체가 '전체' 로 추가된다
     box.querySelectorAll(".mdadd").forEach(el => el.onchange = () => {
       if (!el.value) return;
-      upd(el.dataset.i, r => { r.picks[el.value] = []; });
+      // 마지막에 쓴 기준·요율을 그대로 물려준다 (업체마다 다시 고르는 수고를 줄인다)
+      upd(el.dataset.i, r => {
+        const last = Object.keys(r.picks).map(k => r.picks[k]).pop() || {};
+        r.picks[el.value] = { brands: [], base: last.base || "매출", rate: Number(last.rate) || 0 };
+      });
     });
     box.querySelectorAll(".mdvdel").forEach(el => el.onclick = () =>
       upd(el.dataset.i, r => { delete r.picks[el.dataset.v]; }));
@@ -891,31 +908,32 @@ const ST = (() => {
       if (rewards[el.dataset.i].md === el.value.trim()) return;
       await upd(el.dataset.i, r => { r.md = el.value.trim(); });
     });
-    box.querySelectorAll(".mdbase").forEach(el => el.onchange = () =>
-      upd(el.dataset.i, r => { r.base = el.value; }));
-    box.querySelectorAll(".mdrate").forEach(el => el.onchange = () =>
-      upd(el.dataset.i, r => { r.rate = Number(el.value) || 0; }));
+    box.querySelectorAll(".mdvbase").forEach(el => el.onchange = () =>
+      upd(el.dataset.i, r => { r.picks[el.dataset.v].base = el.value; }));
+    box.querySelectorAll(".mdvrate").forEach(el => el.onchange = () =>
+      upd(el.dataset.i, r => { r.picks[el.dataset.v].rate = Number(el.value) || 0; }));
     box.querySelectorAll(".mdall").forEach(el => el.onclick = () =>
       upd(el.dataset.i, r => {
-        const v = el.dataset.v, p = r.picks;
-        if (p[v] !== undefined && !p[v].length) delete p[v];   // 전체 → 해제
-        else p[v] = [];                                        // 업체 전체로
+        const v = el.dataset.v, p = r.picks[el.dataset.v];
+        if (p && !(p.brands || []).length) delete r.picks[v];   // 전체 → 해제
+        else if (p) p.brands = [];                              // 업체 전체로
       }));
     // 브랜드 칩 — '업체 전체'(.mdall) 도 같은 class 라 빼고 잡는다
     box.querySelectorAll(".brow:not(.mdall)").forEach(el => el.onclick = () =>
       upd(el.dataset.i, r => {
-        const v = el.dataset.v, b = el.dataset.b, p = r.picks;
-        if (p[v] === undefined) { p[v] = [b]; return; }        // 이 업체를 처음 고름
-        if (!p[v].length) {                                     // '업체 전체' 상태에서 하나를 빼면
-          p[v] = brandsOfVendor(v).filter(x => x !== b);        // 나머지 브랜드만 남긴다
-          if (!p[v].length) delete p[v];
+        const v = el.dataset.v, b = el.dataset.b, p = r.picks[v];
+        if (!p) return;
+        const bs = p.brands || (p.brands = []);
+        if (!bs.length) {                                       // '업체 전체' 에서 하나를 빼면
+          p.brands = brandsOfVendor(v).filter(x => x !== b);     // 나머지 브랜드만 남긴다
+          if (!p.brands.length) delete r.picks[v];
           return;
         }
-        const j = p[v].indexOf(b);
-        if (j >= 0) { p[v].splice(j, 1); if (!p[v].length) delete p[v]; }
+        const j = bs.indexOf(b);
+        if (j >= 0) { bs.splice(j, 1); if (!bs.length) delete r.picks[v]; }
         else {
-          p[v].push(b);
-          if (p[v].length === brandsOfVendor(v).length) p[v] = [];   // 다 고르면 '업체 전체'
+          bs.push(b);
+          if (bs.length === brandsOfVendor(v).length) p.brands = [];   // 다 고르면 '업체 전체'
         }
       }));
     box.querySelectorAll(".mddel").forEach(el => el.onclick = async () => {
@@ -971,23 +989,24 @@ const ST = (() => {
     ruleTotals = {};
     (rewards || []).forEach(rule => {
       const md = s(rule.md); if (!md) return;
-      const rate = Number(rule.rate) || 0; if (!rate) return;
       const picks = rule.picks || {};
       const tot = ruleTotals[rule.id] = { reward: 0, baseAmount: 0, count: 0, vendors: 0 };
       Object.keys(picks).forEach(vn => {
+        const p = picks[vn] || {};
+        const rate = Number(p.rate) || 0; if (!rate) return;      // 업체마다 요율이 따로다
         const v = vendors.find(x => x.vendor === vn);
         if (!v) return;                                // 이번 달에 그 업체 주문이 없으면 건너뜀
-        const bl = picks[vn] || [];
+        const bl = p.brands || [];
         const pick = bl.length
           ? v.rows.filter(r => bl.indexOf(r.brand || "(브랜드 없음)") >= 0)
           : v.rows;                                    // 빈 배열 = 그 업체 전체
         if (!pick.length) return;
         const amount = pick.reduce((s2, r) => s2 + (r.amount || 0), 0);
         const pay = pick.reduce((s2, r) => s2 + (r.pay || 0), 0);
-        const base = rewardBase(rule) === "이익" ? amount - pay : amount;
+        const base = rewardBase(p) === "이익" ? amount - pay : amount;
         const won2 = Math.round(base * rate / 100);
         const line = { id: rule.id, md, vendor: v.vendor, brands: bl.slice(),
-                       base: rewardBase(rule), rate, baseAmount: base, reward: won2, count: pick.length };
+                       base: rewardBase(p), rate, baseAmount: base, reward: won2, count: pick.length };
         v.reward += won2; v.rewardRows.push(line);
         tot.reward += won2; tot.baseAmount += base; tot.count += pick.length; tot.vendors++;
         const g = byMd[md] = byMd[md] || { md, reward: 0, lines: [] };
@@ -1904,8 +1923,7 @@ const ST = (() => {
       },
     });
     $("st-md-add").onclick = async () => {
-      const vs = vendorNames();
-      rewards.push({ id: "md" + Date.now(), md: "", vendor: vs[0] || "", brands: [], base: "매출", rate: 0 });
+      rewards.push({ id: "md" + Date.now(), md: "", picks: {} });
       await saveRewards(); drawMd();
       const last = $("st-md-list").querySelectorAll(".mdname");
       if (last.length) last[last.length - 1].focus();
