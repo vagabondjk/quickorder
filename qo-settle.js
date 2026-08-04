@@ -91,6 +91,9 @@ const ST = (() => {
     aliasInfo = await DB.get("priceAliasInfo", {}) || {};
     brandFix = await DB.get("settleBrandVendor", {}) || {};
     rewards = await DB.get("mdRewards", []) || [];      // 지난 정산에서 정해둔 MD 리워드 조건
+    // v6.3.9 에 잠깐 있던 '리워드 없음' 은 없앴다. 요율 0 으로 바꿔 그대로 잠자게 둔다
+    // (매출 대비로 되살리면 안 주던 리워드가 갑자기 붙는다)
+    rewards.forEach(r => { if (r.base === "없음") { r.base = "매출"; r.rate = 0; } });
     // 지난 정산에서 '송장 없어 뺀' 목록. 이번에 출고됐으면 이월 건으로 알려준다.
     carry = await DB.get("settleCarry", { at: 0, list: [] }) || { at: 0, list: [] };
     if (!carry.list) carry.list = [];
@@ -602,6 +605,7 @@ const ST = (() => {
     result.unshipped = unshipped;
     result.period = periodOf(shipped.length ? shipped : rows);
     drawResult();
+    drawMd();          // MD 카드에 계산된 리워드 금액을 채워 넣는다
   }
 
   /* 파트너 MD 리워드 — 조건 편집 화면.
@@ -646,10 +650,17 @@ const ST = (() => {
     if (!allRows().length || !vendors.length) { card.style.display = "none"; box.innerHTML = ""; return; }
     card.style.display = "block";
 
+    /* 계산이 끝나 있으면 그 조건이 실제로 얼마인지 여기서 바로 보여준다.
+       금액을 보려고 아래 결과까지 내려갔다 올라올 일이 없게. */
+    const lineOf = id => {
+      for (const v of ((result && result.vendors) || []))
+        for (const x of (v.rewardRows || [])) if (x.id === id) return x;
+      return null;
+    };
     box.innerHTML = rewards.map((r, i) => {
       const bs = brandsOfVendor(r.vendor);
       const picked = r.brands || [];
-      const none = rewardBase(r) === "없음";
+      const hit = lineOf(r.id);
       const chips = bs.length ? bs.map(b =>
         `<span class="brow${picked.indexOf(b) >= 0 ? " on" : ""}" data-i="${i}" data-b="${esc(b)}">
            <span class="box">${picked.indexOf(b) >= 0 ? "✓" : ""}</span>${esc(b)}</span>`).join("")
@@ -667,16 +678,17 @@ const ST = (() => {
           <select class="mdbase" data-i="${i}" style="flex:none;padding:7px;font-size:12.5px">
             <option value="매출"${rewardBase(r) === "매출" ? " selected" : ""}>매출 대비</option>
             <option value="이익"${rewardBase(r) === "이익" ? " selected" : ""}>이익 대비</option>
-            <option value="없음"${rewardBase(r) === "없음" ? " selected" : ""}>리워드 없음</option>
           </select>
           <input class="mdrate" data-i="${i}" type="number" step="0.1" min="0" value="${Number(r.rate) || 0}"
-            ${none ? "disabled" : ""} style="flex:none;width:70px;padding:7px;text-align:right;
-                   border:1px solid var(--line);border-radius:8px;background:var(--card2);color:inherit;
-                   font-family:inherit;font-size:12.5px${none ? ";opacity:.4" : ""}">
-          <b style="flex:none${none ? ";opacity:.4" : ""}">%</b></div>
+            style="flex:none;width:70px;padding:7px;text-align:right;border:1px solid var(--line);
+                   border-radius:8px;background:var(--card2);color:inherit;font-family:inherit;font-size:12.5px">
+          <b style="flex:none">%</b></div>
         <div class="brands">${chips}</div>
-        <div style="font-size:11px;color:var(--faint);padding-top:4px">${
-          none ? "리워드 없음" : picked.length ? `브랜드 ${picked.length}개` : "브랜드 전체"}</div>
+        <div class="totline" style="font-size:12px;padding-top:6px">
+          <span style="color:var(--muted)">${picked.length ? `브랜드 ${picked.length}개` : "브랜드 전체"}${
+            hit ? ` · ${rewardBase(r)} ${won(hit.baseAmount)}` : ""}</span>
+          <b style="color:${hit && hit.reward ? "var(--brand)" : "var(--faint)"}">${
+            hit ? won(hit.reward) : "정산내역 추출 후 표시"}</b></div>
       </div>`;
     }).join("") + noneBoxHtml();
 
@@ -715,12 +727,11 @@ const ST = (() => {
          자기 자신을 참조해 값이 정해지지 않는다.
      같은 브랜드에 조건을 여러 개 걸면 각각 계산해서 더한다 (MD 두 명이 나눠 갖는 경우).
      ================================================================= */
-  const rewardBase = r => (r.base === "이익" ? "이익" : r.base === "없음" ? "없음" : "매출");
+  const rewardBase = r => (r.base === "이익" ? "이익" : "매출");
   function calcRewards(vendors) {
     vendors.forEach(v => { v.reward = 0; v.rewardRows = []; });
     const byMd = {};
     (rewards || []).forEach(rule => {
-      if (rewardBase(rule) === "없음") return;        // '리워드 없음' — 조건은 남겨두고 계산만 건너뛴다
       const md = s(rule.md); if (!md) return;
       const rate = Number(rule.rate) || 0; if (!rate) return;
       const v = vendors.find(x => x.vendor === rule.vendor);
