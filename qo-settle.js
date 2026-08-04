@@ -862,7 +862,7 @@ const ST = (() => {
             <span class="brow mdall${all ? " on" : ""}" data-i="${i}" data-v="${esc(v)}" style="flex:none">
               <span class="box">${all ? "✓" : ""}</span>업체 전체</span>
             <button class="minibtn mdvdel" data-i="${i}" data-v="${esc(v)}" style="flex:none">✕</button></div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 0 2px">
+          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:9px 12px 0">
             <select class="mdvbase" data-i="${i}" data-v="${esc(v)}" style="flex:1;min-width:0;padding:6px;font-size:12px">
               <option value="매출"${rewardBase(p) === "매출" ? " selected" : ""}>매출 대비</option>
               <option value="이익"${rewardBase(p) === "이익" ? " selected" : ""}>이익 대비</option>
