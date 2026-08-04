@@ -1863,8 +1863,7 @@ const ST = (() => {
   async function drawFilterLine() {
     const el = $("st-filter");
     if (!el) return;
-    const kw = await DB.get("stKeywords", ["정산", "정산내역", "지급"]);
-    el.textContent = "정산 검색: " + (kw.join(", ") || "(없음)");
+    el.textContent = "";      // 검색조건 안내 문구는 뺐다 (2026-08-05)
   }
 
   function bind() {

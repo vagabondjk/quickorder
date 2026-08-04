@@ -887,9 +887,9 @@ function drawDateChips() {
   const totalAll = S.dateAll.reduce((s, d) => s + d.count, 0);
   if (all) all.textContent = (S.dateSel.length === S.dateAll.length && S.dateAll.length) ? "전체 해제" : `전체 ${totalAll}건`;
   const cnt = S.dateAll.filter(d => S.dateSel.includes(d.date)).reduce((s, d) => s + d.count, 0);
-  $("dt-foot").textContent = S.dateSel.length
-    ? `선택한 ${S.dateSel.length}개 날짜 · 총 ${cnt}건만 변환됩니다`
-    : "⚠ 날짜를 하나 이상 선택하세요";
+  // 건수 안내는 뺐다 (2026-08-05) — 날짜 칩에 이미 건수가 있다.
+  // 날짜를 안 고른 경고만 남긴다 (이건 안 보이면 변환이 안 되는 이유를 모른다).
+  $("dt-foot").textContent = S.dateSel.length ? "" : "⚠ 날짜를 하나 이상 선택하세요";
   renderPreview();     // 체크한 날짜에 맞춰 '내용 확인'도 즉시 갱신
   refreshO();
 }
@@ -928,9 +928,7 @@ function renderPreview() {
     }).join("") + "</tr>";
   });
   $("pv-table").innerHTML = h;
-  $("pv-foot").textContent = (selSet && hasDates)
-    ? `체크한 날짜의 주문 ${view.length}건 — 이 내용이 그대로 변환됩니다`
-    : `전체 ${view.length}건 표시`;
+  $("pv-foot").textContent = "";
   // 행이 몇 개 안 되면 '더보기' 자체를 숨김
   const many = view.length > 3;
   $("pv-more").style.display = many ? "" : "none";
@@ -1169,17 +1167,6 @@ function addDupFixer(box, groups) {
   }));
   box.appendChild(w);
 }
-/* 지운 양식이 백업에서 되살아나는지 확인할 수 있게, 현재 상태를 그대로 보여준다 */
-async function drawFormDiag(box) {
-  const tomb = await DB.get("formsDeleted", {}) || {};
-  const names = Object.keys(tomb);
-  if (!names.length) return;
-  const d = document.createElement("div");
-  d.style.cssText = "margin-top:8px;font-size:11px;color:var(--faint);line-height:1.6";
-  d.innerHTML = `지운 양식 ${names.length}개 — 백업에서 다시 내려오지 않게 막고 있습니다<br>` +
-    names.map(n => `· ${esc(n)}`).join("<br>");
-  box.appendChild(d);
-}
 function drawForms() {
   const box = $("vlist");
   if (!S.forms.length) { box.innerHTML = '<div class="empty">저장된 업체 양식이 없습니다.<br>아래에서 추가하세요.</div>'; return; }
@@ -1188,7 +1175,6 @@ function drawForms() {
   addDupWarning(box, dups, f => f.name,
     "브랜드 선택에도 두 번 나옵니다. 안 쓰는 쪽은 아래에서 지워주세요.");
   addDupFixer(box, dups);
-  drawFormDiag(box);
   S.forms.forEach(f => {
     const el = document.createElement("div");
     el.className = "vrow" + (f.checked ? " on" : "");
@@ -1987,8 +1973,7 @@ async function getOrderFilter() {
 async function drawOrderFilter() {
   const f = await getOrderFilter();
   const info = $("order-filter");
-  if (info) info.textContent = "발주서 검색: " + (f.senders.join(", ") || "(발신자 없음)") +
-    " · 키워드 " + (f.keywords.join(", ") || "(없음)");
+  if (info) info.textContent = "";
 }
 
 /* 회신 검색조건 */
@@ -2002,7 +1987,7 @@ async function getReplyFilter() {
 async function drawReplyFilter() {
   const f = await getReplyFilter();
   const el = $("reply-filter");
-  if (el) el.textContent = "회신 검색: " + (f.senders.length ? f.senders.join(", ") + " · " : "") + (f.keywords.join(", ") || "(없음)");
+  if (el) el.textContent = "";
 }
 
 /* ---------- 검색조건 관리 모달 (발주서/회신 공용) ---------- */
@@ -2094,7 +2079,7 @@ $("reply-filter-btn") && ($("reply-filter-btn").onclick = () => openFilter("repl
 
 /* 메일 선택 모달 */
 const mailModal = $("mailmodal");
-let mailItems = [], mailSel = [], mailMulti = false, mailTarget = null;
+let mailItems = [], mailSel = [], mailMulti = false, mailTarget = null, mailHidden = 0;
 $("mail-cancel").onclick = () => mailModal.classList.remove("on");
 mailModal.onclick = e => { if (e.target === mailModal) mailModal.classList.remove("on"); };
 
@@ -2140,11 +2125,37 @@ async function loadMail() {
     }
     opt.onProgress = (i, n) => { const p = $("mail-prog"); if (p) p.textContent = `${i} / ${n}`; };
     mailItems = await GMAIL.listMails(opt);
+    /* 회신 송장은 '보낸사람 또는 키워드' 로 찾는다(union). 그래서 본문에 '회신' 같은 말이
+       들어간 남의 메일까지 딸려온다. 업체 주소를 알고 있으면 그것만 남긴다.
+       — 등록된 업체 이메일 · 도메인 · 예전에 회신이 온 주소가 기준이다.
+       하나도 안 남으면(주소를 아직 안 넣었거나 새 업체) 원래 목록을 그대로 보여준다. */
+    if (target === "rep") {
+      const addr = new Set(), dom = new Set();
+      const add = t => String(t || "").split(/[,;\s]+/).forEach(x => {
+        const e = x.trim().toLowerCase(); if (e.includes("@")) addr.add(e);
+      });
+      Object.values(S.vendorEmails || {}).forEach(add);
+      Object.values(S.vendorSent || {}).forEach(v => (Array.isArray(v) ? v : [v]).forEach(add));
+      Object.values(S.vendorDomains || {}).forEach(v => (Array.isArray(v) ? v : String(v || "").split(/[,;\s]+/))
+        .forEach(d => { const t = String(d || "").trim().toLowerCase().replace(/^@/, ""); if (t) dom.add(t); }));
+      if (addr.size || dom.size) {
+        const known = m => {
+          const f = (m.from.includes("<") ? m.from.split("<").pop().replace(">", "") : m.from).trim().toLowerCase();
+          if (addr.has(f)) return true;
+          const d = f.split("@")[1] || "";
+          return d && [...dom].some(x => d === x || d.endsWith("." + x));
+        };
+        const hit = mailItems.filter(known);
+        if (hit.length) { mailHidden = mailItems.length - hit.length; mailItems = hit; }
+        else mailHidden = 0;
+      } else mailHidden = 0;
+    } else mailHidden = 0;
     if (!mailItems.length) {
       list.innerHTML = `<div class="empty">${dayTxt}간 해당 엑셀 첨부를 찾지 못했어요.<br>위에서 기간을 늘려보세요.</div>`;
       $("mail-sub").textContent = "결과 없음"; return;
     }
-    $("mail-sub").textContent = (mailMulti ? "여러 개 선택 가능 · " : "하나 선택 · ") + mailItems.length + "건";
+    $("mail-sub").textContent = (mailMulti ? "여러 개 선택 가능 · " : "하나 선택 · ") + mailItems.length + "건"
+      + (mailHidden ? ` · 업체 주소가 아닌 메일 ${mailHidden}건은 숨김` : "");
     list.innerHTML = "";
     mailItems.forEach((m, i) => {
       const frm = m.from.includes("<") ? m.from.split("<").pop().replace(">", "") : m.from;
