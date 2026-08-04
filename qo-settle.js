@@ -1106,11 +1106,11 @@ const ST = (() => {
       + `  →  업체 정산 ${c.settledCount}건 · 수량 ${c.settledQty}개`;
     if (c.ok && !c.issues.length)
       return `<div style="margin-top:10px;padding:10px;border:1px solid var(--ok);border-radius:8px;background:rgba(16,150,90,.06)">
-        <b style="color:var(--ok)">✔ 검산 통과 — 주문이 하나도 빠지지 않았습니다</b>
+        <b style="color:var(--ok)">✔ 검수완료 — 주문 건수·수량·금액이 모두 일치합니다</b>
         <div style="margin-top:4px;font-size:12px;color:var(--muted)">${esc(line)}</div></div>`;
     const bad = c.issues.some(i => i.level === "error");
     return `<div style="margin-top:10px;padding:10px;border:1.5px solid var(${bad ? "--danger" : "--warn"});border-radius:8px">
-      <b style="color:var(${bad ? "--danger" : "--warn"})">${bad ? "⚠ 검산 실패 — 주문과 정산이 맞지 않습니다" : "⚠ 확인이 필요합니다"}</b>
+      <b style="color:var(${bad ? "--danger" : "--warn"})">${bad ? "⚠ 검수 실패 — 주문과 정산이 맞지 않습니다" : "⚠ 확인이 필요합니다"}</b>
       <div style="margin-top:4px;font-size:12px;color:var(--muted)">${esc(line)}</div>
       <div style="margin-top:6px;font-size:12.5px;line-height:1.8">${c.issues.map(i =>
         `<div style="color:var(${i.level === "error" ? "--danger" : "--warn"})">· ${esc(i.why)}${
@@ -1325,12 +1325,15 @@ const ST = (() => {
     return `<div style="margin-top:10px;padding:10px;border:1px solid var(--danger);border-radius:8px">
       <b style="color:var(--danger)">⚠ 공급가표에서 단가를 못 찾은 ${total}건 — 지급액 0 원으로 뒀습니다</b>
       ${keys.map((k, i) => `
-        <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line)">
-          <div style="font-size:12.5px"><b>${esc(kinds[k].row.product.slice(0, 60))}</b>
-            ${kinds[k].row.option ? `<span style="color:var(--muted)"> [${esc(kinds[k].row.option)}]</span>` : ""}
-            <span style="color:var(--danger)"> ${kinds[k].n}건</span></div>
-          <div style="font-size:11.5px;color:var(--muted);margin-top:2px">${esc(kinds[k].row.brand || "")}</div>
-          <select class="aliaspick" data-i="${i}" style="width:100%;margin-top:5px;padding:7px;font-size:12.5px">${pickOptions(kinds[k].row)}</select>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
+          <div style="padding:9px 11px;background:var(--card2);border-radius:9px">
+            <div style="font-size:10.5px;font-weight:800;color:var(--faint);letter-spacing:.03em">주문 파일
+              <span style="color:var(--danger)">· ${kinds[k].n}건</span></div>
+            <div style="font-size:13.5px;font-weight:700;color:var(--ink);line-height:1.45;word-break:break-all">${
+              esc(kinds[k].row.product)}${kinds[k].row.option ? ` [${esc(kinds[k].row.option)}]` : ""}</div>
+            ${kinds[k].row.brand ? `<div style="font-size:11.5px;color:var(--muted);margin-top:1px">${esc(kinds[k].row.brand)}</div>` : ""}</div>
+          <div style="text-align:center;font-size:15px;color:var(--muted);line-height:1.2;padding:3px 0">↓</div>
+          <select class="aliaspick" data-i="${i}" style="width:100%;padding:8px;font-size:12.5px">${pickOptions(kinds[k].row)}</select>
         </div>`).join("")}
     </div>`;
   }
@@ -1380,20 +1383,29 @@ const ST = (() => {
     return keys.map((k, i) => {
       const o = aliasOrderLabel(k);
       const t = byKey[aliases[k]];
+      /* 두 상품명을 눈으로 대조하는 화면이라 이름을 제일 크게 보여준다.
+         (전에는 통합파일 상품명이 작은 회색이라 비교가 안 됐다) */
+      const NAME = "font-size:13.5px;font-weight:700;color:var(--ink);line-height:1.45;word-break:break-all";
+      const SUB = "font-size:11.5px;color:var(--muted);margin-top:1px";
       const left = o
-        ? `<b>${esc(o.product.slice(0, 70))}</b>${o.option ? `<span style="color:var(--muted)"> [${esc(o.option)}]</span>` : ""}
-           <div style="font-size:11.5px;color:var(--muted)">${esc(o.brand || "")}</div>`
-        : `<b style="color:var(--muted)">(이름을 못 읽는 옛 연결)</b>
-           <div style="font-size:11px;color:var(--faint);word-break:break-all">${esc(k.slice(0, 90))}</div>`;
+        ? `<div style="${NAME}">${esc(o.product)}${o.option ? ` [${esc(o.option)}]` : ""}</div>
+           ${o.brand ? `<div style="${SUB}">${esc(o.brand)}</div>` : ""}`
+        : `<div style="${NAME}">${esc(k.replace(/\|/g, "  ·  "))}</div>
+           <div style="${SUB}">상품명 수동매칭 (상품명 불일치)</div>`;
       const right = t
-        ? `<b style="color:var(--ok)">${esc((t.brand ? t.brand + " · " : "") + t.product)}</b>${t.option ? ` [${esc(t.option)}]` : ""}
-           <span style="color:var(--muted)"> — ${Math.round(t.price).toLocaleString("ko-KR")}원</span>`
-        : `<b style="color:var(--danger)">⚠ 지금 공급가표에 없는 항목입니다 — 다시 골라주세요</b>`;
-      return `<div style="padding:10px 0;border-top:1px solid var(--line)">
-        <div style="font-size:12.5px">${left}</div>
-        <div style="font-size:12.5px;margin-top:4px">↳ ${right}</div>
-        <div style="display:flex;gap:6px;margin-top:6px">
-          <select class="aliasedit" data-k="${esc(k)}" style="flex:1;padding:7px;font-size:12.5px">${
+        ? `<div style="${NAME};color:var(--ok)">${esc(t.product)}${t.option ? ` [${esc(t.option)}]` : ""}</div>
+           <div style="${SUB}">${esc(t.brand || "")}${t.brand ? " · " : ""}${Math.round(t.price).toLocaleString("ko-KR")}원</div>`
+        : `<div style="${NAME};color:var(--danger)">⚠ 지금 공급가표에 없는 항목입니다 — 다시 골라주세요</div>`;
+      return `<div style="padding:12px 0;border-top:1px solid var(--line)">
+        <div style="padding:9px 11px;background:var(--card2);border-radius:9px">
+          <div style="font-size:10.5px;font-weight:800;color:var(--faint);letter-spacing:.03em">주문 파일</div>
+          ${left}</div>
+        <div style="text-align:center;font-size:15px;color:var(--muted);line-height:1.2;padding:3px 0">↓</div>
+        <div style="padding:9px 11px;background:var(--ok-soft);border-radius:9px">
+          <div style="font-size:10.5px;font-weight:800;color:var(--ok);letter-spacing:.03em">공급가표</div>
+          ${right}</div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <select class="aliasedit" data-k="${esc(k)}" style="flex:1;min-width:0;padding:8px;font-size:12.5px">${
             pickOptions(o || { brand: "", product: "", option: "" }, aliases[k])}</select>
           <button class="minibtn aliasdel" data-k="${esc(k)}" style="flex:none">연결 끊기</button>
         </div></div>`;
@@ -1735,7 +1747,7 @@ const ST = (() => {
     const c = result && result.check;
     if (c) {
       ws.addRow([]);
-      const t = ws.addRow([c.ok && !c.issues.length ? "✔ 검산 통과" : "⚠ 검산 확인 필요"]);
+      const t = ws.addRow([c.ok && !c.issues.length ? "✔ 검수완료 — 주문 건수·수량·금액 일치" : "⚠ 검수 확인 필요"]);
       t.font = { bold: true, color: { argb: c.ok && !c.issues.length ? "FF0A7A3D" : "FFCC0000" } };
       ws.addRow([`주문 ${c.orderCount}건 · 수량 ${c.orderQty}개 → 업체 정산 ${c.settledCount}건 · 수량 ${c.settledQty}개`]);
       c.issues.forEach(i => {
