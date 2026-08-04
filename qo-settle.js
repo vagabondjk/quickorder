@@ -248,9 +248,15 @@ const ST = (() => {
     try {
       const info = await GMAIL.driveFileInfo(d.id);
       const mt = (info && info.modifiedTime) || "";
-      if (mt && d.mtime && mt === d.mtime) return;              // 안 바뀜
+      if (mt && d.mtime && mt === d.mtime) {                    // 안 바뀜 → 받지 않는다
+        // 언제 확인했는지는 남긴다. 이게 없으면 '자동 확인이 도는지' 알 방법이 없다.
+        pbRaw.checkedAt = Date.now();
+        await savePriceBook(); drawPbLoaded();
+        return;
+      }
       const r = await GMAIL.driveFetchExcel(d.id);
       await addPriceBook(r.buf, r.name || d.name, { drive: { id: d.id, name: r.name || d.name, mtime: mt } });
+      pbRaw.checkedAt = Date.now(); await savePriceBook(); drawPbLoaded();
       msg("msg-pb", "ok", `🔄 드라이브의 최신 공급가표로 맞췄어요 — ${r.name || d.name}`);
     } catch (e) {
       // 못 가져와도 지금 있는 공급가표로 그대로 쓴다. 다만 조용히 넘어가지 않는다.
@@ -310,8 +316,12 @@ const ST = (() => {
     if (!on) return;
     $("pb-fname").textContent = "📗 " + (pbRaw.name || "공급가표");
     const w = fmtWhen(pbRaw.at);
-    const from = pbRaw.drive && pbRaw.drive.id ? "구글 드라이브" : "직접 올림";
-    $("pb-when").textContent = w ? `🔄 ${w} 최신화 · ${from}` : "";
+    const drv = pbRaw.drive && pbRaw.drive.id;
+    const from = drv ? "구글 드라이브" : "직접 올림";
+    // '최신화' = 내용을 읽어온 시각, '확인' = 드라이브 원본이 바뀌었는지 본 시각.
+    // 원본이 그대로면 다시 받지 않으므로 최신화 시각은 안 움직인다 — 그걸 오해하지 않게 둘 다 적는다.
+    const chk = drv && pbRaw.checkedAt ? ` · ${fmtWhen(pbRaw.checkedAt)} 확인함(변경 없음)` : "";
+    $("pb-when").textContent = w ? `🔄 ${w} 최신화 · ${from}${chk}` : "";
   }
   function drawPriceBook() {
     drawPbLoaded();
@@ -451,10 +461,36 @@ const ST = (() => {
     box.innerHTML = files.map((f, i) => `<div style="display:flex;align-items:center;gap:8px;
         padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:var(--card2);margin-bottom:5px">
         <span style="flex:1;min-width:0;font-size:12.5px;line-height:1.45;word-break:break-all">📄 <b>${esc(f.name)}</b>
-          <span style="color:var(--muted)"> · ${f.rows.length}행</span></span>
+          <span style="color:var(--muted)"> · ${f.rows.length}행</span>
+          <span style="display:flex;gap:6px;margin-top:6px">
+            <button class="minibtn stpv" data-i="${i}">미리보기</button>
+            <button class="minibtn stdl" data-i="${i}">엑셀 받기</button></span></span>
         <button class="minibtn vdel" data-i="${i}" style="flex:none">✕</button></div>`).join("")
       + `<div style="display:flex;justify-content:flex-end;margin-top:2px">
            <button class="minibtn" id="st-clear-all">전체 해제</button></div>`;
+    /* 불러온 정산 파일도 원본을 들고 있지 않아(읽은 값만 저장) 읽어둔 표로 엑셀을 다시 만든다 */
+    const fileExcel = async f => {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet(String(f.name || "정산").replace(/[\\\/\?\*\[\]:]/g, "_").slice(0, 28) || "정산");
+      ws.addRow((f.cols || []).slice());
+      ws.getRow(1).font = { bold: true };
+      ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEFF3FB" } };
+      (f.rows || []).forEach(r => ws.addRow(r.slice()));
+      (f.cols || []).forEach((h, i) => {
+        ws.getColumn(i + 1).width = /상품명|주소|메시지|메세지/.test(String(h)) ? 34 : 13;
+      });
+      return await QO.saveWorkbook(wb);
+    };
+    box.querySelectorAll(".stpv").forEach(b => b.onclick = async () => {
+      const f = files[Number(b.dataset.i)];
+      try { openPreview(await fileExcel(f), f.name); }
+      catch (e) { msg("msg-s", "err", "⚠ " + e.message); }
+    });
+    box.querySelectorAll(".stdl").forEach(b => b.onclick = async () => {
+      const f = files[Number(b.dataset.i)];
+      try { download(await fileExcel(f), String(f.name).replace(/\.xls[xm]$/i, "") + ".xlsx"); }
+      catch (e) { msg("msg-s", "err", "⚠ " + e.message); }
+    });
     box.querySelectorAll(".vdel").forEach(b => b.onclick = () => {
       files.splice(Number(b.dataset.i), 1);
       result = null; $("result-s").style.display = "none";
@@ -903,7 +939,10 @@ const ST = (() => {
   /* 쇼핑몰별로 따로 떼가는 수수료 — 우리 매출에서 빠지므로 마진에서 공제한다.
      삼성블루베리몰·삼성카드쇼핑처럼 삼성계열은 카드 수수료 1.7% 가 별도로 나간다.
      요율이 바뀌거나 다른 몰이 생기면 여기만 고치면 된다. */
-  const MALL_FEES = [{ match: /삼성/, rate: 1.7, label: "삼성계열 카드수수료" }];
+  /* ★ '블루베리' 도 삼성 계열이다 (삼성블루베리몰·블루베리몰).
+       쇼핑몰명에 '삼성' 이 안 들어가 있어도 1.7% 대상이므로 반드시 같이 잡아야 한다.
+       — 2026-08-05 사용자 확인. 여기서 빼면 그 건들이 조용히 공제에서 빠진다. */
+  const MALL_FEES = [{ match: /삼성|블루베리/, rate: 1.7, label: "삼성계열 카드수수료" }];
   const mallFeeOf = mall => {
     const m = String(mall == null ? "" : mall);
     for (const f of MALL_FEES) if (f.match.test(m)) return f;

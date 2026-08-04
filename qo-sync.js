@@ -113,6 +113,15 @@ const SYNC = (() => {
           await DB.set("formsDeleted", out);
           continue;
         }
+        /* 공급가표는 '한 덩어리'다. 키별로 섞으면 옛 백업의 sheets 가 새 파일 위에 덮여
+           내용은 옛것인데 파일명·시각만 새것인 괴물이 된다. 통째로 새것을 쓴다.
+           (더 늦게 읽은 쪽이 이긴다 — at 이 그 기준) */
+        if (k === "priceBook" && remote && typeof remote === "object" && !Array.isArray(remote)) {
+          const local = await DB.get("priceBook", null);
+          const newer = (Number(remote.at) || 0) >= (Number(local && local.at) || 0);
+          await DB.set("priceBook", newer ? remote : local);
+          continue;
+        }
         if (remote && typeof remote === "object" && !Array.isArray(remote)) {
           const local = await DB.get(k, {});
           await DB.set(k, Object.assign({}, local, remote));
