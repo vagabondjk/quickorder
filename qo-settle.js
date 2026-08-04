@@ -292,6 +292,34 @@ const ST = (() => {
       ["플라스머", "상품별 배송비 포함 공급가로 정산"],
     ], [16, 32]);
 
+    /* ④ 최저가 기준 방식 — 참고자료.
+       업체명 열이 없어서 정산에는 자동으로 쓰이지 않는다(addPriceBook 이 걸러낸다).
+       원본 파일에 있는 시트라 모양을 맞춰 같이 넣는다. 머리글이 4행인 점이 다르다. */
+    const ws4 = wb.addWorksheet("2.최저가 기준 방식");
+    ws4.addRow([]);
+    ws4.addRow(["", "카카오 선물하기 상품 LIST", "", "더벨로샵 수수료", "쇼핑몰 수수료", "배송비"]);
+    ws4.addRow(["", "", "", 0.1, 0.15, 3500, "", "", "", "", "", "(단위 : 원)"]);
+    const h4 = ["NO.", "상품명", "모델명", "브랜드→더벨로샵\n공급가\n(배송비 포함)", "더벨로샵\n수수료율",
+      "더벨로샵→쇼핑몰\n공급가\n(배송비포함)", "쇼핑몰 \n수수료율", "쇼핑몰\n판매가",
+      "최저가 대비\n할인율(%)", "온라인\n최저가\n(배송비포함)", "소비자가"];
+    ws4.addRow([""].concat(h4));
+    const hr4 = ws4.getRow(4);
+    hr4.font = { bold: true };
+    hr4.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    hr4.height = 46;
+    for (let c = 2; c <= h4.length + 1; c++)
+      hr4.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEFF3FB" } };
+    // 예시 한 줄 — 수식은 원본과 같은 모양으로 넣는다 (열 위치가 바뀌면 여기도 같이 고쳐야 한다)
+    const r5 = ws4.addRow(["", "예시", "미즈노 웨이브 라이더", "ascc1000", null, null, null, null, null, 0.1, 150000, 200000]);
+    r5.getCell(5).value = { formula: "G5*(1-F5)" };
+    r5.getCell(6).value = { formula: "$D$3" };
+    r5.getCell(7).value = { formula: "I5*(1-H5)" };
+    r5.getCell(8).value = { formula: "$E$3" };
+    r5.getCell(9).value = { formula: "ROUND(K5*(1-J5),-2)" };
+    [6, 8, 34, 14, 16, 12, 17, 12, 12, 13, 13, 12].forEach((w, i) => { ws4.getColumn(i + 1).width = w; });
+    [5, 7, 9, 11, 12].forEach(c => { ws4.getColumn(c).numFmt = "#,##0"; });
+    [6, 8, 10].forEach(c => { ws4.getColumn(c).numFmt = "0%"; });
+
     return await QO.saveWorkbook(wb);
   }
 
