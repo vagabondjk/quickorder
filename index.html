@@ -249,9 +249,12 @@
     background:rgba(255,255,255,.2);padding:3px 12px;border-radius:9px;word-break:break-all}
 
   /* ===== v6.0 : CS·정산 공용 ===== */
-  .tabs{flex-wrap:wrap}
-  .tabs button{flex:1 1 42%;font-size:12.5px;padding:10px 4px}
-  @media(min-width:520px){.tabs button{flex:1 1 0;font-size:13px}}
+  /* 탭은 언제나 한 줄에 균등하게. 예전엔 flex:1 1 42% 라 모바일에서 두 줄로 접혔고,
+     탭이 홀수(3개)면 마지막 하나만 폭이 두 배가 됐다. */
+  .tabs{flex-wrap:nowrap}
+  .tabs button{flex:1 1 0;min-width:0;font-size:12.5px;padding:10px 4px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  @media(min-width:520px){.tabs button{font-size:13px}}
   .tabs button .dot{display:inline-block;min-width:16px;height:16px;line-height:16px;padding:0 4px;
     margin-left:4px;border-radius:999px;background:var(--danger);color:#fff;font-size:10px;font-weight:800}
   .cnt{margin-left:auto;font-size:11.5px;color:var(--muted);font-weight:700}
@@ -322,8 +325,8 @@
   </header>
 
   <div class="tabs">
-    <button id="tab-o" class="on">① 발주서 변환</button>
-    <button id="tab-i">② 송장 취합</button>
+    <button id="tab-o" class="on">① 발주서</button>
+    <button id="tab-i">② 송장</button>
     <button id="tab-c">③ CS·교환반품<span class="dot" id="cs-badge" style="display:none">0</span></button>
     <button id="tab-s">④ 정산</button>
   </div>
