@@ -162,7 +162,7 @@ const ST = (() => {
       const isPrice = pm.product !== undefined && pm.price !== undefined;
       const isShip = !isPrice && sm.vendor !== undefined && sm.shipMode !== undefined;
       if (!isPrice && !isShip) continue;
-      parsed.push({ name: sh.name, kind: isPrice ? "price" : "ship",
+      parsed.push({ name: sh.name, kind: isPrice ? "price" : "ship", cols: sh.columns,
                     map: isPrice ? pm : sm, rows: sh.rows, count: sh.rows.length });
     }
     if (!parsed.some(p => p.kind === "price"))
@@ -178,6 +178,7 @@ const ST = (() => {
     });
     pbRaw = { name, at: Date.now(), sheets: parsed.map(p => ({
       name: p.name, kind: p.kind, count: p.count, map: p.map,
+      cols: (p.cols || []).slice(),          // 미리보기·내려받기로 되돌리려면 머리글도 있어야 한다
       rows: p.rows.map(r => r.slice()),
     })), off: off.slice() };
     await savePriceBook();
@@ -219,6 +220,39 @@ const ST = (() => {
       <div style="margin-top:5px;font-size:12.5px;line-height:1.7">${
         keys.slice(0, 10).map(k => `· ${esc(k.slice(0, 52))} <b>${miss[k]}건</b>`).join("<br>")}${
         keys.length > 10 ? `<br>· 외 ${keys.length - 10}종` : ""}</div></div>`;
+  }
+
+  /* 올려둔 공급가표를 엑셀로 되돌린다 — 미리보기·내려받기에 쓴다.
+     원본 파일 자체를 들고 있지는 않아서(읽은 값만 저장) 서식은 빠지고 내용만 그대로다.
+     정산에서 꺼둔 시트는 이름 뒤에 표시해, 어떤 시트가 계산에 안 쓰였는지 알 수 있게 한다. */
+  async function priceBookExcel() {
+    // 올린 내용 그대로를 되돌리는 것이므로, 단가가 하나도 안 잡힌 파일이어도 내보낸다
+    if (!pbRaw || !(pbRaw.sheets || []).length) throw new Error("올려둔 공급가표가 없어요.");
+    const off = pbRaw.off || [];
+    const wb = new ExcelJS.Workbook();
+    const used = {};
+    (pbRaw.sheets || []).forEach(sh => {
+      const skip = off.indexOf(sh.name) >= 0;
+      let nm = String(sh.name || "시트").replace(/[\\\/\?\*\[\]:]/g, "_").slice(0, 24) + (skip ? " (미사용)" : "");
+      while (used[nm]) nm = nm.slice(0, 27) + "_";      // 이름이 겹치면 시트가 사라진다
+      used[nm] = 1;
+      const ws = wb.addWorksheet(nm);
+      const cols = (sh.cols || []).slice();
+      if (cols.length) {
+        ws.addRow(cols);
+        ws.getRow(1).font = { bold: true };
+        ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEFF3FB" } };
+        ws.getRow(1).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      }
+      (sh.rows || []).forEach(r => ws.addRow(r.slice()));
+      const n = Math.max(cols.length, ...(sh.rows || []).map(r => r.length), 1);
+      for (let c = 1; c <= n; c++) {
+        const h = String(cols[c - 1] || "");
+        ws.getColumn(c).width = /상품명|품명|비고|방법/.test(h) ? 34 : /업체|브랜드/.test(h) ? 14 : 12;
+      }
+    });
+    if (!wb.worksheets.length) throw new Error("되돌릴 시트가 없어요.");
+    return await QO.saveWorkbook(wb);
   }
 
   /* 올려둔 공급가표가 있다는 걸 한눈에 — 초록 상자 + 작은 '해제' 버튼.
@@ -1745,6 +1779,15 @@ const ST = (() => {
       try { await addPriceBook(await readFile(f), f.name); }
       catch (e) { msg("msg-pb", "err", "⚠ " + f.name + " — " + e.message); }
     };
+    const pbFile = () => (pbRaw && pbRaw.name ? pbRaw.name.replace(/\.xls[xm]$/i, "") : "공급가표") + ".xlsx";
+    $("pb-pv").onclick = async () => {
+      try { openPreview(await priceBookExcel(), "업체별 공급가표"); }
+      catch (e) { msg("msg-pb", "err", "⚠ " + e.message); }
+    };
+    $("pb-dl").onclick = async () => {
+      try { download(await priceBookExcel(), pbFile()); }
+      catch (e) { msg("msg-pb", "err", "⚠ " + e.message); }
+    };
     $("pb-clear").onclick = async () => {
       if (!confirm("올려둔 공급가표를 해제할까요?\n해제하면 업체 지급액은 마진율 방식으로 계산됩니다.")) return;
       pbRaw = null; await DB.set("priceBook", null);
@@ -1849,6 +1892,7 @@ const ST = (() => {
            // 실제 calc() 와 같은 순서로 돌린다 (수수료 → 리워드 → 최종 마진)
            _rewards: (rules, vendors) => { rewards = rules; calcMallFees(vendors); return calcRewards(vendors); },
            _money: moneyLines,
-           _tpl: priceBookTemplate };
+           _tpl: priceBookTemplate,
+           _pbx: (raw) => { pbRaw = raw; return priceBookExcel(); } };
 })();
 window.ST = ST;
