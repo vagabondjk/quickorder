@@ -649,6 +649,21 @@ const ST = (() => {
     return out.sort();
   };
   async function saveRewards() { await DB.set("mdRewards", rewards); }
+  /* MD 리워드 합계 — 이번 달에 우리가 MD 들에게 나갈 돈.
+     (업체 지급액과는 별개다. 업체 지급액은 이 값에 영향받지 않는다) */
+  function totalBoxHtml() {
+    if (!result || !result.total || !result.total.reward) return "";
+    const t = result.total;
+    return `<div style="margin-top:12px;padding:12px 14px;border:1.5px solid var(--brand);border-radius:11px">
+      ${(result.md || []).map(m => `<div class="totline" style="font-size:12.5px">
+        <span>${esc(m.md)}</span><b>${won(m.reward)}</b></div>`).join("")}
+      <div class="totline" style="border-top:1px solid var(--line);margin-top:6px;padding-top:8px">
+        <b style="font-size:14px">MD 리워드 합계</b>
+        <b style="font-size:19px;font-weight:800;color:var(--brand)">${won(t.reward)}</b></div>
+      <div class="totline" style="font-size:12px;color:var(--muted);padding-top:4px">
+        <span>${esc(CO())} 마진 ${won(t.margin)} − 리워드</span><b>최종 ${won(t.netMargin)}</b></div>
+    </div>`;
+  }
   /* 리워드가 안 붙은 브랜드를 한눈에 보여준다.
      안 고른 브랜드는 자동으로 리워드 0 이지만, 목록으로 보여주지 않으면
      '아직 안 정한 것'인지 '원래 없는 것'인지 구별이 안 된다. */
@@ -712,13 +727,15 @@ const ST = (() => {
                    border-radius:8px;background:var(--card2);color:inherit;font-family:inherit;font-size:12.5px">
           <b style="flex:none">%</b></div>
         <div class="brands">${chips}</div>
-        <div class="totline" style="font-size:12px;padding-top:6px">
-          <span style="color:var(--muted)">${picked.length ? `브랜드 ${picked.length}개` : "브랜드 전체"}${
-            hit ? ` · ${rewardBase(r)} ${won(hit.baseAmount)}` : ""}</span>
-          <b style="color:${hit && hit.reward ? "var(--brand)" : "var(--faint)"}">${
-            hit ? won(hit.reward) : "정산내역 추출 후 표시"}</b></div>
+        <div style="font-size:11px;color:var(--faint);padding-top:5px">${
+          picked.length ? `브랜드 ${picked.length}개` : "브랜드 전체"}${
+          hit ? ` · ${rewardBase(r)} ${won(hit.baseAmount)} × ${r.rate}%` : ""}</div>
+        <div class="totline" style="margin-top:6px;padding-top:8px;border-top:1px solid var(--line)">
+          <b style="font-size:13.5px">${esc(r.md || "MD")} 리워드</b>
+          <b style="font-size:17px;font-weight:800;color:${hit && hit.reward ? "var(--brand)" : "var(--faint)"}">${
+            hit ? won(hit.reward) : "— 정산내역 추출 후"}</b></div>
       </div>`;
-    }).join("") + noneBoxHtml();
+    }).join("") + totalBoxHtml() + noneBoxHtml();
 
     const upd = async (i, fn) => { fn(rewards[i]); await saveRewards(); drawMd(); if (result) calc(); };
     box.querySelectorAll(".mdname").forEach(el => el.onchange = el.onblur = async () => {
