@@ -51,27 +51,44 @@ async function openPreview(buf, title) {
   $("pv-modal-foot").textContent = "";
   try {
     const wb = await QO.loadWorkbook(buf.slice(0));
-    const pv = QO.previewAny(wb, 2000);
-    $("pv-modal-sub").textContent = `시트: ${esc(pv.sheet)} · 전체 ${pv.total}건` +
-      (pv.sheets.length > 1 ? ` · (${pv.sheets.length}개 시트 중)` : "");
-    if (!pv.columns.length) { $("pv-modal-foot").textContent = "표시할 내용이 없어요."; return; }
-    if (pv.total === 0) {
-      $("pv-modal-sub").textContent = `시트: ${esc(pv.sheet)} · 빈 양식(내용 없음)`;
-      $("pv-modal-foot").innerHTML = "ℹ️ 이 파일은 <b>빈 양식(템플릿)</b>이라 채워진 내용이 없습니다. 아래는 열(항목) 목록입니다.";
-    }
-    let h = "<tr>" + pv.columns.map((c, i) => `<th>${esc(c || "열" + (i + 1))}</th>`).join("") + "</tr>";
-    pv.rows.forEach(row => {
-      h += "<tr>" + pv.columns.map((_, i) => {
-        const v = row[i] == null ? "" : row[i];
-        const num = /^[0-9,.\-]+$/.test(v) && v !== "";
-        return `<td${num ? ' class="num"' : ""}>${esc(v)}</td>`;
-      }).join("") + "</tr>";
-    });
-    $("pv-modal-table").innerHTML = h;
-    if (pv.total > 0) {   // 빈 양식일 때는 위의 안내문(ℹ️)을 덮어쓰지 않는다
-      $("pv-modal-foot").textContent = pv.total > pv.rows.length
-        ? `앞 ${pv.rows.length}건만 표시 · 전체 ${pv.total}건` : `전체 ${pv.total}건`;
-    }
+    // 시트가 여럿이면 골라서 볼 수 있게 한다 (공급가표처럼 4장짜리 파일이 있다)
+    const all = QO.previewSheets(wb, 2000).filter(s => s.columns.length || s.rows.length);
+    const big = QO.previewAny(wb, 2000);
+    if (!all.length) { $("pv-modal-sub").textContent = ""; $("pv-modal-foot").textContent = "표시할 내용이 없어요."; return; }
+    let cur = Math.max(0, all.findIndex(s => s.name === big.sheet));
+
+    const drawTab = () => {
+      const bar = $("pv-modal-tabs");
+      if (!bar) return;
+      if (all.length < 2) { bar.innerHTML = ""; bar.style.display = "none"; return; }
+      bar.style.display = "flex";
+      bar.innerHTML = all.map((s, i) =>
+        `<button class="seg${i === cur ? " on" : ""}" data-i="${i}">${esc(s.name)} <span style="opacity:.6">${s.rows.length}</span></button>`).join("");
+      bar.querySelectorAll("button").forEach(b => b.onclick = () => { cur = Number(b.dataset.i); drawTab(); drawSheet(); });
+    };
+    const drawSheet = () => {
+      const pv = all[cur];
+      $("pv-modal-sub").textContent = `시트: ${pv.name} · 전체 ${pv.rows.length}건` +
+        (all.length > 1 ? ` · (${all.length}개 시트 중 ${cur + 1}번째)` : "");
+      if (!pv.columns.length && !pv.rows.length) {
+        $("pv-modal-table").innerHTML = ""; $("pv-modal-foot").textContent = "이 시트에는 내용이 없어요."; return;
+      }
+      if (!pv.rows.length) {
+        $("pv-modal-sub").textContent = `시트: ${pv.name} · 빈 양식(내용 없음)`;
+        $("pv-modal-foot").innerHTML = "ℹ️ 이 시트는 <b>빈 양식(템플릿)</b>이라 채워진 내용이 없습니다. 아래는 열(항목) 목록입니다.";
+      }
+      let h = "<tr>" + pv.columns.map((c, i) => `<th>${esc(c || "열" + (i + 1))}</th>`).join("") + "</tr>";
+      pv.rows.forEach(row => {
+        h += "<tr>" + pv.columns.map((_, i) => {
+          const v = row[i] == null ? "" : row[i];
+          const num = /^[0-9,.\-]+$/.test(v) && v !== "";
+          return `<td${num ? ' class="num"' : ""}>${esc(v)}</td>`;
+        }).join("") + "</tr>";
+      });
+      $("pv-modal-table").innerHTML = h;
+      if (pv.rows.length) $("pv-modal-foot").textContent = `전체 ${pv.rows.length}건`;
+    };
+    drawTab(); drawSheet();
   } catch (e) {
     $("pv-modal-sub").textContent = "";
     $("pv-modal-foot").textContent = "⚠ 미리보기 실패: " + e.message;

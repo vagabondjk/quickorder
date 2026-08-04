@@ -162,7 +162,15 @@ const ST = (() => {
       const isPrice = pm.product !== undefined && pm.price !== undefined;
       const isShip = !isPrice && sm.vendor !== undefined && sm.shipMode !== undefined;
       if (!isPrice && !isShip) continue;
-      parsed.push({ name: sh.name, kind: isPrice ? "price" : "ship", cols: sh.columns,
+      // 원본에서 숨겨둔 열은 기억해뒀다가 내려받을 때 그대로 숨긴다.
+      // previewSheets 의 열 순서는 원본 1열부터 그대로라 번호가 어긋나지 않는다.
+      const ws0 = wb.getWorksheet(sh.name);
+      const hidden = [];
+      for (let c = 1; c <= sh.columns.length; c++) {
+        const col = ws0 && ws0.getColumn(c);
+        hidden.push(!!(col && (col.hidden || col.width === 0)));
+      }
+      parsed.push({ name: sh.name, kind: isPrice ? "price" : "ship", cols: sh.columns, hidden,
                     map: isPrice ? pm : sm, rows: sh.rows, count: sh.rows.length });
     }
     if (!parsed.some(p => p.kind === "price"))
@@ -179,6 +187,7 @@ const ST = (() => {
     pbRaw = { name, at: Date.now(), sheets: parsed.map(p => ({
       name: p.name, kind: p.kind, count: p.count, map: p.map,
       cols: (p.cols || []).slice(),          // 미리보기·내려받기로 되돌리려면 머리글도 있어야 한다
+      hidden: (p.hidden || []).slice(),      // 원본에서 숨겨둔 열
       rows: p.rows.map(r => r.slice()),
     })), off: off.slice() };
     await savePriceBook();
@@ -246,9 +255,11 @@ const ST = (() => {
       }
       (sh.rows || []).forEach(r => ws.addRow(r.slice()));
       const n = Math.max(cols.length, ...(sh.rows || []).map(r => r.length), 1);
+      const hid = sh.hidden || [];
       for (let c = 1; c <= n; c++) {
         const h = String(cols[c - 1] || "");
         ws.getColumn(c).width = /상품명|품명|비고|방법/.test(h) ? 34 : /업체|브랜드/.test(h) ? 14 : 12;
+        if (hid[c - 1]) ws.getColumn(c).hidden = true;      // 원본에서 숨겨둔 열은 그대로 숨긴다
       }
     });
     if (!wb.worksheets.length) throw new Error("되돌릴 시트가 없어요.");
