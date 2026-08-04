@@ -149,7 +149,7 @@ const ST = (() => {
   /* 공급가 파일은 시트가 여러 장이다 (운영 / 행사 / 배송비 방식 / 참고자료).
      시트마다 열 위치가 달라서 한 번의 매핑을 돌려 쓸 수 없다 — 시트별로 따로 맞춘다.
      참고용 시트가 섞여 들어갈 수 있으니 어떤 시트를 읽었는지 화면에 보여주고 끌 수 있게 한다. */
-  async function addPriceBook(buf, name) {
+  async function addPriceBook(buf, name, opts) {
     const wb = await QO.loadWorkbook(buf.slice(0));
     const sheets = QO.previewSheets(wb, 20000);
     if (!sheets.length) throw new Error("시트를 찾지 못했어요.");
@@ -189,7 +189,9 @@ const ST = (() => {
       cols: (p.cols || []).slice(),          // 미리보기·내려받기로 되돌리려면 머리글도 있어야 한다
       hidden: (p.hidden || []).slice(),      // 원본에서 숨겨둔 열
       rows: p.rows.map(r => r.slice()),
-    })), off: off.slice() };
+    })), off: off.slice(),
+      // 드라이브에서 가져온 파일이면 어디서 왔는지 기억한다 → 켤 때마다 최신본으로 맞춘다
+      drive: (opts && opts.drive) || (pbRaw && pbRaw.name === name ? pbRaw.drive : null) || null };
     await savePriceBook();
     drawPriceBook(); drawBrands(); drawMd(); refresh();
     if (result) calc();
@@ -229,6 +231,31 @@ const ST = (() => {
       <div style="margin-top:5px;font-size:12.5px;line-height:1.7">${
         keys.slice(0, 10).map(k => `· ${esc(k.slice(0, 52))} <b>${miss[k]}건</b>`).join("<br>")}${
         keys.length > 10 ? `<br>· 외 ${keys.length - 10}종` : ""}</div></div>`;
+  }
+
+  /* 공급가표를 드라이브 최신본으로 맞춘다.
+     공급가표는 수시로 드라이브에서 고쳐지는데, 앱에는 올린 시점의 값이 박혀 있어
+     모르는 사이 옛 단가로 정산할 수 있다. 그래서 켤 때마다 원본이 바뀌었는지 본다.
+     · 드라이브에서 가져온 파일일 때만 동작한다 (PC 에서 끌어다 놓은 파일은 대상 아님)
+     · 수정시각이 그대로면 내려받지 않는다 (매번 받아오면 느리다) */
+  let pbChecked = false;
+  async function refreshPriceBook(force) {
+    const d = pbRaw && pbRaw.drive;
+    if (!d || !d.id) return;
+    if (pbChecked && !force) return;
+    if (typeof GMAIL === "undefined" || GMAIL.needLogin()) return;
+    pbChecked = true;
+    try {
+      const info = await GMAIL.driveFileInfo(d.id);
+      const mt = (info && info.modifiedTime) || "";
+      if (mt && d.mtime && mt === d.mtime) return;              // 안 바뀜
+      const r = await GMAIL.driveFetchExcel(d.id);
+      await addPriceBook(r.buf, r.name || d.name, { drive: { id: d.id, name: r.name || d.name, mtime: mt } });
+      msg("msg-pb", "ok", `🔄 드라이브의 최신 공급가표로 맞췄어요 — ${r.name || d.name}`);
+    } catch (e) {
+      // 못 가져와도 지금 있는 공급가표로 그대로 쓴다. 다만 조용히 넘어가지 않는다.
+      msg("msg-pb", "warn", "⚠ 드라이브 최신본을 확인하지 못했어요 — 지금 올려둔 공급가표로 계산합니다. (" + e.message + ")");
+    }
   }
 
   /* 올려둔 공급가표를 엑셀로 되돌린다 — 미리보기·내려받기에 쓴다.
@@ -719,6 +746,9 @@ const ST = (() => {
     return out.sort();
   };
   async function saveRewards() { await DB.set("mdRewards", rewards); }
+  /* 업체 고르는 칸을 펼쳤는지 (조건 id별). 브랜드를 하나 누를 때마다 다시 그리는데,
+     이걸 기억하지 않으면 매번 접혀서 여러 개를 이어 고를 수가 없다. */
+  const mdOpen = {};
   /* MD 리워드 합계 — 이번 달에 우리가 MD 들에게 나갈 돈.
      (업체 지급액과는 별개다. 업체 지급액은 이 값에 영향받지 않는다) */
   function totalBoxHtml() {
@@ -733,28 +763,6 @@ const ST = (() => {
       <div class="totline" style="font-size:12px;color:var(--muted);padding-top:4px">
         <span>${esc(CO())} 마진 ${won(t.margin)} − 리워드</span><b>최종 ${won(t.netMargin)}</b></div>
     </div>`;
-  }
-  /* 리워드가 안 붙은 브랜드를 한눈에 보여준다.
-     안 고른 브랜드는 자동으로 리워드 0 이지만, 목록으로 보여주지 않으면
-     '아직 안 정한 것'인지 '원래 없는 것'인지 구별이 안 된다. */
-  function noneBoxHtml() {
-    const covered = new Set();
-    (rewards || []).forEach(r => {
-      if (rewardBase(r) === "없음" || !s(r.md) || !(Number(r.rate) || 0)) return;
-      const bs = (r.brands && r.brands.length) ? r.brands : brandsOfVendor(r.vendor);
-      bs.forEach(b => covered.add(r.vendor + "|" + b));
-    });
-    const left = [];
-    vendorNames().forEach(v => brandsOfVendor(v).forEach(b => {
-      if (!covered.has(v + "|" + b)) left.push({ v, b });
-    }));
-    if (!left.length) return "";
-    const byV = {};
-    left.forEach(x => (byV[x.v] = byV[x.v] || []).push(x.b));
-    return `<div style="margin-top:10px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;
-              background:var(--card2);font-size:11.5px;color:var(--muted);line-height:1.7">
-        <b>MD 리워드 없음</b>${Object.keys(byV).map(v =>
-          `<br>🏭 ${esc(v)} — ${byV[v].map(b => esc(b)).join(", ")}`).join("")}</div>`;
   }
   function drawMd() {
     const card = $("st-card-md"), box = $("st-md-list");
@@ -792,7 +800,12 @@ const ST = (() => {
           <div class="brands">${bs.length ? chips
             : `<span style="font-size:11.5px;color:var(--muted)">배정된 브랜드가 없습니다</span>`}</div></div>`;
       }).join("");
+      /* 업체가 늘면 상자가 화면을 다 잡아먹는다 → 접어두고, 고른 내용만 한 줄로 보여준다.
+         아직 아무것도 안 골랐을 때만 펼쳐서 바로 고를 수 있게 한다. */
       const nPick = Object.keys(picks).length;
+      const pickTxt = nPick
+        ? Object.keys(picks).map(v => `${esc(v)} ${picks[v].length ? picks[v].length + "개" : "전체"}`).join(" · ")
+        : "맡은 업체 고르기";
       return `<div class="card" style="padding:12px;margin-bottom:12px;border-color:var(--line)">
         <div class="vh" style="gap:6px">
           <input class="mdname" data-i="${i}" value="${esc(r.md || "")}" placeholder="MD 이름"
@@ -808,17 +821,23 @@ const ST = (() => {
             style="flex:none;width:70px;padding:7px;text-align:right;border:1px solid var(--line);
                    border-radius:8px;background:var(--card2);color:inherit;font-family:inherit;font-size:12.5px">
           <b style="flex:none">%</b></div>
-        ${boxes}
+        <details class="mdpick" data-i="${i}"${(mdOpen[r.id] === undefined ? !nPick : mdOpen[r.id]) ? " open" : ""} style="margin-top:8px">
+          <summary style="cursor:pointer;font-size:12.5px;font-weight:700;padding:7px 10px;
+            background:var(--card2);border:1px solid var(--line);border-radius:9px;list-style:none">
+            🏭 ${pickTxt}${nPick ? ` <span style="color:var(--muted);font-weight:600">· 바꾸기</span>` : ""}</summary>
+          ${boxes}</details>
         <div style="font-size:11px;color:var(--faint);padding-top:6px">${
-          nPick ? `업체 ${nPick}곳` : "맡은 업체를 골라주세요"}${
-          hit && hit.reward ? ` · ${rewardBase(r)} ${won(hit.baseAmount)} × ${r.rate}%` : ""}</div>
+          hit && hit.reward ? `${rewardBase(r)} ${won(hit.baseAmount)} × ${r.rate}%` : ""}</div>
         <div class="totline" style="margin-top:6px;padding-top:8px;border-top:1px solid var(--line)">
           <b style="font-size:13.5px">${esc(r.md || "MD")} 리워드</b>
           <b style="font-size:17px;font-weight:800;color:${hit && hit.reward ? "var(--brand)" : "var(--faint)"}">${
             hit ? won(hit.reward) : "— 정산내역 추출 후"}</b></div>
       </div>`;
-    }).join("") + totalBoxHtml() + noneBoxHtml();
+    }).join("") + totalBoxHtml();
 
+    box.querySelectorAll("details.mdpick").forEach(d => d.ontoggle = () => {
+      const r = rewards[d.dataset.i]; if (r) mdOpen[r.id] = d.open;
+    });
     const upd = async (i, fn) => { fn(rewards[i]); await saveRewards(); drawMd(); if (result) calc(); };
     box.querySelectorAll(".mdname").forEach(el => el.onchange = el.onblur = async () => {
       if (rewards[el.dataset.i].md === el.value.trim()) return;
@@ -1816,8 +1835,13 @@ const ST = (() => {
       key: "pricebook", multiple: false, title: "드라이브에서 공급가표 가져오기",
       onPick: async fs => {
         for (const f of fs) {
-          try { const r = await GMAIL.driveFetchExcel(f.id); await addPriceBook(r.buf, r.name || f.name); }
-          catch (e) { msg("msg-pb", "err", "⚠ " + f.name + " — " + e.message); }
+          try {
+            const r = await GMAIL.driveFetchExcel(f.id);
+            let mt = "";
+            try { mt = (await GMAIL.driveFileInfo(f.id)).modifiedTime || ""; } catch (e2) {}
+            // 어디서 가져왔는지 기억해두면, 다음에 켤 때 드라이브 최신본으로 자동으로 맞춘다
+            await addPriceBook(r.buf, r.name || f.name, { drive: { id: f.id, name: r.name || f.name, mtime: mt } });
+          } catch (e) { msg("msg-pb", "err", "⚠ " + f.name + " — " + e.message); }
         }
       },
     });
@@ -1891,11 +1915,16 @@ const ST = (() => {
     };
   }
 
-  async function init() { bind(); await load(); drawFilterLine(); }
+  async function init() {
+    bind(); await load(); drawFilterLine();
+    // 켤 때 한 번 — 로그인이 늦게 붙는 경우가 있어 조금 뒤에 확인한다
+    setTimeout(() => { refreshPriceBook().catch(() => {}); }, 3000);
+  }
   async function onShow() {
     if (!drawn) { await load(); drawn = true; }
     drawFiles(); drawPriceBook(); drawBrands(); drawMd(); refresh();
     if (result) drawResult();
+    refreshPriceBook().catch(() => {});     // 탭에 들어올 때도 (아직 확인 전이면)
   }
 
   init();
