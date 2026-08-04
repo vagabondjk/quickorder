@@ -966,7 +966,7 @@ async function saveForms(list) {
     }
     if (byName.has(name)) updated++; else added++;
     const rec = { name, file: it.fileName, data: it.buf, checked: true };
-    await DB.putForm(rec);
+    await addForm(rec);          // 지웠던 이름이면 '지움' 표시도 같이 걷어낸다
     byName.set(name, rec);
     names.push(name);
   }
@@ -996,8 +996,8 @@ async function renameForm(f) {
   const newName = v.trim().replace(/[\\/:*?"<>|]/g, "");
   if (!newName || newName === f.name) return;
   if (S.forms.some(x => x.name === newName)) { alert("같은 이름의 업체 양식이 이미 있어요."); return; }
-  await DB.delForm(f.name);
-  await DB.putForm({ name: newName, file: f.file, data: f.data, checked: f.checked !== false });
+  await dropForm(f.name);
+  await addForm({ name: newName, file: f.file, data: f.data, checked: f.checked !== false });
   for (const b in S.brandVendor) if (S.brandVendor[b] === f.name) S.brandVendor[b] = newName;
   await DB.set("brandVendor", S.brandVendor);
   const move = async (obj, key) => {
@@ -1009,6 +1009,22 @@ async function renameForm(f) {
   if (S.sel[f.name]) { S.sel[newName] = S.sel[f.name]; delete S.sel[f.name]; }
   await loadForms();
   msg("msg-o", "ok", `✔ '${f.name}' → '${newName}' 으로 바꿨어요.`);
+}
+/* 업체 양식 지우기 — 지운 이름을 남겨야 드라이브 백업에서 되살아나지 않는다.
+   (2026-08-04: 지운 중복 양식이 앱을 새로 띄울 때마다 돌아와 업체 2곳에 양식이 4개가 됐다) */
+async function dropForm(name) {
+  await DB.delForm(name);
+  const tomb = await DB.get("formsDeleted", {}) || {};
+  tomb[name] = Date.now();
+  await DB.set("formsDeleted", tomb);
+  // 바로 백업에도 반영 — 다음에 켤 때 옛 백업이 다시 내려보내지 못하게
+  try { if (window.SYNC && !GMAIL.needLogin()) await SYNC.syncUpNow(); } catch (e) {}
+}
+/* 업체 양식 넣기 — 같은 이름을 지운 적이 있으면 그 표시를 걷어낸다 */
+async function addForm(f) {
+  await DB.putForm(f);
+  const tomb = await DB.get("formsDeleted", {}) || {};
+  if (tomb[f.name] !== undefined) { delete tomb[f.name]; await DB.set("formsDeleted", tomb); }
 }
 async function loadForms() {
   S.forms = await DB.listForms();
@@ -1075,7 +1091,7 @@ function drawForms() {
       if (ev.target.classList.contains("vdel")) {
         ev.stopPropagation();
         if (!confirm(`'${f.name}' 양식을 지울까요?`)) return;
-        await DB.delForm(f.name); await loadForms(); return;
+        await dropForm(f.name); await loadForms(); return;
       }
       f.checked = !f.checked;
       el.classList.toggle("on", f.checked);

@@ -14,6 +14,8 @@ const SYNC = (() => {
     "csItems", "csMaps", "csSenders", "csKeywords", "csExclude",
     "settleRules", "settleMaps", "stSenders", "stKeywords", "stExclude",
     // v6.1 — 업체별 공급가표. 이게 빠지면 기기를 바꿨을 때 단가와 연결표가 통째로 사라진다
+    // 지운 업체 양식 표시 — 이게 빠지면 다른 기기의 백업이 지운 양식을 되살린다
+    "formsDeleted",
     "priceBook", "priceAliases", "priceAliasInfo", "settleBrandVendor", "settleVendors", "settleCarry",
     // v6.1.6 — 메일 문구
     "mailTemplates"];
@@ -62,11 +64,27 @@ const SYNC = (() => {
     const remoteNames = new Set((obj.forms || []).map(f => f.name));
     const localBefore = await DB.listForms();
     const extraLocal = localBefore.some(f => !remoteNames.has(f.name));   // 이 기기에만 있는 양식
+    /* ★ 지운 양식이 백업에서 되살아나지 않게 (2026-08-04)
+       예전엔 '추가·갱신만' 했더니, 중복 양식을 지워도 앱이 새로 뜰 때마다
+       백업에서 그대로 다시 내려와 업체 2곳에 양식이 4개가 됐다.
+       지운 이름과 지운 시각을 남겨두고, 그보다 오래된 백업은 무시한다.
+       (다른 기기에서 나중에 다시 올린 것이면 백업이 더 최신이라 살아난다) */
+    const tomb = await DB.get("formsDeleted", {}) || {};
+    const bundleAt = Number(obj.updatedAt) || 0;
+    const revived = [];
     DB.suspend(true);
     try {
       // 업체 양식: 추가·갱신만 (원격에 없다고 로컬 것을 지우지 않음)
-      for (const f of (obj.forms || []))
+      for (const f of (obj.forms || [])) {
+        const at = Number(tomb[f.name]) || 0;
+        if (at && at >= bundleAt) continue;             // 지운 뒤로 바뀐 게 없으면 되살리지 않는다
+        if (at) revived.push(f.name);                   // 백업이 더 최신 → 되살리고 표시는 지운다
         await DB.putForm({ name: f.name, file: f.file, checked: f.checked !== false, data: bufFromB64(f.data) });
+      }
+      if (revived.length) {
+        revived.forEach(n => { delete tomb[n]; });
+        await DB.set("formsDeleted", tomb);
+      }
       // 설정: 객체형(업체메일·브랜드·도메인 등)은 병합, 배열/문자열은 교체
       for (const k in (obj.kv || {})) {
         const remote = obj.kv[k];
@@ -82,6 +100,15 @@ const SYNC = (() => {
             if (!cur || (it.updatedAt || 0) >= (cur.updatedAt || 0)) byId.set(it.id, it);
           }
           await DB.set("csItems", [...byId.values()]);
+          continue;
+        }
+        // 지운 양식 표시는 '더 늦게 지운 쪽'을 남긴다.
+        // 이번에 되살린 이름은 표시를 지운다 (안 그러면 다음에 또 안 내려온다).
+        if (k === "formsDeleted" && remote && typeof remote === "object" && !Array.isArray(remote)) {
+          const out = Object.assign({}, await DB.get("formsDeleted", {}) || {});
+          for (const n in remote) if ((Number(remote[n]) || 0) > (Number(out[n]) || 0)) out[n] = remote[n];
+          revived.forEach(n => { delete out[n]; });
+          await DB.set("formsDeleted", out);
           continue;
         }
         if (remote && typeof remote === "object" && !Array.isArray(remote)) {
@@ -140,6 +167,7 @@ const SYNC = (() => {
 
   return {
     syncDown, syncUpNow, pushSoon,
+    _apply: applyBundle,        // 검증용 — 드라이브 없이 백업 병합을 돌려볼 수 있게
     onStatus(fn) { onStatus = fn; },
     lastTime, enabled: () => GMAIL.signedIn(),
   };
