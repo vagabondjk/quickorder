@@ -56,6 +56,8 @@ const ST = (() => {
   const PB_SHIP_FIELDS = [
     { k: "vendor", n: "업체명", kw: ["업체명", "업체", "벤더", "거래처"], req: true },
     { k: "shipMode", n: "배송비 정산", kw: ["배송비정산", "배송비 정산 방법", "배송비방식", "정산방법", "정산방식"], req: true },
+    // 업체에 돈 넣는 날 (15일 / 말일 …). 계산에는 안 쓰고 정산서·화면에 그대로 적는다.
+    { k: "payDay", n: "입금일", kw: ["입금일", "지급일", "송금일", "결제일", "입금"] },
   ];
 
   let files = [];        // [{name, cols, rows, map, sig}]
@@ -131,12 +133,16 @@ const ST = (() => {
   function rebuildBook() {
     if (!pbRaw || !pbRaw.sheets) { pbook = QO.buildPriceBook([]); return; }
     const off = pbRaw.off || [];
-    const shipModes = {}, rows = [];
+    const shipModes = {}, payDays = {}, rows = [];
     pbRaw.sheets.forEach(sh => {
       if (off.indexOf(sh.name) >= 0) return;
       const g = (r, k) => (sh.map[k] === undefined ? "" : r[sh.map[k]]);
       if (sh.kind === "ship") {
-        sh.rows.forEach(r => { const v = s(g(r, "vendor")); if (v) shipModes[v] = s(g(r, "shipMode")); });
+        sh.rows.forEach(r => {
+          const v = s(g(r, "vendor")); if (!v) return;
+          shipModes[v] = s(g(r, "shipMode"));
+          const d = s(g(r, "payDay")); if (d) payDays[v] = d;
+        });
       } else {
         sh.rows.forEach(r => rows.push({
           vendor: s(g(r, "vendor")), brand: s(g(r, "brand")), product: s(g(r, "product")),
@@ -147,6 +153,7 @@ const ST = (() => {
     });
     pbook = QO.buildPriceBook(rows, { shipModes });
     pbook.shipModes = shipModes;
+    pbook.payDays = payDays;
   }
   const hasBook = () => pbook.items.length > 0;
 
@@ -750,6 +757,7 @@ const ST = (() => {
       const d = ded[v];
       if (d) { byVendor[v].ded = d.amount; byVendor[v].dedRows = d.rows; }
       byVendor[v].final = byVendor[v].pay - byVendor[v].ded;
+      byVendor[v].payDay = (pbook.payDays || {})[v] || "";   // 공급가표 3번 시트의 입금일
     }
     const vendors = Object.values(byVendor).sort((a, b) => b.final - a.final);
     calcMallFees(vendors);                            // 몰 수수료(삼성계열 카드 등)
@@ -1200,7 +1208,8 @@ const ST = (() => {
     result.vendors.forEach(v => {
       const row = document.createElement("div");
       row.className = "rrow";
-      row.innerHTML = `<div class="rtop"><b style="flex:1">🏭 ${esc(v.vendor)}</b><span class="cnt">${v.rows.length}건</span></div>
+      row.innerHTML = `<div class="rtop"><b style="flex:1">🏭 ${esc(v.vendor)}${
+          v.payDay ? `<span style="font-weight:600;color:var(--muted);font-size:12px"> · 입금일 ${esc(v.payDay)}</span>` : ""}</b><span class="cnt">${v.rows.length}건</span></div>
         ${moneyLines({ mallAmount: v.mallAmount, amount: v.amount, pay: v.final, margin: v.margin,
                        unpricedAmount: v.unpricedAmount, ded: v.ded, netMargin: v.netMargin,
                        feeRows: v.feeRows, rewardRows: v.rewardRows }, { payLabel: "업체 지급액" })}
@@ -1517,10 +1526,15 @@ const ST = (() => {
     // 개당 업체는 배송비가 단가에 이미 합쳐져 있지만 '(배송비 포함)' 이라고 적지 않는다 — 업체 요청.
     // 주문한 달과 수집(출고)된 달이 다른 건이 있으면 '비고' 열을 붙인다
     const anyCarry = v.rows.some(r => QO.carryNote(r));
+    // 행사기간 단가로 계산된 줄이 있으면 그 사실을 줄마다 표시한다 (priceFrom = 적용시작일)
+    const anyPromo = v.rows.some(r => r.priceFrom);
     const head = src.concat([`${v.vendor}→${CO()} 공급가`])
       .concat(perOrderShip ? ["배송비"] : []).concat(["정산금액"])
+      .concat(anyPromo ? ["행사"] : [])
       .concat(anyCarry ? ["비고"] : []);
     const nCol = head.length;
+    const moneyEnd = src.length + 1 + (perOrderShip ? 1 : 0) + 1;   // 정산금액 열
+    const promoCol = moneyEnd + 1;                                  // 그 오른쪽이 '행사' 열
 
     const p = (result && result.period) || { label: "" };
     const totalQty = v.rows.reduce((s2, r) => s2 + (r.qty || 0), 0);
@@ -1536,7 +1550,8 @@ const ST = (() => {
     ws.getRow(1).font = { bold: true, size: 14 };
     // 업체용에는 작성일을 넣지 않는다 — 업체가 볼 것은 '어느 기간을 정산했는지'다
     const pr = periodRange();
-    ws.addRow([(pr ? `정산기간 ${pr} (출고완료된 주문건 기준) · ` : "") + `${v.rows.length}건`]);
+    ws.addRow([(pr ? `정산기간 ${pr} (출고완료된 주문건 기준) · ` : "") + `${v.rows.length}건`
+      + (v.payDay ? ` · 입금일 ${v.payDay}` : "")]);
     ws.addRow(["※ 아래 금액은 모두 부가세가 포함된 금액입니다."]);
     while (ws.rowCount < tops.length) ws.addRow([]);   // 요약이 길면 줄을 더 만든다
     ws.addRow([]);
@@ -1600,13 +1615,19 @@ const ST = (() => {
       line.push(r.priced === false ? "미확정" : (r.unitCost == null ? "" : Math.round(r.unitCost) + merged));
       if (perOrderShip) line.push(r.shipMode === "건당" ? Math.round(r.shipTotal || 0) : 0);
       line.push(Math.round(r.pay || 0));
+      if (anyPromo) line.push(r.priceFrom ? "행사 공급가" : "");
       if (anyCarry) line.push(QO.carryNote(r));
-      ws.addRow(line);
+      const row = ws.addRow(line);
+      // 행사 단가로 계산된 줄은 오른쪽 표시를 빨갛게 (셀 서식은 새 객체로 — 공유하면 표 전체에 번진다)
+      if (anyPromo && r.priceFrom) {
+        const c = row.getCell(promoCol);
+        c.font = { bold: true, color: { argb: "FFCC0000" } };
+        c.alignment = { horizontal: "center", vertical: "middle" };
+      }
     });
 
     ws.addRow([]);
     // 합계는 금액 열 끝(정산금액)에 맞춘다 — 맨 끝에 '비고'가 붙어도 밀리지 않게
-    const moneyEnd = nCol - (anyCarry ? 1 : 0);
     const add = (label, val, color) => {
       const cells = new Array(nCol).fill("");
       cells[moneyEnd - 2] = label; cells[moneyEnd - 1] = Math.round(val);
@@ -1668,8 +1689,10 @@ const ST = (() => {
       ws.getColumn(i + 1).width = w;
     });
     for (let n = src.length + 1; n <= moneyEnd; n++) { ws.getColumn(n).width = 14; ws.getColumn(n).numFmt = "#,##0"; }
+    if (anyPromo) ws.getColumn(promoCol).width = 12;
     if (anyCarry) ws.getColumn(nCol).width = 20;      // 비고는 글자라 서식을 걸지 않는다
     alignSheet(ws, moneyEnd, src.length, hr);
+    if (anyPromo) ws.getColumn(promoCol).alignment = { horizontal: "center", vertical: "middle" };
     if (anyCarry) ws.getColumn(nCol).alignment = { horizontal: "center", vertical: "middle" };
     // alignSheet 는 열 단위로 정렬을 덮어쓴다 → 상단 요약은 그 뒤에 다시 오른쪽으로
     tops.forEach((t, i) => {
@@ -1709,6 +1732,10 @@ const ST = (() => {
     line("배송비", v => v.ship || 0);
     if (vendors.some(v => v.ded)) line("교환·반품 차감", v => -(v.ded || 0), { color: "FFCC0000" });
     line("업체 지급액", v => v.final, { bold: true, color: "FF1A56DB" });
+    // 입금일은 금액이 아니라 글자라 line() 대신 직접 적는다
+    if (vendors.some(v => v.payDay))
+      ws.addRow(["입금일"].concat(vendors.map(v => v.payDay || "-")).concat([""]))
+        .font = { color: { argb: "FF666666" } };
     ws.addRow([]);
     line(`${co} 매출`, v => v.amount);
     line(`${co} 마진`, v => v.margin, { bold: true, color: "FF0A7A3D" });
