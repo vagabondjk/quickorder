@@ -1039,7 +1039,8 @@ const ST = (() => {
     const mallFee = (d.mallAmount || 0) - (d.amount || 0);
     if (d.mallAmount) {
       h += L("쇼핑몰 매출", d.mallAmount);
-      if (mallFee > 0) h += L("└ 쇼핑몰 수수료", mallFee, { small: true, minus: true });
+      // 몰이 가져가는 몫이 매출의 몇 %인지 같이 적는다 (몰마다 수수료가 달라 눈으로 비교하게)
+      if (mallFee > 0) h += L(`└ 쇼핑몰 수수료 ${rateOf(mallFee, d.mallAmount)}`, mallFee, { small: true, minus: true });
     }
     h += L(`${esc(CO())} 매출`, d.amount);
     if (d.unpricedAmount)
@@ -1048,8 +1049,9 @@ const ST = (() => {
     h += `<div class="totline"${big ? ' style="border-top:1px solid var(--line);margin-top:6px;padding-top:8px"' : ""}>` +
       `<b>${esc(o && o.payLabel || "업체 지급액")}</b><span style="color:var(--brand)">${won(d.pay)}</span></div>`;
     h += L(`${esc(CO())} 마진`, d.margin, { color: "var(--ok)", rate: rateOf(d.margin, d.amount) });
+    // 대상 매출을 같이 적는다 — 이게 없으면 금액이 맞는지 눈으로 검산할 수 없다
     (d.feeRows || []).forEach(g =>
-      h += L(`└ ${esc(g.label)} ${g.rate}% · ${g.count}건`, g.fee, { small: true, minus: true }));
+      h += L(`└ ${esc(g.label)} ${g.rate}% · ${g.count}건 (대상 ${won(g.amount)})`, g.fee, { small: true, minus: true }));
     (d.rewardRows || []).forEach(m =>
       h += L(`└ MD 리워드 · ${esc(m.md)}`, m.reward, { small: true, minus: true }));
     if ((d.feeRows || []).length || (d.rewardRows || []).length)
