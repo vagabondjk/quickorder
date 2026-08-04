@@ -36,6 +36,9 @@ const ST = (() => {
       kw: ["원가", "공급가(쇼핑몰)", "쇼핑몰공급가", "공급단가", "공급가", "판매단가"] },
     // 몰이 소비자에게 판 값(결제금액). 위 '매출(개당)'이 없을 때만 매출 대신 쓴다.
     { k: "amount", n: "쇼핑몰 매출", kw: ["정산금액", "정산예정금액", "지급액", "정산대금", "실정산액", "정산", "금액"] },
+    // 고객이 실제로 결제한 금액. 이건 매출 계산에 쓰지 않고 화면에 '쇼핑몰 매출' 로만 보여준다.
+    // 여기서 우리 매출을 빼면 몰이 가져가는 몫(쇼핑몰 수수료)이 나온다.
+    { k: "mallAmount", n: "고객 결제금액", kw: ["결제금액", "판매가(쇼핑몰)", "총결제금액", "상품결제금액"] },
   ];
 
   /* 업체별 공급가표 — 업체에 '지급할' 상품별 단가. 통합 파일엔 없어서 따로 올린다. */
@@ -69,7 +72,9 @@ const ST = (() => {
   let carry = { at: 0, list: [] };   // 지난 정산에서 송장이 없어 뺀 주문 (이월 추적용)
   let names = {};        // 업체 → 저장·발송할 파일명 (수정하면 그대로 씀)
   /* 파트너 MD 리워드 — 매출(또는 이익)의 일부를 MD에게 준다.
-     [{ id, md, vendor, brands:[], base:"매출"|"이익", rate: 3 }]
+     [{ id, md, base:"매출"|"이익", rate: 3, picks: { 업체명: [브랜드…] } }]
+     · picks 에 업체가 있고 배열이 비어 있으면 그 업체 '전체'가 대상이다.
+     · MD 한 명이 여러 업체를 맡을 수 있어 업체를 여러 개 담는다.
      한 번 정해두면 다음 달 정산에서도 그대로 불러온다.
      ★ 리워드까지 빼야 진짜 우리 마진이다. 업체용 정산서에는 절대 나가지 않는다. */
   let rewards = [];
@@ -94,6 +99,13 @@ const ST = (() => {
     // v6.3.9 에 잠깐 있던 '리워드 없음' 은 없앴다. 요율 0 으로 바꿔 그대로 잠자게 둔다
     // (매출 대비로 되살리면 안 주던 리워드가 갑자기 붙는다)
     rewards.forEach(r => { if (r.base === "없음") { r.base = "매출"; r.rate = 0; } });
+    // 업체 하나만 담던 옛 조건({vendor, brands})을 여러 업체({picks})로 옮긴다
+    rewards.forEach(r => {
+      if (r.picks) return;
+      r.picks = {};
+      if (r.vendor) r.picks[r.vendor] = (r.brands || []).slice();
+      delete r.vendor; delete r.brands;
+    });
     // 지난 정산에서 '송장 없어 뺀' 목록. 이번에 출고됐으면 이월 건으로 알려준다.
     carry = await DB.get("settleCarry", { at: 0, list: [] }) || { at: 0, list: [] };
     if (!carry.list) carry.list = [];
@@ -214,8 +226,8 @@ const ST = (() => {
   function drawPbLoaded() {
     const row = $("pb-loaded"); if (!row) return;
     const on = hasBook();
-    row.style.display = on ? "" : "none";
-    if (on) $("pb-fname").textContent = "📗 " + (pbRaw.name || "공급가표") + " — 올려둔 파일";
+    row.style.display = on ? "flex" : "none";
+    if (on) $("pb-fname").textContent = "📗 " + (pbRaw.name || "공급가표");
   }
   function drawPriceBook() {
     drawPbLoaded();
@@ -391,6 +403,8 @@ const ST = (() => {
         // 개당 단가가 있으면 그걸 × 수량. (통합 파일의 '판매가(쇼핑몰)'이 개당 단가다)
         const unitPrice = f.map.unitPrice === undefined ? null : num(g(r, "unitPrice"));
         const amount = unitPrice ? unitPrice * qty : num(g(r, "amount"));
+        // 고객 결제금액 (몰이 소비자에게 받은 값). 매출 계산엔 안 쓰고 화면 표시용이다.
+        const mallAmount = f.map.mallAmount === undefined ? 0 : num(g(r, "mallAmount"));
         if (!product && !amount) { skipped.push({ src: f.name, raw: r }); continue; }
         // 브랜드는 파일에 열이 있으면 그걸 그대로 쓴다(상품명에서 추측하는 것보다 정확).
         const brand = (f.map.brand === undefined ? "" : s(g(r, "brand")))
@@ -406,7 +420,7 @@ const ST = (() => {
           orderNo: s(g(r, "orderNo")),
           product, option, qty,
           unitPrice: unitPrice || null,
-          amount,
+          amount, mallAmount,
           vendor, brand,
           invoice: f.map.invoice === undefined ? null : s(g(r, "invoice")),
         });
@@ -599,9 +613,10 @@ const ST = (() => {
       // 단가를 못 찾은 줄은 마진도 0. (지급액 0 원을 그대로 마진으로 잡으면 마진이 부풀려진다)
       r.margin = r.priced ? r.amount - r.pay : 0;
       const g = byVendor[v] = byVendor[v] ||
-        { vendor: v, rows: [], amount: 0, pay: 0, margin: 0, ded: 0, dedRows: [],
+        { vendor: v, rows: [], amount: 0, mallAmount: 0, pay: 0, margin: 0, ded: 0, dedRows: [],
           unpriced: 0, unpricedAmount: 0, loose: 0, ship: 0, brands: [] };
       g.rows.push(r); g.amount += r.amount; g.pay += r.pay; g.margin += r.margin;
+      g.mallAmount += r.mallAmount || 0;
       g.ship += r.shipTotal || 0;
       if (r.brand && g.brands.indexOf(r.brand) < 0) g.brands.push(r.brand);
       if (!r.priced) { g.unpriced++; g.unpricedAmount += r.amount; }
@@ -613,17 +628,27 @@ const ST = (() => {
       byVendor[v].final = byVendor[v].pay - byVendor[v].ded;
     }
     const vendors = Object.values(byVendor).sort((a, b) => b.final - a.final);
-    const mdList = calcRewards(vendors);              // 파트너 MD 리워드
+    calcMallFees(vendors);                            // 몰 수수료(삼성계열 카드 등)
+    const mdList = calcRewards(vendors);              // 파트너 MD 리워드 (여기서 netMargin 까지 확정)
     const sum = f => vendors.reduce((s2, v) => s2 + (v[f] || 0), 0);
     result = {
       vendors,
       md: mdList,
       total: {
-        amount: sum("amount"), pay: sum("pay"), margin: sum("margin"),
+        amount: sum("amount"), mallAmount: sum("mallAmount"), pay: sum("pay"), margin: sum("margin"),
         ded: sum("ded"), final: sum("final"), count: rows.length,
         unpricedAmount: sum("unpricedAmount"),
-        reward: sum("reward"), netMargin: sum("netMargin"),
+        reward: sum("reward"), fee: sum("fee"), netMargin: sum("netMargin"),
       },
+      // 몰 수수료 종류별 합계 (삼성계열 등)
+      fees: (() => {
+        const by = {};
+        vendors.forEach(v => (v.feeRows || []).forEach(g => {
+          const t = by[g.label] = by[g.label] || { label: g.label, rate: g.rate, amount: 0, fee: 0, count: 0 };
+          t.amount += g.amount; t.fee += g.fee; t.count += g.count;
+        }));
+        return Object.values(by);
+      })(),
       noVendor: rows.filter(r => !r.vendor && !r.brand).length,
       unpriced,
       loose: sum("loose"),
@@ -701,24 +726,36 @@ const ST = (() => {
       return null;
     };
     box.innerHTML = rewards.map((r, i) => {
-      const bs = brandsOfVendor(r.vendor);
-      const picked = r.brands || [];
-      const hit = lineOf(r.id);
-      const chips = bs.length ? bs.map(b =>
-        `<span class="brow${picked.indexOf(b) >= 0 ? " on" : ""}" data-i="${i}" data-b="${esc(b)}">
-           <span class="box">${picked.indexOf(b) >= 0 ? "✓" : ""}</span>${esc(b)}</span>`).join("")
-        : `<span style="font-size:11.5px;color:var(--muted)">이 업체에 배정된 브랜드가 없습니다</span>`;
-      return `<div class="vendorbox" style="margin-bottom:10px">
+      const picks = r.picks || (r.picks = {});
+      const hit = ruleTotals[r.id];
+      /* 업체를 전부 늘어놓고, 맡은 업체·브랜드를 눌러서 고른다.
+         '업체 전체' 를 누르면 그 업체의 모든 브랜드가 대상 (나중에 브랜드가 늘어도 따라간다). */
+      const boxes = vendors.map(v => {
+        const bs = brandsOfVendor(v);
+        const on = picks[v] !== undefined;
+        const all = on && !(picks[v] || []).length;
+        const chips = bs.map(b => {
+          const sel = on && (all || picks[v].indexOf(b) >= 0);
+          return `<span class="brow${sel ? " on" : ""}" data-i="${i}" data-v="${esc(v)}" data-b="${esc(b)}">
+            <span class="box">${sel ? "✓" : ""}</span>${esc(b)}</span>`;
+        }).join("");
+        return `<div class="vendorbox" style="margin-top:6px${on ? ";border-color:var(--brand)" : ""}">
+          <div class="vh" style="gap:6px">
+            <span style="flex:1">🏭 ${esc(v)}</span>
+            <span class="brow mdall${all ? " on" : ""}" data-i="${i}" data-v="${esc(v)}" style="flex:none">
+              <span class="box">${all ? "✓" : ""}</span>업체 전체</span></div>
+          <div class="brands">${bs.length ? chips
+            : `<span style="font-size:11.5px;color:var(--muted)">배정된 브랜드가 없습니다</span>`}</div></div>`;
+      }).join("");
+      const nPick = Object.keys(picks).length;
+      return `<div class="card" style="padding:12px;margin-bottom:12px;border-color:var(--line)">
         <div class="vh" style="gap:6px">
           <input class="mdname" data-i="${i}" value="${esc(r.md || "")}" placeholder="MD 이름"
             style="flex:1;min-width:0;padding:7px 9px;border:1px solid var(--line);border-radius:8px;
                    background:var(--card2);color:inherit;font-family:inherit;font-size:13px;font-weight:700">
           <button class="minibtn mddel" data-i="${i}" style="flex:none">✕</button></div>
         <div style="display:flex;gap:6px;align-items:center;padding:8px 0 2px">
-          <select class="mdvendor" data-i="${i}" style="flex:1;min-width:0;padding:7px;font-size:12.5px">
-            ${vendors.map(v => `<option value="${esc(v)}"${v === r.vendor ? " selected" : ""}>🏭 ${esc(v)}</option>`).join("")}
-          </select>
-          <select class="mdbase" data-i="${i}" style="flex:none;padding:7px;font-size:12.5px">
+          <select class="mdbase" data-i="${i}" style="flex:1;padding:7px;font-size:12.5px">
             <option value="매출"${rewardBase(r) === "매출" ? " selected" : ""}>매출 대비</option>
             <option value="이익"${rewardBase(r) === "이익" ? " selected" : ""}>이익 대비</option>
           </select>
@@ -726,10 +763,10 @@ const ST = (() => {
             style="flex:none;width:70px;padding:7px;text-align:right;border:1px solid var(--line);
                    border-radius:8px;background:var(--card2);color:inherit;font-family:inherit;font-size:12.5px">
           <b style="flex:none">%</b></div>
-        <div class="brands">${chips}</div>
-        <div style="font-size:11px;color:var(--faint);padding-top:5px">${
-          picked.length ? `브랜드 ${picked.length}개` : "브랜드 전체"}${
-          hit ? ` · ${rewardBase(r)} ${won(hit.baseAmount)} × ${r.rate}%` : ""}</div>
+        ${boxes}
+        <div style="font-size:11px;color:var(--faint);padding-top:6px">${
+          nPick ? `업체 ${nPick}곳` : "맡은 업체를 골라주세요"}${
+          hit && hit.reward ? ` · ${rewardBase(r)} ${won(hit.baseAmount)} × ${r.rate}%` : ""}</div>
         <div class="totline" style="margin-top:6px;padding-top:8px;border-top:1px solid var(--line)">
           <b style="font-size:13.5px">${esc(r.md || "MD")} 리워드</b>
           <b style="font-size:17px;font-weight:800;color:${hit && hit.reward ? "var(--brand)" : "var(--faint)"}">${
@@ -742,17 +779,32 @@ const ST = (() => {
       if (rewards[el.dataset.i].md === el.value.trim()) return;
       await upd(el.dataset.i, r => { r.md = el.value.trim(); });
     });
-    box.querySelectorAll(".mdvendor").forEach(el => el.onchange = () =>
-      upd(el.dataset.i, r => { r.vendor = el.value; r.brands = []; }));   // 업체가 바뀌면 브랜드는 초기화
     box.querySelectorAll(".mdbase").forEach(el => el.onchange = () =>
       upd(el.dataset.i, r => { r.base = el.value; }));
     box.querySelectorAll(".mdrate").forEach(el => el.onchange = () =>
       upd(el.dataset.i, r => { r.rate = Number(el.value) || 0; }));
-    box.querySelectorAll(".brow").forEach(el => el.onclick = () =>
+    box.querySelectorAll(".mdall").forEach(el => el.onclick = () =>
       upd(el.dataset.i, r => {
-        const b = el.dataset.b, cur = r.brands || (r.brands = []);
-        const j = cur.indexOf(b);
-        if (j >= 0) cur.splice(j, 1); else cur.push(b);
+        const v = el.dataset.v, p = r.picks;
+        if (p[v] !== undefined && !p[v].length) delete p[v];   // 전체 → 해제
+        else p[v] = [];                                        // 업체 전체로
+      }));
+    // 브랜드 칩 — '업체 전체'(.mdall) 도 같은 class 라 빼고 잡는다
+    box.querySelectorAll(".brow:not(.mdall)").forEach(el => el.onclick = () =>
+      upd(el.dataset.i, r => {
+        const v = el.dataset.v, b = el.dataset.b, p = r.picks;
+        if (p[v] === undefined) { p[v] = [b]; return; }        // 이 업체를 처음 고름
+        if (!p[v].length) {                                     // '업체 전체' 상태에서 하나를 빼면
+          p[v] = brandsOfVendor(v).filter(x => x !== b);        // 나머지 브랜드만 남긴다
+          if (!p[v].length) delete p[v];
+          return;
+        }
+        const j = p[v].indexOf(b);
+        if (j >= 0) { p[v].splice(j, 1); if (!p[v].length) delete p[v]; }
+        else {
+          p[v].push(b);
+          if (p[v].length === brandsOfVendor(v).length) p[v] = [];   // 다 고르면 '업체 전체'
+        }
       }));
     box.querySelectorAll(".mddel").forEach(el => el.onclick = async () => {
       if (!confirm(`'${rewards[el.dataset.i].md || "이름 없음"}' 리워드 조건을 지울까요?`)) return;
@@ -772,31 +824,63 @@ const ST = (() => {
          자기 자신을 참조해 값이 정해지지 않는다.
      같은 브랜드에 조건을 여러 개 걸면 각각 계산해서 더한다 (MD 두 명이 나눠 갖는 경우).
      ================================================================= */
+  /* 쇼핑몰별로 따로 떼가는 수수료 — 우리 매출에서 빠지므로 마진에서 공제한다.
+     삼성블루베리몰·삼성카드쇼핑처럼 삼성계열은 카드 수수료 1.7% 가 별도로 나간다.
+     요율이 바뀌거나 다른 몰이 생기면 여기만 고치면 된다. */
+  const MALL_FEES = [{ match: /삼성/, rate: 1.7, label: "삼성계열 카드수수료" }];
+  const mallFeeOf = mall => {
+    const m = String(mall == null ? "" : mall);
+    for (const f of MALL_FEES) if (f.match.test(m)) return f;
+    return null;
+  };
+  /* 업체별 몰 수수료 — 대상 줄의 '우리 매출' 에 요율을 곱한다 */
+  function calcMallFees(vendors) {
+    vendors.forEach(v => {
+      const by = {};
+      v.rows.forEach(r => {
+        const f = mallFeeOf(r.mall); if (!f) return;
+        const g = by[f.label] = by[f.label] || { label: f.label, rate: f.rate, amount: 0, count: 0 };
+        g.amount += r.amount || 0; g.count++;
+      });
+      v.feeRows = Object.values(by).map(g =>
+        Object.assign(g, { fee: Math.round(g.amount * g.rate / 100) }));
+      v.fee = v.feeRows.reduce((s2, g) => s2 + g.fee, 0);
+    });
+  }
+
   const rewardBase = r => (r.base === "이익" ? "이익" : "매출");
+  let ruleTotals = {};        // 조건 id → 여러 업체를 합친 리워드 (카드에 바로 보여주려고)
   function calcRewards(vendors) {
     vendors.forEach(v => { v.reward = 0; v.rewardRows = []; });
     const byMd = {};
+    ruleTotals = {};
     (rewards || []).forEach(rule => {
       const md = s(rule.md); if (!md) return;
       const rate = Number(rule.rate) || 0; if (!rate) return;
-      const v = vendors.find(x => x.vendor === rule.vendor);
-      if (!v) return;                                  // 이번 달에 그 업체 주문이 없으면 건너뜀
-      const pick = (rule.brands && rule.brands.length)
-        ? v.rows.filter(r => rule.brands.indexOf(r.brand || "(브랜드 없음)") >= 0)
-        : v.rows;
-      if (!pick.length) return;
-      const amount = pick.reduce((s2, r) => s2 + (r.amount || 0), 0);
-      const pay = pick.reduce((s2, r) => s2 + (r.pay || 0), 0);
-      const base = rewardBase(rule) === "이익" ? amount - pay : amount;
-      const won2 = Math.round(base * rate / 100);
-      const line = { id: rule.id, md, vendor: v.vendor, brands: (rule.brands || []).slice(),
-                     base: rewardBase(rule), rate, baseAmount: base, reward: won2, count: pick.length };
-      v.reward += won2; v.rewardRows.push(line);
-      const g = byMd[md] = byMd[md] || { md, reward: 0, lines: [] };
-      g.reward += won2; g.lines.push(line);
+      const picks = rule.picks || {};
+      const tot = ruleTotals[rule.id] = { reward: 0, baseAmount: 0, count: 0, vendors: 0 };
+      Object.keys(picks).forEach(vn => {
+        const v = vendors.find(x => x.vendor === vn);
+        if (!v) return;                                // 이번 달에 그 업체 주문이 없으면 건너뜀
+        const bl = picks[vn] || [];
+        const pick = bl.length
+          ? v.rows.filter(r => bl.indexOf(r.brand || "(브랜드 없음)") >= 0)
+          : v.rows;                                    // 빈 배열 = 그 업체 전체
+        if (!pick.length) return;
+        const amount = pick.reduce((s2, r) => s2 + (r.amount || 0), 0);
+        const pay = pick.reduce((s2, r) => s2 + (r.pay || 0), 0);
+        const base = rewardBase(rule) === "이익" ? amount - pay : amount;
+        const won2 = Math.round(base * rate / 100);
+        const line = { id: rule.id, md, vendor: v.vendor, brands: bl.slice(),
+                       base: rewardBase(rule), rate, baseAmount: base, reward: won2, count: pick.length };
+        v.reward += won2; v.rewardRows.push(line);
+        tot.reward += won2; tot.baseAmount += base; tot.count += pick.length; tot.vendors++;
+        const g = byMd[md] = byMd[md] || { md, reward: 0, lines: [] };
+        g.reward += won2; g.lines.push(line);
+      });
     });
-    // 리워드까지 빼야 진짜 우리 마진
-    vendors.forEach(v => { v.netMargin = (v.margin || 0) - (v.reward || 0); });
+    // 리워드와 몰 수수료까지 빼야 진짜 우리 마진
+    vendors.forEach(v => { v.netMargin = (v.margin || 0) - (v.reward || 0) - (v.fee || 0); });
     return Object.values(byMd).sort((a, b) => b.reward - a.reward);
   }
 
@@ -903,6 +987,42 @@ const ST = (() => {
     </div>`;
   }
 
+  /* 돈 흐름 표시 — 전체 합계와 업체 카드가 같은 순서를 쓴다.
+       쇼핑몰 매출 −(쇼핑몰 수수료) → 랩노마드 매출 −(업체 지급액) → 랩노마드 마진
+       −(카드 수수료) −(MD 리워드) → 랩노마드 최종 마진
+     쇼핑몰 수수료는 따로 적힌 값이 아니라 '고객 결제금액 − 우리 매출' 이다(몰이 가져가는 몫).
+     결제금액 열이 없는 파일이면 위 두 줄은 그냥 나오지 않는다. */
+  function moneyLines(d, o) {
+    const big = o && o.big;
+    const L = (label, val, opt) => {
+      const s2 = opt || {};
+      return `<div class="totline"${s2.small ? ' style="font-size:12px;color:var(--muted)"' : ""}>` +
+        `${s2.small ? "<span>" : "<b>"}${label}${s2.small ? "</span>" : "</b>"}` +
+        `<span${s2.color ? ` style="color:${s2.color}"` : ""}>${s2.minus ? "− " : ""}${won(val)}${
+          s2.rate !== undefined ? ` <span style="color:var(--muted);font-weight:600">(${s2.rate})</span>` : ""}</span></div>`;
+    };
+    let h = "";
+    const mallFee = (d.mallAmount || 0) - (d.amount || 0);
+    if (d.mallAmount) {
+      h += L("쇼핑몰 매출", d.mallAmount);
+      if (mallFee > 0) h += L("└ 쇼핑몰 수수료", mallFee, { small: true, minus: true });
+    }
+    h += L(`${esc(CO())} 매출`, d.amount);
+    if (d.unpricedAmount)
+      h += L("└ 단가 못 찾은 건 (지급·마진에서 빠짐)", d.unpricedAmount, { small: true, color: "var(--danger)" });
+    if (d.ded) h += L("CS 차감 (교환·반품)", d.ded, { minus: true, color: "var(--danger)" });
+    h += `<div class="totline"${big ? ' style="border-top:1px solid var(--line);margin-top:6px;padding-top:8px"' : ""}>` +
+      `<b>${esc(o && o.payLabel || "업체 지급액")}</b><span style="color:var(--brand)">${won(d.pay)}</span></div>`;
+    h += L(`${esc(CO())} 마진`, d.margin, { color: "var(--ok)", rate: rateOf(d.margin, d.amount) });
+    (d.feeRows || []).forEach(g =>
+      h += L(`└ ${esc(g.label)} ${g.rate}% · ${g.count}건`, g.fee, { small: true, minus: true }));
+    (d.rewardRows || []).forEach(m =>
+      h += L(`└ MD 리워드 · ${esc(m.md)}`, m.reward, { small: true, minus: true }));
+    if ((d.feeRows || []).length || (d.rewardRows || []).length)
+      h += L(`${esc(CO())} 최종 마진`, d.netMargin, { color: "var(--ok)", rate: rateOf(d.netMargin, d.amount) });
+    return h;
+  }
+
   function drawResult() {
     if (!result) { $("result-s").style.display = "none"; return; }
     $("result-s").style.display = "block";
@@ -920,16 +1040,13 @@ const ST = (() => {
     $("st-total").innerHTML =
       (per.label ? `<div style="margin-bottom:6px;font-size:13px"><b>📅 정산월 ${esc(per.label)}</b>
          <span style="color:var(--muted);font-size:11.5px"> · 주문일 ${esc(QO.fmtDate(per.from))} ~ ${esc(QO.fmtDate(per.to))} · 작성일 ${esc(QO.fmtDate(QO.todayStr()))}</span></div>` : "") +
-      `<div class="totline"><b>${result.usedBook ? "몰 매출 합계" : "몰 정산금액 합계"}</b><span>${won(t.amount)}</span></div>
-       ${t.unpricedAmount ? `<div class="totline" style="font-size:12px;color:var(--danger)"><span>└ 단가 못 찾은 건 (지급·마진에서 빠짐)</span><span>${won(t.unpricedAmount)}</span></div>` : ""}
-       <div class="totline"><b>${esc(CO())} 마진</b><span style="color:var(--ok)">${won(t.margin)} <span style="color:var(--muted);font-weight:600">(${rateOf(t.margin, t.amount)})</span></span></div>
-       ${t.reward ? (result.md || []).map(m =>
-          `<div class="totline" style="font-size:12px;color:var(--muted)"><span>└ MD 리워드 · ${esc(m.md)}</span><span>− ${won(m.reward)}</span></div>`).join("")
-          + `<div class="totline"><b>${esc(CO())} 최종 마진</b><span style="color:var(--ok)">${won(t.netMargin)} <span style="color:var(--muted);font-weight:600">(${rateOf(t.netMargin, t.amount)})</span></span></div>` : ""}
-       ${t.ded ? `<div class="totline"><b>CS 차감 (교환·반품)</b><span style="color:var(--danger)">− ${won(t.ded)}</span></div>` : ""}
-       <div class="totline" style="border-top:1px solid var(--line);margin-top:6px;padding-top:8px">
-         <b>업체 지급 합계</b><span style="color:var(--brand)">${won(t.final)}</span></div>
-       <div class="synchint" style="margin-top:6px">${t.count}건${
+      moneyLines({
+        mallAmount: t.mallAmount, amount: t.amount, pay: t.final, margin: t.margin,
+        unpricedAmount: t.unpricedAmount, ded: t.ded, netMargin: t.netMargin,
+        feeRows: result.fees || [],
+        rewardRows: (result.md || []).map(m => ({ md: m.md, reward: m.reward })),
+      }, { big: true, payLabel: "업체 지급 합계" }) +
+      `<div class="synchint" style="margin-top:6px">${t.count}건${
          result.noVendor ? ` · <b style="color:var(--danger)">업체 미지정 ${result.noVendor}건</b>` : ""}</div>` +
       checkBoxHtml(result.check) +
       (up.length ? unpricedBoxHtml(upKinds, kindKeys, up.length) : "");
@@ -944,15 +1061,10 @@ const ST = (() => {
       const row = document.createElement("div");
       row.className = "rrow";
       row.innerHTML = `<div class="rtop"><b style="flex:1">🏭 ${esc(v.vendor)}</b><span class="cnt">${v.rows.length}건</span></div>
-        <div class="totline" style="font-size:12px"><span>${result.usedBook ? "매출" : "정산금액"}</span><span>${won(v.amount)}</span></div>
-        ${v.unpricedAmount ? `<div class="totline" style="font-size:12px;color:var(--danger)"><span>└ 단가 못 찾은 건</span><span>${won(v.unpricedAmount)}</span></div>` : ""}
-        <div class="totline" style="font-size:12px"><span>${esc(CO())} 마진</span><span>${won(v.margin)} <span style="color:var(--muted)">(${rateOf(v.margin, v.amount)})</span></span></div>
-        ${(v.rewardRows || []).map(m => `<div class="totline" style="font-size:12px;color:var(--muted)">
-            <span>└ MD 리워드 · ${esc(m.md)} (${esc(m.base)} ${m.rate}%)</span><span>− ${won(m.reward)}</span></div>`).join("")}
-        ${v.reward ? `<div class="totline" style="font-size:12px"><span>${esc(CO())} 최종 마진</span><span>${won(v.netMargin)} <span style="color:var(--muted)">(${rateOf(v.netMargin, v.amount)})</span></span></div>` : ""}
+        ${moneyLines({ mallAmount: v.mallAmount, amount: v.amount, pay: v.final, margin: v.margin,
+                       unpricedAmount: v.unpricedAmount, ded: v.ded, netMargin: v.netMargin,
+                       feeRows: v.feeRows, rewardRows: v.rewardRows }, { payLabel: "업체 지급액" })}
         ${v.unpriced ? `<div class="totline" style="font-size:12px;color:var(--danger)"><span>⚠ 단가 못 찾음</span><span>${v.unpriced}건 (0원 처리)</span></div>` : ""}
-        ${v.ded ? `<div class="totline" style="font-size:12px;color:var(--danger)"><span>CS 차감 ${v.dedRows.length}건</span><span>− ${won(v.ded)}</span></div>` : ""}
-        <div class="totline" style="font-size:13px"><b>지급액</b><span style="color:var(--brand)">${won(v.final)}</span></div>
         <div class="rmail"><input type="email" placeholder="업체 이메일 (쉼표로 여러 명)" autocapitalize="off" spellcheck="false">
           <button class="dlbtn">메일 보내기</button></div>
         <div class="cands"></div>
@@ -1448,8 +1560,15 @@ const ST = (() => {
     ws.addRow([]);
     line(`${co} 매출`, v => v.amount);
     line(`${co} 마진`, v => v.margin, { bold: true, color: "FF0A7A3D" });
+    // 몰 수수료(삼성계열 카드 등) — 우리 매출에서 떼가므로 마진에서 뺀다
+    const feeLabels = [];
+    vendors.forEach(v => (v.feeRows || []).forEach(g => {
+      if (feeLabels.indexOf(g.label) < 0) feeLabels.push(g.label);
+    }));
+    feeLabels.forEach(lb => line(`└ ${lb}`, v =>
+      -((v.feeRows || []).filter(g => g.label === lb).reduce((s2, g) => s2 + g.fee, 0)), { color: "FF8A6D00" }));
     // 파트너 MD 리워드 — 이걸 빼야 진짜 마진이다. 마진율도 최종 기준으로 적는다.
-    const anyReward = vendors.some(v => v.reward);
+    const anyReward = vendors.some(v => v.reward) || feeLabels.length;
     if (anyReward) {
       (result && result.md ? result.md : []).forEach(m =>
         line(`└ MD 리워드 · ${m.md}`, v => -((v.rewardRows || [])
@@ -1727,7 +1846,9 @@ const ST = (() => {
   return { onShow, drawFilter: drawFilterLine, markSettled, calc, result: () => result, periodRange,
            /* 검증용 — 업체용 정산서(합계 수식·머리말)를 화면 없이 만들어 볼 수 있게 열어둔다 */
            _make: (r, v) => { result = r; const wb = new ExcelJS.Workbook(); vendorSheet(wb, v); return wb; },
-           _rewards: (rules, vendors) => { rewards = rules; return calcRewards(vendors); },
+           // 실제 calc() 와 같은 순서로 돌린다 (수수료 → 리워드 → 최종 마진)
+           _rewards: (rules, vendors) => { rewards = rules; calcMallFees(vendors); return calcRewards(vendors); },
+           _money: moneyLines,
            _tpl: priceBookTemplate };
 })();
 window.ST = ST;

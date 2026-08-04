@@ -1063,12 +1063,47 @@ function addDupWarning(box, groups, nameOf, tail) {
     + `<br><span style="color:var(--muted)">${esc(tail)}</span>`;
   box.appendChild(w);
 }
+/* 중복 양식을 여기서 바로 지운다 — 목록에서 ✕ 를 찾아 누르는 것보다 확실하다.
+   지우면 '지운 양식' 표시가 남아, 드라이브 백업에서 다시 내려오지 않는다. */
+function addDupFixer(box, groups) {
+  if (!groups.length) return;
+  const w = document.createElement("div");
+  w.style.cssText = "margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;align-items:center";
+  w.innerHTML = `<span style="font-size:11.5px;color:var(--muted);flex:1 1 100%">지울 쪽을 눌러주세요</span>`;
+  groups.forEach(g => g.items.forEach(f => {
+    const b = document.createElement("button");
+    b.className = "minibtn";
+    b.textContent = "✕ " + f.name;
+    b.onclick = async ev => {
+      ev.stopPropagation();
+      if (!confirm(`'${f.name}' 양식을 지울까요?\n(다시 살아나지 않게 표시도 같이 남깁니다)`)) return;
+      await dropForm(f.name);
+      await loadForms();
+    };
+    w.appendChild(b);
+  }));
+  box.appendChild(w);
+}
+/* 지운 양식이 백업에서 되살아나는지 확인할 수 있게, 현재 상태를 그대로 보여준다 */
+async function drawFormDiag(box) {
+  const tomb = await DB.get("formsDeleted", {}) || {};
+  const names = Object.keys(tomb);
+  if (!names.length) return;
+  const d = document.createElement("div");
+  d.style.cssText = "margin-top:8px;font-size:11px;color:var(--faint);line-height:1.6";
+  d.innerHTML = `지운 양식 ${names.length}개 — 백업에서 다시 내려오지 않게 막고 있습니다<br>` +
+    names.map(n => `· ${esc(n)}`).join("<br>");
+  box.appendChild(d);
+}
 function drawForms() {
   const box = $("vlist");
   if (!S.forms.length) { box.innerHTML = '<div class="empty">저장된 업체 양식이 없습니다.<br>아래에서 추가하세요.</div>'; return; }
   box.innerHTML = "";
-  addDupWarning(box, dupNameGroups(S.forms, f => f.name), f => f.name,
-    "브랜드 선택에도 두 번 나옵니다. 안 쓰는 쪽은 ✕ 로 지우거나 ‘이름수정’ 으로 구분해 주세요.");
+  const dups = dupNameGroups(S.forms, f => f.name);
+  addDupWarning(box, dups, f => f.name,
+    "브랜드 선택에도 두 번 나옵니다. 안 쓰는 쪽은 아래에서 지워주세요.");
+  addDupFixer(box, dups);
+  drawFormDiag(box);
   S.forms.forEach(f => {
     const el = document.createElement("div");
     el.className = "vrow" + (f.checked ? " on" : "");
