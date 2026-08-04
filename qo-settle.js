@@ -758,9 +758,6 @@ const ST = (() => {
     return out.sort();
   };
   async function saveRewards() { await DB.set("mdRewards", rewards); }
-  /* 업체 고르는 칸을 펼쳤는지 (조건 id별). 브랜드를 하나 누를 때마다 다시 그리는데,
-     이걸 기억하지 않으면 매번 접혀서 여러 개를 이어 고를 수가 없다. */
-  const mdOpen = {};
   /* MD 리워드 합계 — 이번 달에 우리가 MD 들에게 나갈 돈.
      (업체 지급액과는 별개다. 업체 지급액은 이 값에 영향받지 않는다) */
   function totalBoxHtml() {
@@ -793,31 +790,34 @@ const ST = (() => {
     box.innerHTML = rewards.map((r, i) => {
       const picks = r.picks || (r.picks = {});
       const hit = ruleTotals[r.id];
-      /* 업체를 전부 늘어놓고, 맡은 업체·브랜드를 눌러서 고른다.
-         '업체 전체' 를 누르면 그 업체의 모든 브랜드가 대상 (나중에 브랜드가 늘어도 따라간다). */
-      const boxes = vendors.map(v => {
+      /* 맡은 업체만 화면에 남긴다. 업체는 아래 드롭다운에서 골라 추가한다.
+         업체가 늘어도 고른 것만 보이니 화면이 길어지지 않는다.
+         '업체 전체' = 그 업체의 모든 브랜드 (나중에 브랜드가 늘어도 따라간다). */
+      const mine = Object.keys(picks);
+      const boxes = mine.map(v => {
         const bs = brandsOfVendor(v);
-        const on = picks[v] !== undefined;
-        const all = on && !(picks[v] || []).length;
+        const all = !(picks[v] || []).length;
         const chips = bs.map(b => {
-          const sel = on && (all || picks[v].indexOf(b) >= 0);
+          const sel = all || picks[v].indexOf(b) >= 0;
           return `<span class="brow${sel ? " on" : ""}" data-i="${i}" data-v="${esc(v)}" data-b="${esc(b)}">
             <span class="box">${sel ? "✓" : ""}</span>${esc(b)}</span>`;
         }).join("");
-        return `<div class="vendorbox" style="margin-top:6px${on ? ";border-color:var(--brand)" : ""}">
+        return `<div class="vendorbox" style="margin-top:6px;border-color:var(--brand)">
           <div class="vh" style="gap:6px">
             <span style="flex:1">🏭 ${esc(v)}</span>
             <span class="brow mdall${all ? " on" : ""}" data-i="${i}" data-v="${esc(v)}" style="flex:none">
-              <span class="box">${all ? "✓" : ""}</span>업체 전체</span></div>
+              <span class="box">${all ? "✓" : ""}</span>업체 전체</span>
+            <button class="minibtn mdvdel" data-i="${i}" data-v="${esc(v)}" style="flex:none">✕</button></div>
           <div class="brands">${bs.length ? chips
             : `<span style="font-size:11.5px;color:var(--muted)">배정된 브랜드가 없습니다</span>`}</div></div>`;
       }).join("");
-      /* 업체가 늘면 상자가 화면을 다 잡아먹는다 → 접어두고, 고른 내용만 한 줄로 보여준다.
-         아직 아무것도 안 골랐을 때만 펼쳐서 바로 고를 수 있게 한다. */
-      const nPick = Object.keys(picks).length;
-      const pickTxt = nPick
-        ? Object.keys(picks).map(v => `${esc(v)} ${picks[v].length ? picks[v].length + "개" : "전체"}`).join(" · ")
-        : "맡은 업체 고르기";
+      const rest = vendors.filter(v => picks[v] === undefined);
+      const adder = rest.length
+        ? `<select class="mdadd" data-i="${i}" style="width:100%;margin-top:8px;padding:8px;font-size:12.5px">
+             <option value="">＋ 맡은 업체 추가…</option>
+             ${rest.map(v => `<option value="${esc(v)}">🏭 ${esc(v)}</option>`).join("")}
+           </select>`
+        : "";
       return `<div class="card" style="padding:12px;margin-bottom:12px;border-color:var(--line)">
         <div class="vh" style="gap:6px">
           <input class="mdname" data-i="${i}" value="${esc(r.md || "")}" placeholder="MD 이름"
@@ -833,11 +833,7 @@ const ST = (() => {
             style="flex:none;width:70px;padding:7px;text-align:right;border:1px solid var(--line);
                    border-radius:8px;background:var(--card2);color:inherit;font-family:inherit;font-size:12.5px">
           <b style="flex:none">%</b></div>
-        <details class="mdpick" data-i="${i}"${(mdOpen[r.id] === undefined ? !nPick : mdOpen[r.id]) ? " open" : ""} style="margin-top:8px">
-          <summary style="cursor:pointer;font-size:12.5px;font-weight:700;padding:7px 10px;
-            background:var(--card2);border:1px solid var(--line);border-radius:9px;list-style:none">
-            🏭 ${pickTxt}${nPick ? ` <span style="color:var(--muted);font-weight:600">· 바꾸기</span>` : ""}</summary>
-          ${boxes}</details>
+        ${boxes}${adder}
         <div style="font-size:11px;color:var(--faint);padding-top:6px">${
           hit && hit.reward ? `${rewardBase(r)} ${won(hit.baseAmount)} × ${r.rate}%` : ""}</div>
         <div class="totline" style="margin-top:6px;padding-top:8px;border-top:1px solid var(--line)">
@@ -847,10 +843,14 @@ const ST = (() => {
       </div>`;
     }).join("") + totalBoxHtml();
 
-    box.querySelectorAll("details.mdpick").forEach(d => d.ontoggle = () => {
-      const r = rewards[d.dataset.i]; if (r) mdOpen[r.id] = d.open;
-    });
     const upd = async (i, fn) => { fn(rewards[i]); await saveRewards(); drawMd(); if (result) calc(); };
+    // 드롭다운에서 고르면 그 업체가 '전체' 로 추가된다
+    box.querySelectorAll(".mdadd").forEach(el => el.onchange = () => {
+      if (!el.value) return;
+      upd(el.dataset.i, r => { r.picks[el.value] = []; });
+    });
+    box.querySelectorAll(".mdvdel").forEach(el => el.onclick = () =>
+      upd(el.dataset.i, r => { delete r.picks[el.dataset.v]; }));
     box.querySelectorAll(".mdname").forEach(el => el.onchange = el.onblur = async () => {
       if (rewards[el.dataset.i].md === el.value.trim()) return;
       await upd(el.dataset.i, r => { r.md = el.value.trim(); });
@@ -1081,8 +1081,9 @@ const ST = (() => {
     const mallFee = (d.mallAmount || 0) - (d.amount || 0);
     if (d.mallAmount) {
       h += L("쇼핑몰 매출", d.mallAmount);
-      // 몰이 가져가는 몫이 매출의 몇 %인지 같이 적는다 (몰마다 수수료가 달라 눈으로 비교하게)
-      if (mallFee > 0) h += L(`└ 쇼핑몰 수수료 ${rateOf(mallFee, d.mallAmount)}`, mallFee, { small: true, minus: true });
+      // 요율은 언제나 오른쪽 금액 뒤 괄호에 (왼쪽은 항목 이름만)
+      if (mallFee > 0) h += L("└ 쇼핑몰 수수료", mallFee,
+        { small: true, minus: true, rate: rateOf(mallFee, d.mallAmount) });
     }
     h += L(`${esc(CO())} 매출`, d.amount);
     if (d.unpricedAmount)
@@ -1093,9 +1094,11 @@ const ST = (() => {
     h += L(`${esc(CO())} 마진`, d.margin, { color: "var(--ok)", rate: rateOf(d.margin, d.amount) });
     // 대상 매출을 같이 적는다 — 이게 없으면 금액이 맞는지 눈으로 검산할 수 없다
     (d.feeRows || []).forEach(g =>
-      h += L(`└ ${esc(g.label)} ${g.rate}% · ${g.count}건 (대상 ${won(g.amount)})`, g.fee, { small: true, minus: true }));
+      h += L(`└ ${esc(g.label)} · ${g.count}건 · 대상 ${won(g.amount)}`, g.fee,
+        { small: true, minus: true, rate: g.rate + "%" }));
     (d.rewardRows || []).forEach(m =>
-      h += L(`└ MD 리워드 · ${esc(m.md)}`, m.reward, { small: true, minus: true }));
+      h += L(`└ MD 리워드 · ${esc(m.md)}`, m.reward,
+        { small: true, minus: true, rate: m.rate ? m.rate + "%" : undefined }));
     if ((d.feeRows || []).length || (d.rewardRows || []).length)
       h += L(`${esc(CO())} 최종 마진`, d.netMargin, { color: "var(--ok)", rate: rateOf(d.netMargin, d.amount) });
     return h;
@@ -1122,7 +1125,11 @@ const ST = (() => {
         mallAmount: t.mallAmount, amount: t.amount, pay: t.final, margin: t.margin,
         unpricedAmount: t.unpricedAmount, ded: t.ded, netMargin: t.netMargin,
         feeRows: result.fees || [],
-        rewardRows: (result.md || []).map(m => ({ md: m.md, reward: m.reward })),
+        // 요율이 조건마다 다르면 합계 줄엔 안 적는다 (하나로 못 줄임)
+        rewardRows: (result.md || []).map(m => {
+          const rs = [...new Set((m.lines || []).map(x => x.rate))];
+          return { md: m.md, reward: m.reward, rate: rs.length === 1 ? rs[0] : 0 };
+        }),
       }, { big: true, payLabel: "업체 지급 합계" }) +
       `<div class="synchint" style="margin-top:6px">${t.count}건${
          result.noVendor ? ` · <b style="color:var(--danger)">업체 미지정 ${result.noVendor}건</b>` : ""}</div>` +
