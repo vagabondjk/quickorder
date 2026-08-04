@@ -224,24 +224,71 @@ const ST = (() => {
     box.innerHTML = hasBook() ? matchBoxHtml() : "";
   }
 
-  /* 빈 양식 내려받기 — 뭘 적어야 하는지 바로 보이게 예시를 한 줄 넣는다 */
+  /* 빈 양식 내려받기 — 실제로 쓰는 '업체별 공급가 리스트_정산용.xlsx' 와 같은 모양으로 만든다.
+     열 이름·위치가 그 파일과 같아야 받은 사람이 채워서 그대로 올릴 수 있다.
+     ※ A열은 비우고 머리글은 2행 — 원본 파일이 그렇게 생겼다.
+     ※ '2.최저가 기준 방식' 시트는 참고자료라 정산에 쓰지 않으므로 넣지 않는다.
+     ※ 지급액 = (상품 공급가 + 배송비) × 수량. '브랜드→벤더 공급가' 는 그 둘을 더한 값이라
+       사람이 눈으로 맞춰보는 용도다 — 프로그램은 앞의 두 열로 계산한다. */
   async function priceBookTemplate() {
     const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("공급가표");
-    ws.addRow(["브랜드", "상품명", "옵션", "공급단가(부가세 포함)", "적용시작일"]);
-    ws.getRow(1).font = { bold: true };
-    ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEFF3FB" } };
-    ws.addRow(["수피아토", "수피아토 쿨타월", "", 7370, ""]);
-    ws.addRow(["수피아토", "수피아토 쿨타월", "", 8730, "2026-07-13"]);
-    ws.addRow(["현우동", "카레 우동 밀키트 500g x 3팩", "", 21870, ""]);
-    ws.addRow([]);
-    ws.addRow(["※ 공급단가는 부가세가 포함된 금액입니다. 지급액 = 공급단가 × 수량 으로 그대로 계산합니다."]);
-    ws.addRow(["※ 상품명은 주문 파일과 똑같지 않아도 됩니다. 모델명처럼 알아볼 수 있는 이름이면 찾아냅니다."]);
-    ws.addRow(["※ 옵션이 비어 있으면 그 상품의 모든 옵션에 같은 단가를 적용합니다."]);
-    ws.addRow(["※ 단가가 바뀐 적이 있으면 위 쿨타월처럼 줄을 나누고 적용시작일을 적어주세요."]);
-    ws.addRow(["※ 적용시작일이 비어 있으면 '언제나' 적용됩니다."]);
-    [14, 40, 12, 12, 14].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
-    ws.getColumn(4).numFmt = "#,##0";
+    const sheet = (name, head, rows, widths) => {
+      const ws = wb.addWorksheet(name);
+      ws.addRow([]);                                    // 1행 비움
+      ws.addRow([""].concat(head));                     // 2행 머리글 (B열부터)
+      const hr = ws.getRow(2);
+      hr.font = { bold: true };
+      hr.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      for (let c = 2; c <= head.length + 1; c++)
+        hr.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEFF3FB" } };
+      rows.forEach(r => ws.addRow([""].concat(r)));
+      widths.forEach((w, i) => { ws.getColumn(i + 2).width = w; });
+      ws.getRow(2).height = 30;
+      return ws;
+    };
+
+    /* ① 평시 공급가 */
+    const h1 = ["NO.", "업체명", "상품명", "모델명", "브랜드명", "사이트 검색어", "상품구분", "카테고리",
+      "제조사", "원산지", "세금 구분", "배송비 구분", "배송비", "반품지", "상품 공급가", "옵션 제목",
+      "옵션상세명칭", "대표이미지", "상세페이지", "판매가", "소비자가", "합배송 가능여부",
+      "토요일 배송 가능여부", "재고관리여부", "재고관리수량", "영양성분 표시 대상 여부",
+      "유전자 재조합 식품 여부", "브랜드→벤더 공급가 (배송비 포함)"];
+    const r1 = [];
+    const row1 = (no, vendor, product, brand, ship, price) => {
+      const a = new Array(h1.length).fill("");
+      a[0] = no; a[1] = vendor; a[2] = product; a[4] = brand; a[12] = ship; a[14] = price;
+      a[27] = price + ship;      // 눈으로 맞춰보는 칸
+      return a;
+    };
+    r1.push(row1(1, "플라스머", "[애플하우스] 일반떡볶기 3pk", "애플하우스", 4000, 15000));
+    r1.push(row1(2, "플라스머", "[현우동] 카레우동 3pk", "현우동", 4000, 17870));
+    r1.push(row1(3, "디에스피", "[수피아토] 쿨타월", "수피아토", 0, 7370));
+    const w1 = [6, 12, 34, 12, 12, 14, 10, 10, 10, 10, 10, 11, 10, 10, 13, 12, 13, 12, 12, 11, 11, 13, 15, 12, 12, 16, 16, 20];
+    const ws1 = sheet("1.운영 상품 리스트_정산용", h1, r1, w1);
+    [14, 16, 29].forEach(c => { ws1.getColumn(c).numFmt = "#,##0"; });
+
+    /* ② 행사 공급가 — 기간이 겹치면 이 값이 우선한다 */
+    const h2 = ["NO.", "업체명", "행사 시작일", "행사 종료일", "상품명", "모델명", "브랜드명",
+      "사이트 검색어", "상품구분", "카테고리", "제조사", "원산지", "세금 구분", "배송비 구분",
+      "배송비", "반품지", "상품 공급가", "브랜드→벤더 행사공급가 (배송비 포함)"];
+    const row2 = (no, vendor, from, to, product, brand, ship, price) => {
+      const a = new Array(h2.length).fill("");
+      a[0] = no; a[1] = vendor; a[2] = from; a[3] = to; a[4] = product; a[6] = brand;
+      a[14] = ship; a[16] = price; a[17] = price + ship;
+      return a;
+    };
+    const r2 = [row2(1, "플라스머", "2026-07-27", "2026-08-14", "[종로계림] 마늘삼계탕 2pk", "종로계림", 4000, 20210)];
+    const w2 = [6, 12, 13, 13, 34, 12, 12, 14, 10, 10, 10, 10, 10, 11, 10, 10, 13, 22];
+    const ws2 = sheet("2.행사 상품리스트_정산용", h2, r2, w2);
+    [16, 18, 19].forEach(c => { ws2.getColumn(c).numFmt = "#,##0"; });
+    [4, 5].forEach(c => { ws2.getColumn(c).numFmt = "yyyy-mm-dd"; });
+
+    /* ③ 업체별 배송비 정산 방법 */
+    sheet("3. 업체별 배송비 정산 방법", ["업체명", "배송비 정산 방법"], [
+      ["디에스피", "주문당 배송비 1건으로 정산"],
+      ["플라스머", "상품별 배송비 포함 공급가로 정산"],
+    ], [16, 32]);
+
     return await QO.saveWorkbook(wb);
   }
 
@@ -1624,6 +1671,7 @@ const ST = (() => {
   return { onShow, drawFilter: drawFilterLine, markSettled, calc, result: () => result, periodRange,
            /* 검증용 — 업체용 정산서(합계 수식·머리말)를 화면 없이 만들어 볼 수 있게 열어둔다 */
            _make: (r, v) => { result = r; const wb = new ExcelJS.Workbook(); vendorSheet(wb, v); return wb; },
-           _rewards: (rules, vendors) => { rewards = rules; return calcRewards(vendors); } };
+           _rewards: (rules, vendors) => { rewards = rules; return calcRewards(vendors); },
+           _tpl: priceBookTemplate };
 })();
 window.ST = ST;
