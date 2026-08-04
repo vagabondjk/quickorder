@@ -731,6 +731,7 @@ const ST = (() => {
       if (m.ok) {
         const it = m.item || {};
         r.unitCost = Math.round(m.price); r.how = m.how; r.priceFrom = m.from || "";
+        r.priceTo = (m.item && m.item.to) || "";        // 행사 종료일 (정산서에 기간을 적으려고)
         r.ship = Math.round(it.ship || 0);
         r.shipMode = it.shipMode || "개당";
         r.shipTotal = r.ship * (r.shipMode === "건당" ? (r.qty > 0 ? 1 : 0) : r.qty);
@@ -861,7 +862,7 @@ const ST = (() => {
             <span class="brow mdall${all ? " on" : ""}" data-i="${i}" data-v="${esc(v)}" style="flex:none">
               <span class="box">${all ? "✓" : ""}</span>업체 전체</span>
             <button class="minibtn mdvdel" data-i="${i}" data-v="${esc(v)}" style="flex:none">✕</button></div>
-          <div style="display:flex;gap:6px;align-items:center;padding:6px 0 2px">
+          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 0 2px">
             <select class="mdvbase" data-i="${i}" data-v="${esc(v)}" style="flex:1;min-width:0;padding:6px;font-size:12px">
               <option value="매출"${rewardBase(p) === "매출" ? " selected" : ""}>매출 대비</option>
               <option value="이익"${rewardBase(p) === "이익" ? " selected" : ""}>이익 대비</option>
@@ -1209,7 +1210,8 @@ const ST = (() => {
       const row = document.createElement("div");
       row.className = "rrow";
       row.innerHTML = `<div class="rtop"><b style="flex:1">🏭 ${esc(v.vendor)}${
-          v.payDay ? `<span style="font-weight:600;color:var(--muted);font-size:12px"> · 입금일 ${esc(v.payDay)}</span>` : ""}</b><span class="cnt">${v.rows.length}건</span></div>
+          v.payDay ? `<span style="font-weight:700;font-size:11px;color:var(--brand);background:var(--brand-soft);
+            padding:2px 8px;border-radius:999px;margin-left:6px;white-space:nowrap">입금일 ${esc(v.payDay)}</span>` : ""}</b><span class="cnt">${v.rows.length}건</span></div>
         ${moneyLines({ mallAmount: v.mallAmount, amount: v.amount, pay: v.final, margin: v.margin,
                        unpricedAmount: v.unpricedAmount, ded: v.ded, netMargin: v.netMargin,
                        feeRows: v.feeRows, rewardRows: v.rewardRows }, { payLabel: "업체 지급액" })}
@@ -1526,12 +1528,24 @@ const ST = (() => {
     // 개당 업체는 배송비가 단가에 이미 합쳐져 있지만 '(배송비 포함)' 이라고 적지 않는다 — 업체 요청.
     // 주문한 달과 수집(출고)된 달이 다른 건이 있으면 '비고' 열을 붙인다
     const anyCarry = v.rows.some(r => QO.carryNote(r));
-    // 행사기간 단가로 계산된 줄이 있으면 그 사실을 줄마다 표시한다 (priceFrom = 적용시작일)
+    /* 줄마다의 특이사항 — 행사 단가로 계산됐는지, 이월 건인지.
+       둘 다 '이 줄만 다른 이유'라 한 칸에 모아 적는다. */
     const anyPromo = v.rows.some(r => r.priceFrom);
+    const anyNote = anyPromo || anyCarry;
+    const ymd = d => { const t = String(d || "").replace(/\D/g, ""); 
+      return t.length === 8 ? `${t.slice(0,4)}-${t.slice(4,6)}-${t.slice(6,8)}` : String(d || ""); };
+    const noteOf = r => {
+      const bits = [];
+      if (r.priceFrom) {
+        const per = ymd(r.priceFrom) + (r.priceTo ? `~${ymd(r.priceTo)}` : "~");
+        bits.push(`행사공급가(${per})`);
+      }
+      const c = QO.carryNote(r); if (c) bits.push(c);
+      return bits.join(" · ");
+    };
     const head = src.concat([`${v.vendor}→${CO()} 공급가`])
       .concat(perOrderShip ? ["배송비"] : []).concat(["정산금액"])
-      .concat(anyPromo ? ["행사"] : [])
-      .concat(anyCarry ? ["비고"] : []);
+      .concat(anyNote ? ["특이사항"] : []);
     const nCol = head.length;
     const moneyEnd = src.length + 1 + (perOrderShip ? 1 : 0) + 1;   // 정산금액 열
     const promoCol = moneyEnd + 1;                                  // 그 오른쪽이 '행사' 열
@@ -1545,13 +1559,13 @@ const ST = (() => {
     if (perOrderShip) tops.push(["배송비 합계", perOrderShip, "#,##0"]);
     if (v.ded) tops.push(["교환·반품 차감", -v.ded, "#,##0"]);
     tops.push(["정산금액", v.final, "#,##0"]);
+    if (v.payDay) tops.push(["입금일", v.payDay, "@"]);   // 금액이 아니라 글자 (서식 @ = 텍스트)
 
     ws.addRow([`${v.vendor} 정산서${p.label ? " — " + p.label : ""}`]);
     ws.getRow(1).font = { bold: true, size: 14 };
     // 업체용에는 작성일을 넣지 않는다 — 업체가 볼 것은 '어느 기간을 정산했는지'다
     const pr = periodRange();
-    ws.addRow([(pr ? `정산기간 ${pr} (출고완료된 주문건 기준) · ` : "") + `${v.rows.length}건`
-      + (v.payDay ? ` · 입금일 ${v.payDay}` : "")]);
+    ws.addRow([(pr ? `정산기간 ${pr} (출고완료된 주문건 기준) · ` : "") + `${v.rows.length}건`]);
     ws.addRow(["※ 아래 금액은 모두 부가세가 포함된 금액입니다."]);
     while (ws.rowCount < tops.length) ws.addRow([]);   // 요약이 길면 줄을 더 만든다
     ws.addRow([]);
@@ -1560,11 +1574,13 @@ const ST = (() => {
     tops.forEach((t, i) => {
       const row = ws.getRow(i + 1);
       const label = row.getCell(4), val = row.getCell(5);
-      label.value = t[0]; val.value = Math.round(t[1]);
+      label.value = t[0];
+      val.value = typeof t[1] === "number" ? Math.round(t[1]) : t[1];
       topCells[t[0]] = val;
-      const last = i === tops.length - 1;
+      const last = t[0] === "정산금액";
       const font = { bold: true, size: last ? 13 : 11 };
       if (last) font.color = { argb: "FF1A56DB" };
+      if (t[0] === "입금일") font.color = { argb: "FF1A56DB" };
       label.font = font; val.font = font;
       // 셀 서식은 새 객체로 만들어 넣는다 (공유 객체를 고치면 다른 칸까지 번진다)
       val.style = Object.assign({}, val.style, { numFmt: t[2] });
@@ -1615,11 +1631,10 @@ const ST = (() => {
       line.push(r.priced === false ? "미확정" : (r.unitCost == null ? "" : Math.round(r.unitCost) + merged));
       if (perOrderShip) line.push(r.shipMode === "건당" ? Math.round(r.shipTotal || 0) : 0);
       line.push(Math.round(r.pay || 0));
-      if (anyPromo) line.push(r.priceFrom ? "행사 공급가" : "");
-      if (anyCarry) line.push(QO.carryNote(r));
+      if (anyNote) line.push(noteOf(r));
       const row = ws.addRow(line);
-      // 행사 단가로 계산된 줄은 오른쪽 표시를 빨갛게 (셀 서식은 새 객체로 — 공유하면 표 전체에 번진다)
-      if (anyPromo && r.priceFrom) {
+      // 행사 단가로 계산된 줄은 특이사항을 빨갛게 (셀 서식은 새 객체로 — 공유하면 표 전체에 번진다)
+      if (anyNote && r.priceFrom) {
         const c = row.getCell(promoCol);
         c.font = { bold: true, color: { argb: "FFCC0000" } };
         c.alignment = { horizontal: "center", vertical: "middle" };
@@ -1689,11 +1704,9 @@ const ST = (() => {
       ws.getColumn(i + 1).width = w;
     });
     for (let n = src.length + 1; n <= moneyEnd; n++) { ws.getColumn(n).width = 14; ws.getColumn(n).numFmt = "#,##0"; }
-    if (anyPromo) ws.getColumn(promoCol).width = 12;
-    if (anyCarry) ws.getColumn(nCol).width = 20;      // 비고는 글자라 서식을 걸지 않는다
+    if (anyNote) ws.getColumn(promoCol).width = 34;   // 특이사항은 글자라 서식을 걸지 않는다
     alignSheet(ws, moneyEnd, src.length, hr);
-    if (anyPromo) ws.getColumn(promoCol).alignment = { horizontal: "center", vertical: "middle" };
-    if (anyCarry) ws.getColumn(nCol).alignment = { horizontal: "center", vertical: "middle" };
+    if (anyNote) ws.getColumn(promoCol).alignment = { horizontal: "center", vertical: "middle" };
     // alignSheet 는 열 단위로 정렬을 덮어쓴다 → 상단 요약은 그 뒤에 다시 오른쪽으로
     tops.forEach((t, i) => {
       const row = ws.getRow(i + 1);
@@ -1735,7 +1748,7 @@ const ST = (() => {
     // 입금일은 금액이 아니라 글자라 line() 대신 직접 적는다
     if (vendors.some(v => v.payDay))
       ws.addRow(["입금일"].concat(vendors.map(v => v.payDay || "-")).concat([""]))
-        .font = { color: { argb: "FF666666" } };
+        .font = { bold: true, color: { argb: "FF1A56DB" } };
     ws.addRow([]);
     line(`${co} 매출`, v => v.amount);
     line(`${co} 마진`, v => v.margin, { bold: true, color: "FF0A7A3D" });
