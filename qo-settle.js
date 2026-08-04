@@ -322,13 +322,10 @@ const ST = (() => {
     row.style.display = on ? "flex" : "none";
     if (!on) return;
     $("pb-fname").textContent = "📗 " + (pbRaw.name || "공급가표");
-    const w = fmtWhen(pbRaw.at);
-    const drv = pbRaw.drive && pbRaw.drive.id;
-    const from = drv ? "구글 드라이브" : "직접 올림";
-    // '최신화' = 내용을 읽어온 시각, '확인' = 드라이브 원본이 바뀌었는지 본 시각.
-    // 원본이 그대로면 다시 받지 않으므로 최신화 시각은 안 움직인다 — 그걸 오해하지 않게 둘 다 적는다.
-    const chk = drv && pbRaw.checkedAt ? ` · ${fmtWhen(pbRaw.checkedAt)} 확인함(변경 없음)` : "";
-    $("pb-when").textContent = w ? `🔄 ${w} 최신화 · ${from}${chk}` : "";
+    // 드라이브를 확인한 시각이 있으면 그게 곧 '최신화된 시점'이다 (바뀐 게 없어도 최신 상태다).
+    // 한 줄로 짧게만 적는다.
+    const when = fmtWhen(pbRaw.checkedAt || pbRaw.at);
+    $("pb-when").textContent = when ? `🔄 ${when} 최신화` : "";
   }
   function drawPriceBook() {
     drawPbLoaded();
