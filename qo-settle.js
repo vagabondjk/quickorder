@@ -295,11 +295,23 @@ const ST = (() => {
 
   /* 올려둔 공급가표가 있다는 걸 한눈에 — 초록 상자 + 작은 '해제' 버튼.
      공급가표는 한 번 올려두고 몇 달을 쓰는 파일이라, 지금 뭐가 걸려 있는지가 제일 중요하다. */
+  /* 언제 읽어온 값인지 — 공급가표는 드라이브에서 수시로 바뀌어서,
+     지금 화면의 단가가 언제 기준인지 안 보이면 옛 값으로 정산해도 모른다. */
+  function fmtWhen(ms) {
+    const d = new Date(Number(ms) || 0);
+    if (!ms || isNaN(d.getTime())) return "";
+    const p = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
   function drawPbLoaded() {
     const row = $("pb-loaded"); if (!row) return;
     const on = hasBook();
     row.style.display = on ? "flex" : "none";
-    if (on) $("pb-fname").textContent = "📗 " + (pbRaw.name || "공급가표");
+    if (!on) return;
+    $("pb-fname").textContent = "📗 " + (pbRaw.name || "공급가표");
+    const w = fmtWhen(pbRaw.at);
+    const from = pbRaw.drive && pbRaw.drive.id ? "구글 드라이브" : "직접 올림";
+    $("pb-when").textContent = w ? `🔄 ${w} 최신화 · ${from}` : "";
   }
   function drawPriceBook() {
     drawPbLoaded();
