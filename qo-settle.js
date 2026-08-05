@@ -39,6 +39,19 @@ const ST = (() => {
     // 고객이 실제로 결제한 금액. 이건 매출 계산에 쓰지 않고 화면에 '쇼핑몰 매출' 로만 보여준다.
     // 여기서 우리 매출을 빼면 몰이 가져가는 몫(쇼핑몰 수수료)이 나온다.
     { k: "mallAmount", n: "고객 결제금액", kw: ["결제금액", "판매가(쇼핑몰)", "총결제금액", "상품결제금액"] },
+    // 몰 정산자료와 이어붙일 열. 'orderNo' 는 사방넷 번호가 먼저 잡혀서 따로 둔다.
+    { k: "mallOrderNo", n: "쇼핑몰 주문번호", kw: ["주문번호(쇼핑몰)", "쇼핑몰주문번호", "몰주문번호"] },
+  ];
+
+  /* 쇼핑몰이 준 '공급사 대금지급 내역' — 우리가 실제로 받은 금액(매입금액)이 적혀 있다.
+     통합파일의 '원가' 는 최초 등록가라 행사 등으로 바뀐 값이 반영되지 않는다.
+     ★ 매입금액은 '줄 합계'다 (수량이 이미 반영돼 있다). 수량을 다시 곱하면 안 된다. */
+  const PAY_FIELDS = [
+    { k: "orderNo", n: "주문번호", kw: ["주문번호", "주문no", "order"], req: true },
+    { k: "product", n: "상품명", kw: ["상품명", "제품명", "품목"] },
+    { k: "option", n: "옵션", kw: ["단품명", "옵션명", "옵션", "규격"] },
+    { k: "qty", n: "수량", kw: ["주문수량", "수량", "개수"] },
+    { k: "buy", n: "매입금액(우리가 받는 돈)", kw: ["매입금액", "매입가", "공급금액", "지급액", "정산금액"], req: true },
   ];
 
   /* 업체별 공급가표 — 업체에 '지급할' 상품별 단가. 통합 파일엔 없어서 따로 올린다. */
@@ -61,6 +74,8 @@ const ST = (() => {
   ];
 
   let files = [];        // [{name, cols, rows, map, sig}]
+  let payFiles = [];     // 쇼핑몰 대금지급 내역 [{name, cols, rows, map, sig}]
+  let payMaps = {};      // 몰마다 양식이 달라, 한 번 맞춘 열은 기억한다
   let maps = {};
   let result = null;     // 계산 결과
   let useCs = true;
@@ -98,6 +113,7 @@ const ST = (() => {
     aliasInfo = await DB.get("priceAliasInfo", {}) || {};
     brandFix = await DB.get("settleBrandVendor", {}) || {};
     rewards = await DB.get("mdRewards", []) || [];      // 지난 정산에서 정해둔 MD 리워드 조건
+    payMaps = await DB.get("payMaps", {}) || {};
     // v6.3.9 에 잠깐 있던 '리워드 없음' 은 없앴다. 요율 0 으로 바꿔 그대로 잠자게 둔다
     // (매출 대비로 되살리면 안 주던 리워드가 갑자기 붙는다)
     rewards.forEach(r => { if (r.base === "없음") { r.base = "매출"; r.rate = 0; } });
@@ -454,7 +470,7 @@ const ST = (() => {
       maps[sig] = m; await DB.set("settleMaps", maps);
       files = files.filter(f => f.name !== name);
       files.push({ name, cols: pv.columns, rows: pv.rows, map: m, sig });
-      drawFiles(); drawPriceBook(); drawBrands(); drawMd(); refresh();
+      drawFiles(); drawPriceBook(); drawPay(); drawBrands(); drawMd(); refresh();
       msg("msg-s", "ok", `✔ ${name} — ${pv.rows.length}행 불러왔어요.`);
     };
     if (saved && MAP.ok(auto, FIELDS)) { await put(auto); return; }
@@ -505,7 +521,7 @@ const ST = (() => {
     box.querySelectorAll(".vdel").forEach(b => b.onclick = () => {
       files.splice(Number(b.dataset.i), 1);
       result = null; $("result-s").style.display = "none";
-      drawFiles(); drawPriceBook(); drawBrands(); drawMd(); refresh();
+      drawFiles(); drawPriceBook(); drawPay(); drawBrands(); drawMd(); refresh();
     });
     const all = $("st-clear-all");
     if (all) all.onclick = () => {
@@ -514,7 +530,7 @@ const ST = (() => {
       const fi = $("f-st"); if (fi) fi.value = "";
       $("result-s").style.display = "none";
       msg("msg-s", "", "");
-      drawFiles(); drawPriceBook(); drawBrands(); drawMd(); refresh();
+      drawFiles(); drawPriceBook(); drawPay(); drawBrands(); drawMd(); refresh();
     };
   }
 
@@ -551,7 +567,8 @@ const ST = (() => {
           orderNo: s(g(r, "orderNo")),
           product, option, qty,
           unitPrice: unitPrice || null,
-          amount, mallAmount,
+          amount, mallAmount, baseAmount: amount,     // baseAmount = 보정 전 매출(되돌릴 수 있게)
+          mallOrderNo: f.map.mallOrderNo === undefined ? "" : s(g(r, "mallOrderNo")),
           vendor, brand,
           invoice: f.map.invoice === undefined ? null : s(g(r, "invoice")),
         });
@@ -721,6 +738,7 @@ const ST = (() => {
     const hasInvCol = files.some(f => f.map.invoice !== undefined);
     const unshipped = hasInvCol ? rows.filter(r => !String(r.invoice || "").trim()) : [];
     const shipped = hasInvCol ? rows.filter(r => String(r.invoice || "").trim()) : rows;
+    const fix = applyPayFix(rows);          // 쇼핑몰 대금지급 내역으로 매출 보정
     // 지급액은 언제나 공급가표 기준이다 — 공급단가 × 수량 + 배송비.
     for (const r of shipped) {
       const v = vOf(r);
@@ -787,11 +805,13 @@ const ST = (() => {
       loose: sum("loose"),
       usedBook: vendors.some(v => v.rows.some(r => r.mode === "book")),
     };
+    result.payFix = fix;
     result.check = reconcile(rows, shipped, unshipped, vendors, unpriced);
     result.unshipped = unshipped;
     result.period = periodOf(shipped.length ? shipped : rows);
     drawResult();
     drawMd();          // MD 카드에 계산된 리워드 금액을 채워 넣는다
+    drawPayState();
   }
 
   /* 파트너 MD 리워드 — 조건 편집 화면.
@@ -948,6 +968,115 @@ const ST = (() => {
       await saveRewards(); drawMd(); if (result) calc();
     });
   }
+
+  /* 쇼핑몰 대금지급 내역 불러오기 — 몰마다 양식이 달라 열 맞추기를 한 번만 하면 기억한다 */
+  async function addPayFile(buf, name) {
+    const wb = await QO.loadWorkbook(buf.slice(0));
+    const pv = QO.previewAny(wb, 50000);
+    if (!pv.columns.length) throw new Error("표를 찾지 못했어요.");
+    const sig = MAP.signature(pv.columns);
+    const auto = Object.assign(MAP.autoMap(pv.columns, PAY_FIELDS), payMaps[sig] || {});
+    const put = async m => {
+      payMaps[sig] = m; await DB.set("payMaps", payMaps);
+      payFiles = payFiles.filter(f => f.name !== name);
+      payFiles.push({ name, cols: pv.columns, rows: pv.rows, map: m, sig });
+      drawPay(); if (result) calc();
+      msg("msg-pay", "ok", `✔ ${name} — ${pv.rows.length}행 불러왔어요.`);
+    };
+    if (MAP.ok(auto, PAY_FIELDS)) return put(auto);
+    MAP.open({ title: "대금지급 내역 열 맞추기", columns: pv.columns, fields: PAY_FIELDS, saved: auto, onOk: put });
+  }
+  function drawPay() {
+    const box = $("pay-loaded"); if (!box) return;
+    if (!payFiles.length) { box.style.display = "none"; box.innerHTML = ""; drawPayState(); return; }
+    box.style.display = "block";
+    box.innerHTML = payFiles.map((f, i) => `<div style="display:flex;align-items:center;gap:8px;
+        padding:9px 11px;border:1px solid var(--ok);border-radius:9px;background:var(--ok-soft);margin-bottom:5px">
+        <span style="flex:1;min-width:0;font-size:12.5px;word-break:break-all">📗 <b>${esc(f.name)}</b>
+          <span style="color:var(--muted)"> · ${f.rows.length}행</span></span>
+        <button class="minibtn paydel" data-i="${i}" style="flex:none">해제</button></div>`).join("");
+    box.querySelectorAll(".paydel").forEach(b => b.onclick = () => {
+      payFiles.splice(Number(b.dataset.i), 1);
+      drawPay(); if (result) calc();
+    });
+    drawPayState();
+  }
+  /* 보정 결과 — 몇 건이 바뀌었고 얼마가 달라졌는지, 못 붙은 건 몇 건인지 */
+  function drawPayState() {
+    const el = $("pay-state"); if (!el) return;
+    const f = result && result.payFix;
+    if (!f) { el.innerHTML = ""; return; }
+    const d = f.after - f.before;
+    el.innerHTML = `<div style="text-align:left;padding:10px;border:1px solid var(${f.missed ? "--warn" : "--ok"});
+        border-radius:9px;background:var(${f.missed ? "--warn-soft" : "--ok-soft"})">
+        <b style="color:var(${f.missed ? "--warn" : "--ok"})">${f.missed ? "⚠" : "✔"} 매출 보정 ${f.fixed}건</b>
+        <div style="margin-top:5px;font-size:12px;color:var(--muted);line-height:1.7">
+          보정 전 ${won(f.before)} → 보정 후 ${won(f.after)}
+          <b style="color:var(${d < 0 ? "--danger" : "--ok"})"> (${d >= 0 ? "+" : ""}${won(d)})</b><br>
+          값이 같아 그대로 둔 건 ${f.same}건${f.missed ? ` · <b style="color:var(--warn)">대금지급 내역에 없어 원가 그대로 둔 건 ${f.missed}건</b>` : ""}</div>
+        ${f.missed ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px;font-weight:700">못 찾은 ${f.missed}건 보기</summary>
+          <div style="font-size:11.5px;color:var(--muted);line-height:1.7;margin-top:4px">${
+            f.missList.slice(0, 30).map(x => `· ${esc(x.mall || "")} ${esc(x.no)} — ${esc(String(x.product || "").slice(0, 30))}${x.why ? ` <b>(${esc(x.why)})</b>` : ""}`).join("<br>")}${
+            f.missList.length > 30 ? `<br>· 외 ${f.missed - 30}건` : ""}</div></details>` : ""}
+      </div>`;
+  }
+
+  /* =================================================================
+     랩노마드 공급가 보정
+     ─────────────────────────────────────────────────────────────────
+     통합파일의 '원가' 는 상품을 처음 등록할 때 넣은 값이다.
+     행사 등으로 우리가 몰에 넘기는 값이 바뀌어도 통합파일엔 반영되지 않아
+     매출이 실제와 어긋난다. 몰이 주는 '공급사 대금지급 내역' 의 매입금액이
+     우리가 실제로 받은 돈이므로 그걸로 덮어쓴다.
+
+     · 잇는 키 : 몰 주문번호 → 한 주문에 상품이 여러 개면 상품명으로 가른다
+     · 매입금액은 '줄 합계' 다. 수량을 다시 곱하지 않는다.
+     · 못 찾은 줄은 원래 값을 그대로 둔다. 조용히 넘기지 않고 몇 건인지 알린다.
+     ================================================================= */
+  function payIndex() {
+    const idx = {};
+    payFiles.forEach(f => {
+      const g = (r, k) => (f.map[k] === undefined ? "" : r[f.map[k]]);
+      f.rows.forEach(r => {
+        const no = s(g(r, "orderNo")); if (!no) return;
+        (idx[no] = idx[no] || []).push({
+          product: s(g(r, "product")), option: s(g(r, "option")),
+          qty: num(g(r, "qty")), buy: num(g(r, "buy")), src: f.name,
+        });
+      });
+    });
+    return idx;
+  }
+  function applyPayFix(rows) {
+    // 보정 파일이 없으면 원래 값으로 되돌려 둔다 (파일을 뺐을 때 옛 보정이 남지 않게)
+    rows.forEach(r => { if (r.baseAmount !== undefined) r.amount = r.baseAmount; r.payFixed = false; });
+    if (!payFiles.length) return null;
+    const idx = payIndex();
+    const out = { files: payFiles.length, fixed: 0, same: 0, missed: 0, before: 0, after: 0, missList: [] };
+    rows.forEach(r => {
+      const no = s(r.mallOrderNo); if (!no) { out.missed++; return; }
+      const cand = idx[no];
+      if (!cand || !cand.length) {
+        out.missed++;
+        if (out.missList.length < 200) out.missList.push({ no, product: r.product, mall: r.mall, date: r.date });
+        return;
+      }
+      // 한 주문에 여러 줄이면 상품명으로 가른다. 그래도 못 가리면 손대지 않는다.
+      let m = cand.length === 1 ? cand[0] : cand.find(x => x.product === s(r.product));
+      if (!m && cand.length > 1) m = cand.find(x => normPay(x.product) === normPay(r.product));
+      if (!m) {
+        out.missed++;
+        if (out.missList.length < 200) out.missList.push({ no, product: r.product, mall: r.mall, date: r.date, why: "상품이 여러 개라 못 가림" });
+        return;
+      }
+      const before = r.amount || 0, after = Math.round(m.buy);
+      out.before += before; out.after += after;
+      r.amount = after; r.payFixed = true;
+      if (Math.round(before) === after) out.same++; else out.fixed++;
+    });
+    return out;
+  }
+  const normPay = t => String(t == null ? "" : t).replace(/[\s·・.,()\[\]/\-_]/g, "").toLowerCase();
 
   /* =================================================================
      파트너 MD 리워드
@@ -1150,6 +1279,10 @@ const ST = (() => {
         { small: true, minus: true, rate: rateOf(mallFee, d.mallAmount) });
     }
     h += L(`${esc(CO())} 매출`, d.amount);
+    // 몰 대금지급 내역으로 보정했으면 그 사실을 매출 바로 밑에 남긴다
+    if (d.payFix && d.payFix.fixed)
+      h += L(`└ 공급가 보정 ${d.payFix.fixed}건 적용${d.payFix.missed ? ` · 미보정 ${d.payFix.missed}건` : ""}`,
+        d.payFix.after - d.payFix.before, { small: true });
     if (d.unpricedAmount)
       h += L("└ 단가 못 찾은 건 (지급·마진에서 빠짐)", d.unpricedAmount, { small: true, color: "var(--danger)" });
     if (d.ded) h += L("CS 차감 (교환·반품)", d.ded, { minus: true, color: "var(--danger)" });
@@ -1186,6 +1319,7 @@ const ST = (() => {
       (per.label ? `<div style="margin-bottom:6px;font-size:13px"><b>📅 정산월 ${esc(per.label)}</b>
          <span style="color:var(--muted);font-size:11.5px"> · 주문일 ${esc(QO.fmtDate(per.from))} ~ ${esc(QO.fmtDate(per.to))} · 작성일 ${esc(QO.fmtDate(QO.todayStr()))}</span></div>` : "") +
       moneyLines({
+        payFix: result.payFix,
         mallAmount: t.mallAmount, amount: t.amount, pay: t.final, margin: t.margin,
         unpricedAmount: t.unpricedAmount, ded: t.ded, netMargin: t.netMargin,
         feeRows: result.fees || [],
@@ -1970,6 +2104,24 @@ const ST = (() => {
         }
       },
     });
+    const takePay = async f => {
+      try { await addPayFile(await readFile(f), f.name); }
+      catch (e) { msg("msg-pay", "err", "⚠ " + f.name + " — " + e.message); }
+    };
+    $("f-pay").addEventListener("change", async function () {
+      const fs = [...this.files]; this.value = "";
+      for (const f of fs) await takePay(f);
+    });
+    bindDrop("drop-pay", async fs => { for (const f of fs) await takePay(f); });
+    $("pay-drive").onclick = () => openDrivePicker({
+      key: "paydetail", multiple: true, title: "드라이브에서 대금지급 내역 가져오기",
+      onPick: async fs => {
+        for (const f of fs) {
+          try { const r = await GMAIL.driveFetchExcel(f.id); await addPayFile(r.buf, r.name || f.name); }
+          catch (e) { msg("msg-pay", "err", "⚠ " + f.name + " — " + e.message); }
+        }
+      },
+    });
     $("st-md-add").onclick = async () => {
       rewards.push({ id: "md" + Date.now(), md: "", picks: {} });
       await saveRewards(); drawMd();
@@ -2046,7 +2198,7 @@ const ST = (() => {
   }
   async function onShow() {
     if (!drawn) { await load(); drawn = true; }
-    drawFiles(); drawPriceBook(); drawBrands(); drawMd(); refresh();
+    drawFiles(); drawPriceBook(); drawPay(); drawBrands(); drawMd(); refresh();
     if (result) drawResult();
     refreshPriceBook().catch(() => {});     // 탭에 들어올 때도 (아직 확인 전이면)
   }
@@ -2058,6 +2210,8 @@ const ST = (() => {
            // 실제 calc() 와 같은 순서로 돌린다 (수수료 → 리워드 → 최종 마진)
            _rewards: (rules, vendors) => { rewards = rules; calcMallFees(vendors); return calcRewards(vendors); },
            _money: moneyLines,
+           /* 검증용 — 대금지급 내역 보정을 화면 없이 돌려본다 */
+           _payfix: (pfs, rows) => { payFiles = pfs; return applyPayFix(rows); },
            _tpl: priceBookTemplate,
            _pbx: (raw) => { pbRaw = raw; return priceBookExcel(); } };
 })();

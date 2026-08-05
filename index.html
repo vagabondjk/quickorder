@@ -565,10 +565,23 @@
     </div>
 
 
+    <div class="card" id="st-card-pay">
+      <h2><span class="n">5</span>랩노마드 공급가 보정 <span style="font-size:11px;font-weight:700;color:var(--muted)">(선택)</span></h2>
+      <div id="pay-loaded" style="display:none;margin:2px 0 10px"></div>
+      <div class="setrow" style="margin:0 0 8px"><span style="flex:1"></span>
+        <button class="minibtn" id="pay-drive">📁 구글드라이브에서 업로드하기</button></div>
+      <label class="drop" id="drop-pay" style="margin-top:0;padding:16px">
+        디바이스 파일 선택 또는 끌어오기
+        <input type="file" id="f-pay" accept=".xlsx,.xlsm" multiple>
+      </label>
+      <div class="pvfoot" id="pay-state" style="margin-top:10px"></div>
+      <div class="msg" id="msg-pay"></div>
+    </div>
+
     <button class="go" id="run-s" disabled><span class="spin"></span><span id="run-s-lbl">업체별 정산내역 추출</span></button>
 
     <div class="card" id="result-s" style="display:none;margin-top:14px">
-      <h2><span class="n">5</span>정산 결과</h2>
+      <h2><span class="n">6</span>정산 결과</h2>
       <div class="setrow" style="margin-bottom:8px"><span style="flex:1;font-size:11px;color:var(--faint)"></span>
         <button class="minibtn" data-mailtpl="settle">✏️ 메일내용 수정</button></div>
       <div class="totbox" id="st-total"></div>

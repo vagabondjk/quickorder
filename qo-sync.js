@@ -17,7 +17,7 @@ const SYNC = (() => {
     // 지운 업체 양식 표시 — 이게 빠지면 다른 기기의 백업이 지운 양식을 되살린다
     "formsDeleted",
     "priceBook", "priceAliases", "priceAliasInfo", "settleBrandVendor", "settleVendors", "settleCarry",
-    "mdRewards",        // 파트너 MD 리워드 조건 — 한 번 정하면 다음 달에도 그대로 쓴다
+    "mdRewards", "payMaps",        // 파트너 MD 리워드 조건 — 한 번 정하면 다음 달에도 그대로 쓴다
 
     // v6.1.6 — 메일 문구
     "mailTemplates"];
