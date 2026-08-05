@@ -469,13 +469,23 @@ $("drv-link-go").onclick = async () => {
     await drvPick([{ id, name: info.name, mimeType: info.mimeType }]);
   } catch (e) { $("drv-msg").textContent = "⚠ " + e.message; }
 };
-$("drv-done").onclick = async () => { if (DRV.sel.size) await drvPick([...DRV.sel.values()]); };
-$("drv-folder").onclick = async () => {
+/* 아무것도 안 고르면 '이 폴더 전부', 고른 게 있으면 '그것만'.
+   버튼 글자가 무슨 일이 일어날지 그대로 말해주게 한다 (예전엔 빈 선택이면 조용히 아무 일도 안 했다). */
+function drvDoneLabel() {
+  const d = $("drv-done"); if (!d || !DRV.multiple) return;
+  const n = (DRV.files || []).length;
+  d.textContent = DRV.sel.size ? `선택 완료 (${DRV.sel.size}개)`
+    : n ? `전체 가져오기 (${n}개)` : "선택 완료";
+  d.style.opacity = (DRV.sel.size || n) ? "" : ".55";
+}
+$("drv-done").onclick = async () => {
+  if (DRV.sel.size) return drvPick([...DRV.sel.values()]);
   const fs = (DRV.files || []).map(f => ({ id: f.id, name: f.name, mimeType: f.mimeType }));
-  if (!fs.length) return;
+  if (!fs.length) { $("drv-msg").textContent = "⚠ 이 폴더에는 가져올 엑셀 파일이 없어요."; return; }
   if (fs.length > 1 && !confirm(`이 폴더의 파일 ${fs.length}개를 모두 가져올까요?`)) return;
   await drvPick(fs);
 };
+
 
 /* opts: { key, title, sub, multiple, onPick(files) } — files: [{id,name,mimeType}]
    key: 용도별 기본 폴더 저장용 (order/tpl/sab/rep) → 다음부터 그 폴더가 바로 열림 */
@@ -601,15 +611,9 @@ async function drvSearch(q) {
 }
 function drvRender(items, allowFolders) {
   const box = $("drv-list"); box.innerHTML = "";
-  // 폴더째 가져오기 — 지금 화면의 파일(폴더 제외)을 통째로 고른다.
-  // 몰 대금지급 내역처럼 파일이 여러 개일 때 하나씩 누르지 않아도 된다.
+  // 지금 화면의 파일(폴더 제외). 아무것도 안 고르고 눌렀을 때 통째로 가져오는 데 쓴다.
   DRV.files = items.filter(f => f.mimeType !== GFOLDER);
-  const fb = $("drv-folder");
-  if (fb) {
-    const on = DRV.multiple && DRV.files.length > 0;
-    fb.style.display = on ? "" : "none";
-    fb.textContent = on ? `📂 이 폴더 전부 (${DRV.files.length}개)` : "";
-  }
+  drvDoneLabel();
   if (!items.length) { box.innerHTML = '<div class="empty">엑셀/시트 파일이 없어요.</div>'; return; }
   items.forEach(f => {
     const folder = f.mimeType === GFOLDER;
@@ -625,7 +629,8 @@ function drvRender(items, allowFolders) {
       if (DRV.multiple) {
         if (DRV.sel.has(f.id)) DRV.sel.delete(f.id); else DRV.sel.set(f.id, f);
         el.classList.toggle("on", DRV.sel.has(f.id));
-        $("drv-done").textContent = DRV.sel.size ? `선택 완료 (${DRV.sel.size}개)` : "선택 완료";
+        drvDoneLabel();
+        $("drv-msg").textContent = "";
       } else drvPick([f]);
     };
     box.appendChild(el);
