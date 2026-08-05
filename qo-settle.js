@@ -1011,7 +1011,7 @@ const ST = (() => {
         border-radius:9px;background:var(${f.missed ? "--warn-soft" : "--ok-soft"})">
         <b style="color:var(${f.missed ? "--warn" : "--ok"})">${f.missed ? "⚠" : "✔"} 매출 보정 ${f.fixed}건</b>
         <div style="margin-top:5px;font-size:12px;color:var(--muted);line-height:1.7">
-          보정 전 ${won(f.before)} → 보정 후 ${won(f.after)}
+          매출 ${won(f.before)} → ${won(f.after)}
           <b style="color:var(${d < 0 ? "--danger" : "--ok"})"> (${d >= 0 ? "+" : ""}${won(d)})</b><br>
           값이 같아 그대로 둔 건 ${f.same}건${f.missed ? ` · <b style="color:var(--warn)">원가 그대로 둔 건 ${f.missed}건</b>` : ""}${
             f.dup ? `<br><b style="color:var(--danger)">⚠ 파일끼리 금액이 어긋난 건 ${f.dup}건 — 어느 쪽이 맞는지 확인이 필요합니다</b>` : ""}</div>
@@ -1087,10 +1087,12 @@ const ST = (() => {
       }
       const m = { buy: amts[0] };
       const before = r.amount || 0, after = Math.round(m.buy);
-      out.before += before; out.after += after;
       r.amount = after; r.payFixed = true;
       if (Math.round(before) === after) out.same++; else out.fixed++;
     });
+    /* 합계는 '전체 줄' 로 낸다. 붙은 줄만 더하면 아래 '랩노마드 매출' 과 숫자가 달라
+       어느 쪽이 맞는지 헷갈린다 (못 붙은 줄은 원가 그대로라 앞뒤가 같다). */
+    rows.forEach(r => { out.before += r.baseAmount || 0; out.after += r.amount || 0; });
     return out;
   }
   const normPay = t => String(t == null ? "" : t).replace(/[\s·・.,()\[\]/\-_]/g, "").toLowerCase();
