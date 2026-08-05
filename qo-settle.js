@@ -1013,7 +1013,8 @@ const ST = (() => {
         <div style="margin-top:5px;font-size:12px;color:var(--muted);line-height:1.7">
           보정 전 ${won(f.before)} → 보정 후 ${won(f.after)}
           <b style="color:var(${d < 0 ? "--danger" : "--ok"})"> (${d >= 0 ? "+" : ""}${won(d)})</b><br>
-          값이 같아 그대로 둔 건 ${f.same}건${f.missed ? ` · <b style="color:var(--warn)">대금지급 내역에 없어 원가 그대로 둔 건 ${f.missed}건</b>` : ""}</div>
+          값이 같아 그대로 둔 건 ${f.same}건${f.missed ? ` · <b style="color:var(--warn)">원가 그대로 둔 건 ${f.missed}건</b>` : ""}${
+            f.dup ? `<br><b style="color:var(--danger)">⚠ 파일끼리 금액이 어긋난 건 ${f.dup}건 — 어느 쪽이 맞는지 확인이 필요합니다</b>` : ""}</div>
         ${f.missed ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px;font-weight:700">못 찾은 ${f.missed}건 보기</summary>
           <div style="font-size:11.5px;color:var(--muted);line-height:1.7;margin-top:4px">${
             f.missList.slice(0, 30).map(x => `· ${esc(x.mall || "")} ${esc(x.no)} — ${esc(String(x.product || "").slice(0, 30))}${x.why ? ` <b>(${esc(x.why)})</b>` : ""}`).join("<br>")}${
@@ -1052,7 +1053,7 @@ const ST = (() => {
     rows.forEach(r => { if (r.baseAmount !== undefined) r.amount = r.baseAmount; r.payFixed = false; });
     if (!payFiles.length) return null;
     const idx = payIndex();
-    const out = { files: payFiles.length, fixed: 0, same: 0, missed: 0, before: 0, after: 0, missList: [] };
+    const out = { files: payFiles.length, fixed: 0, same: 0, missed: 0, dup: 0, before: 0, after: 0, missList: [] };
     rows.forEach(r => {
       const no = s(r.mallOrderNo); if (!no) { out.missed++; return; }
       const cand = idx[no];
@@ -1061,14 +1062,25 @@ const ST = (() => {
         if (out.missList.length < 200) out.missList.push({ no, product: r.product, mall: r.mall, date: r.date });
         return;
       }
-      // 한 주문에 여러 줄이면 상품명으로 가른다. 그래도 못 가리면 손대지 않는다.
-      let m = cand.length === 1 ? cand[0] : cand.find(x => x.product === s(r.product));
-      if (!m && cand.length > 1) m = cand.find(x => normPay(x.product) === normPay(r.product));
-      if (!m) {
+      /* 한 주문에 여러 줄이면 상품명으로 가른다.
+         ★ 몰 정산기준(배송완료 ~25일)과 우리 기준(말일)이 달라 몰별로 파일을 2개씩 받는데,
+           같은 주문이 두 파일에 겹쳐 들어올 수 있다. 그때 금액이 서로 다르면
+           어느 쪽이 맞는지 알 수 없으므로 찍지 않고 미보정으로 남긴다. */
+      let hits = cand.length === 1 ? cand.slice() : cand.filter(x => x.product === s(r.product));
+      if (!hits.length && cand.length > 1) hits = cand.filter(x => normPay(x.product) === normPay(r.product));
+      if (!hits.length) {
         out.missed++;
         if (out.missList.length < 200) out.missList.push({ no, product: r.product, mall: r.mall, date: r.date, why: "상품이 여러 개라 못 가림" });
         return;
       }
+      const amts = [...new Set(hits.map(x => Math.round(x.buy)))];
+      if (amts.length > 1) {
+        out.missed++; out.dup++;
+        if (out.missList.length < 200) out.missList.push({ no, product: r.product, mall: r.mall, date: r.date,
+          why: `파일 ${[...new Set(hits.map(x => x.src))].length}개에 금액이 다르게 있음 (${amts.map(a => won(a)).join(" / ")})` });
+        return;
+      }
+      const m = hits[0];
       const before = r.amount || 0, after = Math.round(m.buy);
       out.before += before; out.after += after;
       r.amount = after; r.payFixed = true;
