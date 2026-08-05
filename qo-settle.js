@@ -1125,7 +1125,10 @@ const ST = (() => {
     vendors.forEach(v => {
       const by = {};
       v.rows.forEach(r => {
+        r.mallFee = 0;
         const f = mallFeeOf(r.mall); if (!f) return;
+        // 줄마다 남겨둔다 — MD 리워드는 수수료를 뺀 금액에서 책정한다
+        r.mallFee = (r.amount || 0) * f.rate / 100;
         const g = by[f.label] = by[f.label] || { label: f.label, rate: f.rate, amount: 0, count: 0 };
         g.amount += r.amount || 0; g.count++;
       });
@@ -1155,12 +1158,18 @@ const ST = (() => {
           ? v.rows.filter(r => bl.indexOf(r.brand || "(브랜드 없음)") >= 0)
           : v.rows;                                    // 빈 배열 = 그 업체 전체
         if (!pick.length) return;
+        /* ★ MD 리워드는 '수수료를 뺀 뒤' 금액에서 책정한다.
+             카드수수료(삼성계열 1.7%)는 몰이 떼가서 우리 손에 안 들어오는 돈이라
+             그 위에 리워드를 얹으면 실제보다 많이 나간다. */
         const amount = pick.reduce((s2, r) => s2 + (r.amount || 0), 0);
+        const fee = pick.reduce((s2, r) => s2 + (r.mallFee || 0), 0);
         const pay = pick.reduce((s2, r) => s2 + (r.pay || 0), 0);
-        const base = rewardBase(p) === "이익" ? amount - pay : amount;
+        const net = amount - fee;
+        const base = rewardBase(p) === "이익" ? net - pay : net;
         const won2 = Math.round(base * rate / 100);
         const line = { id: rule.id, md, vendor: v.vendor, brands: bl.slice(),
-                       base: rewardBase(p), rate, baseAmount: base, reward: won2, count: pick.length };
+                       base: rewardBase(p) + (fee ? "−수수료" : ""), rate,
+                       baseAmount: base, reward: won2, count: pick.length };
         v.reward += won2; v.rewardRows.push(line);
         tot.reward += won2; tot.baseAmount += base; tot.count += pick.length; tot.vendors++;
         const g = byMd[md] = byMd[md] || { md, reward: 0, lines: [] };
