@@ -846,9 +846,6 @@ const ST = (() => {
       <div class="totline" style="border-top:1px solid var(--line);margin-top:6px;padding-top:8px">
         <b style="font-size:14px">MD 리워드 합계</b>
         <b style="font-size:19px;font-weight:800;color:var(--brand)">${won(t.reward)}</b></div>
-      <div class="totline" style="font-size:12px;color:var(--muted);padding-top:4px">
-        <span>${esc(CO())} 마진 ${won(t.margin)}${t.fee ? ` − 수수료 ${won(t.fee)}` : ""} − 리워드 ${won(t.reward)}</span>
-        <b>최종 ${won(t.netMargin)}</b></div>
     </div>`;
   }
   function drawMd() {
@@ -1179,7 +1176,7 @@ const ST = (() => {
         const base = rewardBase(p) === "이익" ? net - pay : net;
         const won2 = Math.round(base * rate / 100);
         const line = { id: rule.id, md, vendor: v.vendor, brands: bl.slice(),
-                       base: rewardBase(p) + (fee ? "−수수료" : ""), rate,
+                       base: "담당업체" + rewardBase(p) + (fee ? "−수수료" : ""), rate,
                        baseAmount: base, reward: won2, count: pick.length };
         v.reward += won2; v.rewardRows.push(line);
         tot.reward += won2; tot.baseAmount += base; tot.count += pick.length; tot.vendors++;
