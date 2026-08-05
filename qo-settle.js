@@ -833,13 +833,22 @@ const ST = (() => {
     if (!result || !result.total || !result.total.reward) return "";
     const t = result.total;
     return `<div style="margin-top:12px;padding:12px 14px;border:1.5px solid var(--brand);border-radius:11px">
-      ${(result.md || []).map(m => `<div class="totline" style="font-size:12.5px">
-        <span>${esc(m.md)}</span><b>${won(m.reward)}</b></div>`).join("")}
+      ${(result.md || []).map(m => {
+        // 요율이 조건마다 다를 수 있어, 기준액을 더해 실효 요율로 적는다
+        const b = (m.lines || []).reduce((s2, x) => s2 + x.baseAmount, 0);
+        const rs = [...new Set((m.lines || []).map(x => x.rate))];
+        const kinds = [...new Set((m.lines || []).map(x => x.base))];
+        return `<div class="totline" style="font-size:12.5px;padding-top:2px">
+            <span>${esc(m.md)}</span><b>${won(m.reward)}</b></div>
+          <div style="font-size:11px;color:var(--faint);padding-bottom:4px">${
+            esc(kinds.join("·"))} ${won(b)} × ${rs.length === 1 ? rs[0] : rateOf(m.reward, b).replace("%", "")}% = ${won(m.reward)}</div>`;
+      }).join("")}
       <div class="totline" style="border-top:1px solid var(--line);margin-top:6px;padding-top:8px">
         <b style="font-size:14px">MD 리워드 합계</b>
         <b style="font-size:19px;font-weight:800;color:var(--brand)">${won(t.reward)}</b></div>
       <div class="totline" style="font-size:12px;color:var(--muted);padding-top:4px">
-        <span>${esc(CO())} 마진 ${won(t.margin)} − 리워드</span><b>최종 ${won(t.netMargin)}</b></div>
+        <span>${esc(CO())} 마진 ${won(t.margin)}${t.fee ? ` − 수수료 ${won(t.fee)}` : ""} − 리워드 ${won(t.reward)}</span>
+        <b>최종 ${won(t.netMargin)}</b></div>
     </div>`;
   }
   function drawMd() {
@@ -894,6 +903,8 @@ const ST = (() => {
             <b style="flex:none;font-size:12px">%</b>
             <b style="flex:none;font-size:12.5px;color:${line && line.reward ? "var(--brand)" : "var(--faint)"}">${
               line ? won(line.reward) : "—"}</b></div>
+          ${line ? `<div style="font-size:11px;color:var(--faint);padding:0 12px 2px">${
+            esc(line.base)} ${won(line.baseAmount)} × ${line.rate}% = ${won(line.reward)}</div>` : ""}
           <div class="brands">${bs.length ? chips
             : `<span style="font-size:11.5px;color:var(--muted)">배정된 브랜드가 없습니다</span>`}</div></div>`;
       }).join("");
