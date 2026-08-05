@@ -2129,6 +2129,16 @@ const ST = (() => {
       const fs = [...this.files]; this.value = "";
       for (const f of fs) await takePay(f);
     });
+    /* 폴더째 업로드 — 대금지급 내역은 몰마다 2개씩이라 파일이 금방 늘어난다.
+       webkitdirectory 는 아이폰 사파리에서 안 먹어서, 되는 브라우저에서만 버튼을 보여준다. */
+    const dirIn = $("f-pay-dir");
+    if (dirIn && "webkitdirectory" in dirIn) $("pay-dir-btn").style.display = "inline-block";
+    if (dirIn) dirIn.addEventListener("change", async function () {
+      const fs = [...this.files].filter(f => /\.xls[xm]$/i.test(f.name)); this.value = "";
+      if (!fs.length) { msg("msg-pay", "warn", "그 폴더에 엑셀 파일이 없어요."); return; }
+      for (const f of fs) await takePay(f);
+      msg("msg-pay", "ok", `✔ 폴더에서 엑셀 ${fs.length}개를 불러왔어요.`);
+    });
     bindDrop("drop-pay", async fs => { for (const f of fs) await takePay(f); });
     $("pay-drive").onclick = () => openDrivePicker({
       key: "paydetail", multiple: true, title: "드라이브에서 대금지급 내역 가져오기",

@@ -453,7 +453,7 @@ async function setOrder(file) {
 /* =================================================================
    구글 드라이브 파일 선택기 (폴더 탐색 + 검색 + 링크) — 발주서/업체양식/송장양식/회신 공용
    ================================================================= */
-const DRV = { multiple: false, onPick: null, path: [], sel: new Map(), home: null };
+const DRV = { multiple: false, onPick: null, path: [], sel: new Map(), home: null, files: [] };
 const GSHEET = "application/vnd.google-apps.spreadsheet";
 const GFOLDER = "application/vnd.google-apps.folder";
 
@@ -470,6 +470,12 @@ $("drv-link-go").onclick = async () => {
   } catch (e) { $("drv-msg").textContent = "⚠ " + e.message; }
 };
 $("drv-done").onclick = async () => { if (DRV.sel.size) await drvPick([...DRV.sel.values()]); };
+$("drv-folder").onclick = async () => {
+  const fs = (DRV.files || []).map(f => ({ id: f.id, name: f.name, mimeType: f.mimeType }));
+  if (!fs.length) return;
+  if (fs.length > 1 && !confirm(`이 폴더의 파일 ${fs.length}개를 모두 가져올까요?`)) return;
+  await drvPick(fs);
+};
 
 /* opts: { key, title, sub, multiple, onPick(files) } — files: [{id,name,mimeType}]
    key: 용도별 기본 폴더 저장용 (order/tpl/sab/rep) → 다음부터 그 폴더가 바로 열림 */
@@ -595,6 +601,15 @@ async function drvSearch(q) {
 }
 function drvRender(items, allowFolders) {
   const box = $("drv-list"); box.innerHTML = "";
+  // 폴더째 가져오기 — 지금 화면의 파일(폴더 제외)을 통째로 고른다.
+  // 몰 대금지급 내역처럼 파일이 여러 개일 때 하나씩 누르지 않아도 된다.
+  DRV.files = items.filter(f => f.mimeType !== GFOLDER);
+  const fb = $("drv-folder");
+  if (fb) {
+    const on = DRV.multiple && DRV.files.length > 0;
+    fb.style.display = on ? "" : "none";
+    fb.textContent = on ? `📂 이 폴더 전부 (${DRV.files.length}개)` : "";
+  }
   if (!items.length) { box.innerHTML = '<div class="empty">엑셀/시트 파일이 없어요.</div>'; return; }
   items.forEach(f => {
     const folder = f.mimeType === GFOLDER;

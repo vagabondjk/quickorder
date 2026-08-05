@@ -574,6 +574,10 @@
         디바이스 파일 선택 또는 끌어오기
         <input type="file" id="f-pay" accept=".xlsx,.xlsm" multiple>
       </label>
+      <label class="minibtn" id="pay-dir-btn" style="display:none;margin-top:8px;text-align:center">
+        📂 폴더째 업로드
+        <input type="file" id="f-pay-dir" webkitdirectory directory multiple>
+      </label>
       <div class="pvfoot" id="pay-state" style="margin-top:10px"></div>
       <div class="msg" id="msg-pay"></div>
     </div>
@@ -710,6 +714,7 @@
     <p class="sub2" id="drv-sub">폴더를 열어 파일을 고르세요.</p>
     <div class="drvbar">
       <button class="minibtn" id="drv-up">⬆ 상위</button>
+      <button class="minibtn" id="drv-folder" style="display:none">📂 이 폴더 전부</button>
       <div id="drv-crumb" class="drvcrumb"></div>
     </div>
     <div class="mlist drvlist" id="drv-list"></div>
