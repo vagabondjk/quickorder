@@ -1073,14 +1073,19 @@ const ST = (() => {
         if (out.missList.length < 200) out.missList.push({ no, product: r.product, mall: r.mall, date: r.date, why: "상품이 여러 개라 못 가림" });
         return;
       }
-      const amts = [...new Set(hits.map(x => Math.round(x.buy)))];
+      /* 같은 파일 안에 같은 주문·상품이 여러 줄인 경우가 있다 (재배송 등 — 21,739원 + 0원).
+         한 주문에 대해 몰이 나눠 정산한 것이므로 그 파일 안에서는 더한다.
+         파일이 다른데 금액이 어긋나면 그건 겹쳐 받은 것이라 더하면 두 번 세게 된다 → 찍지 않는다. */
+      const bySrc = {};
+      hits.forEach(x => { bySrc[x.src] = (bySrc[x.src] || 0) + Math.round(x.buy); });
+      const amts = [...new Set(Object.values(bySrc))];
       if (amts.length > 1) {
         out.missed++; out.dup++;
         if (out.missList.length < 200) out.missList.push({ no, product: r.product, mall: r.mall, date: r.date,
-          why: `파일 ${[...new Set(hits.map(x => x.src))].length}개에 금액이 다르게 있음 (${amts.map(a => won(a)).join(" / ")})` });
+          why: `파일 ${Object.keys(bySrc).length}개에 금액이 다르게 있음 (${amts.map(a => won(a)).join(" / ")})` });
         return;
       }
-      const m = hits[0];
+      const m = { buy: amts[0] };
       const before = r.amount || 0, after = Math.round(m.buy);
       out.before += before; out.after += after;
       r.amount = after; r.payFixed = true;
