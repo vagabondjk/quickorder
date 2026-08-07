@@ -1701,7 +1701,13 @@ $("run-i").onclick = async function () {
     const sab = await QO.loadWorkbook(S.sabBuf.slice(0));
     const replies = [];
     for (const r of S.reps) replies.push({ name: r.name, wb: await QO.loadWorkbook(r.data.slice(0)) });
-    const out = QO.collectInvoices(sab, replies);
+    // 업체별로 지난번에 쓴 택배사를 넘겨준다 — 회신에 택배사가 비어 와도 채울 수 있게
+  const carriers = await DB.get("vendorCarriers", {}) || {};
+  const out = QO.collectInvoices(sab, replies, { carriers });
+  // 이번에 실제로 쓰인 택배사를 기억해 다음 회신에 쓴다
+  if (out.carrierSeen && Object.keys(out.carrierSeen).length) {
+    await DB.set("vendorCarriers", Object.assign(carriers, out.carrierSeen));
+  }
     const buf = await QO.saveWorkbook(sab);
     const stem = S.sabName.replace(/\.[^.]+$/, "");
     showResultI(out, buf, `${QO.todayStr()}_${stem}_송장취합.xlsx`);
@@ -1756,6 +1762,13 @@ function showResultI(out, buf, filename) {
       h += `<div class="msg show err" style="margin-top:8px">⚠ 취합본 송장 빈칸 <b>${out.missingCount}건</b> / 주문 ${out.orderRows}행 — 아래 주문은 업체 회신에 송장이 없습니다</div>`;
       h += missingTable(out.missing || [], out.missingCount);
     }
+  }
+
+  // (나-1) 택배사가 비어 와서 대신 채운 내역 — 조용히 채우면 나중에 왜 그런지 모른다
+  if ((out.carrierFills || []).length) {
+    h += `<div class="msg show ok" style="margin-top:8px;text-align:left">🚚 택배사가 비어 있던 칸을 채웠습니다
+      ${out.carrierFills.map(c => `<div style="padding:3px 0"><b>${esc(c.supplier)}</b> — ${esc(c.carrier)}
+        <span style="color:var(--muted)">${c.n}건 · ${esc(c.from)} 기준</span></div>`).join("")}</div>`;
   }
 
   // (나-2) 송장 자리에 송장이 아닌 값(문장·메모)이 들어간 행

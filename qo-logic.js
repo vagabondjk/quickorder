@@ -489,7 +489,20 @@ function looksLikeCarrier(v) {
   return true;
 }
 
+/* 택배사를 기억할 업체 키 — 파일명이 '디에스피_회신.xlsx', '디에스피 송장회신 8월.xlsx' 처럼
+   달마다 조금씩 달라서, 앞의 날짜와 뒤의 '회신·양식·N월' 같은 꼬리를 떼고 업체명만 남긴다.
+   이걸 안 하면 다음 달에 키가 달라져 기억해둔 택배사를 못 찾는다. */
+function carrierKey(name) {
+  let t = String(name == null ? "" : name).replace(/\.[^.]+$/, "").trim();
+  t = t.replace(/^\d{6,8}[_\-\s]*/, "");
+  for (let i = 0; i < 4; i++)
+    t = t.replace(/[_\-\s]*(회신본|송장회신|회신|송장|발주양식|발주서|양식|사본|\d{1,2}월|\(\d+\))\s*$/, "").trim();
+  return t || String(name == null ? "" : name);
+}
+
 function collectInvoices(sabangWb, replies, opts) {
+  const carrierFills = [];      // 택배사를 대신 채워 넣은 내역 (화면에 알려준다)
+  const carrierSeen = {};       // 업체별로 이번에 실제로 쓰인 택배사 (다음에 기억)
   opts = opts || {};
   const log = opts.log || function () {};
 
@@ -517,6 +530,24 @@ function collectInvoices(sabangWb, replies, opts) {
       const opt = fm.OPTION !== undefined ? getV(ws, r, fm.OPTION) : null;
       rows.push({ car, inv, vals, opt });
     }
+    /* 택배사가 비어 있는 줄 채우기 —
+       한 업체는 택배사가 거의 같은데 회신 파일에 몇 칸이 비어 오는 일이 있다.
+       ① 같은 회신 파일에서 제일 많이 쓰인 택배사
+       ② 없으면 지난번에 그 업체가 쓴 택배사 (opts.carriers 로 넘어온다)
+       송장번호가 있는 줄만 채운다 — 송장도 없는 줄은 아직 출고 전이다. */
+    const cnt = {};
+    rows.forEach(x => { const c = String(x.car == null ? "" : x.car).trim();
+      if (c && looksLikeCarrier(c)) cnt[c] = (cnt[c] || 0) + 1; });
+    let top = ""; Object.keys(cnt).forEach(c => { if (!top || cnt[c] > cnt[top]) top = c; });
+    const vkey = carrierKey(supplier);
+    const remembered = (opts.carriers || {})[vkey] || (opts.carriers || {})[supplier] || "";
+    const fill = top || remembered;
+    let filled = 0;
+    if (fill) rows.forEach(x => {
+      if (isBlank(x.car) && !isBlank(x.inv)) { x.car = fill; x.carFilled = true; filled++; }
+    });
+    if (filled) carrierFills.push({ supplier: vkey, carrier: fill, n: filled, from: top ? "같은 파일" : "지난 회신" });
+    if (top) carrierSeen[vkey] = top;          // 다음 달을 위해 기억할 값 (업체명만)
     loaded.push({ supplier, fm, rows });
   }
 
@@ -673,6 +704,7 @@ function collectInvoices(sabangWb, replies, opts) {
   return { total: best.total, per, srcInvoice, writtenInvoice, gap: srcInvoice - writtenInvoice - already, already,
     perSrc, sheet: best.ws.name, orderRows, missingCount, missing: missing.slice(0, 500),
     oddCount, odd: odd.slice(0, 500),
+    carrierFills, carrierSeen,          // 택배사를 대신 채운 내역 · 업체별로 기억할 택배사
     ambiguous: best.ambiguous || [] };
 }
 
@@ -1277,7 +1309,7 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   toDateValue, isDateHeader, hasDateFormat, hasTimeFormat,
   findDateColumns, defaultDateColumn, orderDateInfo, formatPhone, stripHyphen,
   valueTransformForHeader, nameFromFilename, normKey,
-  convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, todayStr, fmtDate,
+  convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, carrierKey, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, todayStr, fmtDate,
   normPriceText, toPriceNumber, priceKeyParts, priceRowKey, buildPriceBook, matchPrice,
   rankPriceCandidates, settle, settleCheck,
   settleSheetHead, settleSheetRow, isPriceHeader, isInternalHeader, vendorSheetColumns, carryNote };
