@@ -2471,10 +2471,15 @@ const MST = (() => {
   }
   /* 마스터인지 저장된 표시로 판단하면, 기기를 바꾸거나 표시가 지워졌을 때 들어갈 길이 막힌다.
      그래서 표시가 없으면 모달 안에서 아이디·비밀번호를 받아 그 자리에서 확인한다. */
+  let authedNow = false;                       // 이번에 아이디·비번으로 확인한 경우
+  async function isMasterNow() {
+    if (authedNow) return true;
+    try { return await LOCK.isMasterSession(); } catch (e) { return false; }
+  }
   async function open() {
+    wire();                                    // ★ 열 때마다 다시 연결한다 (아래 wire 주석 참고)
     $("mstmodal").classList.add("on");
-    let ok = false; try { ok = await LOCK.isMasterSession(); } catch (e) {}
-    if (!ok) return authMode();
+    if (!await isMasterNow()) return authMode();
     $("mst-auth").style.display = "none"; $("mst-body").style.display = "";
     $("mst-sub").textContent = "승인할 업체명을 넣으면 승인코드가 나옵니다. 그 코드를 업체에 전달하세요.";
     await load(); $("mst-msg").textContent = ""; await draw();
@@ -2483,34 +2488,65 @@ const MST = (() => {
     $("mst-auth").style.display = ""; $("mst-body").style.display = "none";
     $("mst-sub").textContent = "마스터 아이디와 비밀번호를 넣으세요.";
     $("mst-err").textContent = ""; $("mst-pw").value = "";
+    /* 안 될 때 짐작하지 않도록, 지금 돌고 있는 파일이 어느 버전인지 보여준다 */
+    const d = $("mst-diag");
+    if (d) d.textContent = "v" + (typeof APP_VER !== "undefined" ? APP_VER : "?") +
+      " · 확인 " + (typeof LOCK.signInMaster === "function" ? "새 방식" :
+                   typeof LOCK.isMaster === "function" ? "옛 방식" : "없음");
     setTimeout(() => { try { ($("mst-id").value ? $("mst-pw") : $("mst-id")).focus(); } catch (e) {} }, 80);
   }
+  /* 실패 이유를 뭉뚱그리지 않는다 — 비밀번호가 틀린 것과 파일이 옛것인 것은 대처가 다르다 */
   async function signIn() {
     const id = $("mst-id").value, pw = $("mst-pw").value;
-    let ok = false; try { ok = await LOCK.signInMaster(id, pw); } catch (e) {}
-    if (!ok) { $("mst-err").textContent = "아이디 또는 비밀번호가 틀렸습니다."; $("mst-pw").value = ""; $("mst-pw").focus(); return; }
-    $("mst-pw").value = ""; show(); await open();
+    const err = $("mst-err"); err.textContent = "확인 중…";
+    let ok = false, why = "";
+    try {
+      if (typeof LOCK.signInMaster === "function") ok = await LOCK.signInMaster(id, pw);
+      else if (typeof LOCK.isMaster === "function") ok = await LOCK.isMaster(id, pw);   // 옛 qo-lock.js 라도 들어갈 수 있게
+      else why = "앱 파일이 옛것입니다. [파일 새로 받기] 를 눌러 주세요.";
+    } catch (e) { why = "확인 중 오류 — " + (e && e.message ? e.message : e); }
+    if (!ok) {
+      err.textContent = why || "아이디 또는 비밀번호가 틀렸습니다.";
+      $("mst-pw").value = ""; $("mst-pw").focus(); return;
+    }
+    authedNow = true; $("mst-pw").value = ""; err.textContent = ""; show(); await open();
+  }
+  /* 서비스워커와 캐시를 통째로 버리고 다시 받는다 — 파일이 섞여 있을 때의 마지막 수단 */
+  async function hardReload() {
+    try {
+      if (navigator.serviceWorker) {
+        const rs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(rs.map(r => r.unregister()));
+      }
+      if (window.caches) { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); }
+    } catch (e) {}
+    location.reload(true);
   }
   const show = () => { const b = $("mst-open"); if (b) b.style.display = ""; };
-  function bind() {
-    const btn = $("mst-open");
-    if (btn) btn.onclick = open;
-    if ($("set-master")) $("set-master").onclick = () => { $("setmodal").classList.remove("on"); open(); };
-    if (!$("mstmodal")) return;               // 옛 화면이면 여기서 멈춘다
-    $("mst-in").onclick = signIn;
-    $("mst-pw").onkeydown = e => { if (e.key === "Enter") signIn(); };
-    $("mst-id").onkeydown = e => { if (e.key === "Enter") $("mst-pw").focus(); };
-    $("mst-close").onclick = () => $("mstmodal").classList.remove("on");
-    $("mstmodal").onclick = e => { if (e.target === $("mstmodal")) $("mstmodal").classList.remove("on"); };
-    $("mst-add").onclick = async () => {
+
+  /* ★ 버튼 연결은 '한 번만' 하면 안 된다.
+     하나라도 없는 요소를 만나면 거기서 예외가 나 뒤쪽 버튼이 통째로 죽는데,
+     시작할 때 딱 한 번 도는 구조라 그러면 영영 안 먹는다 (확인 버튼 무반응이 그 경우).
+     그래서 요소마다 따로 감싸고, 모달을 열 때마다 다시 연결한다. */
+  const on = (id, ev, fn) => { try { const el = $(id); if (el) el[ev] = fn; } catch (e) {} };
+  function wire() {
+    on("mst-open", "onclick", open);
+    on("set-master", "onclick", () => { $("setmodal").classList.remove("on"); open(); });
+    on("mst-in", "onclick", signIn);
+    on("mst-hard", "onclick", hardReload);
+    on("mst-pw", "onkeydown", e => { if (e.key === "Enter") signIn(); });
+    on("mst-id", "onkeydown", e => { if (e.key === "Enter") $("mst-pw").focus(); });
+    on("mst-close", "onclick", () => $("mstmodal").classList.remove("on"));
+    on("mstmodal", "onclick", e => { if (e.target === $("mstmodal")) $("mstmodal").classList.remove("on"); });
+    on("mst-add", "onclick", async () => {
       const n = $("mst-name").value.trim().replace(/\s+/g, "");
       if (!n) { $("mst-name").focus(); return; }
       if (list.indexOf(n) >= 0) { $("mst-msg").textContent = "이미 목록에 있어요."; return; }
       list.push(n); await save(); $("mst-name").value = ""; $("mst-msg").textContent = ""; draw();
-    };
-    $("mst-name").onkeydown = e => { if (e.key === "Enter") $("mst-add").onclick(); };
+    });
+    on("mst-name", "onkeydown", e => { if (e.key === "Enter") $("mst-add").onclick(); });
   }
-  return { bind, open, show };
+  return { bind: wire, open, show };
 })();
 /* ★ 로그인 화면이 끝난 다음에 확인해야 한다.
    페이지가 뜨는 순간 확인하면, 그 자리에서 마스터로 로그인해도 이미 확인이 끝나 있어서
