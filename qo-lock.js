@@ -54,11 +54,11 @@ const LOCK = (() => {
   }
   function deviceId() {
     let id = null;
-    try { id = localStorage.getItem(CONFIG.ls("qo_device")); } catch (e) {}
+    try { id = localStorage.getItem(CONFIG.lsBase("qo_device")); } catch (e) {}
     if (!id) {
       const r = crypto.getRandomValues(new Uint8Array(16));
       id = [...r].map(b => b.toString(16).padStart(2, "0")).join("");
-      try { localStorage.setItem(CONFIG.ls("qo_device"), id); } catch (e) {}
+      try { localStorage.setItem(CONFIG.lsBase("qo_device"), id); } catch (e) {}
     }
     return id;
   }
@@ -80,7 +80,7 @@ const LOCK = (() => {
     const h = await sha256Hex(SALT + "|approve|" + normId(company));
     return h.slice(0, 10).toUpperCase();
   }
-  const APPROVED_KEY = () => CONFIG.ls("qo_approved");
+  const APPROVED_KEY = () => CONFIG.lsBase("qo_approved");
   async function savedApproval() {
     try {
       const s2 = JSON.parse(localStorage.getItem(APPROVED_KEY()) || "null");
@@ -100,7 +100,7 @@ const LOCK = (() => {
     return (await idHash(id)) === MASTER_ID && (await hashPw(pw)) === MASTER_PW;
   }
   /* 마스터로 들어왔는지 — 앱 안의 '마스터' 메뉴를 띄울지 판단한다 */
-  const MKEY = () => CONFIG.ls("qo_master");
+  const MKEY = () => CONFIG.lsBase("qo_master");
   async function saveMaster() {
     try { localStorage.setItem(MKEY(), await sha256Hex(deviceId() + SALT + "|master|")); } catch (e) {}
   }
@@ -123,7 +123,7 @@ const LOCK = (() => {
   async function isUnlocked() {
     if (!configured()) return true;
     try {
-      const s = JSON.parse(localStorage.getItem(CONFIG.ls("qo_lock")) || "null");
+      const s = JSON.parse(localStorage.getItem(CONFIG.lsBase("qo_lock")) || "null");
       if (!s || !s.exp || Date.now() >= s.exp) return false;   // 없거나 7일 지남
       if (s.token !== await signExp(s.exp)) return false;
       await saveUnlock();          // 슬라이딩: 열 때마다 만료를 다시 7일 뒤로 연장
@@ -132,9 +132,9 @@ const LOCK = (() => {
   }
   async function saveUnlock() {
     const exp = Date.now() + UNLOCK_MS;
-    try { localStorage.setItem(CONFIG.ls("qo_lock"),JSON.stringify({ exp, token: await signExp(exp) })); } catch (e) {}
+    try { localStorage.setItem(CONFIG.lsBase("qo_lock"),JSON.stringify({ exp, token: await signExp(exp) })); } catch (e) {}
   }
-  function signOut() { try { localStorage.removeItem(CONFIG.ls("qo_lock")); } catch (e) {} }
+  function signOut() { try { localStorage.removeItem(CONFIG.lsBase("qo_lock")); } catch (e) {} }
 
   /* ---------- 잠금 화면 UI ---------- */
   function injectStyle() {

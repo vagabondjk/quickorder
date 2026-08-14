@@ -2476,19 +2476,31 @@ const MST = (() => {
   }
   return { bind, open, show: () => { const b = $("mst-open"); if (b) b.style.display = ""; } };
 })();
+/* ★ 로그인 화면이 끝난 다음에 확인해야 한다.
+   페이지가 뜨는 순간 확인하면, 그 자리에서 마스터로 로그인해도 이미 확인이 끝나 있어서
+   버튼이 안 나타난다 (새로고침해야 보였다). LOCK.ready 를 기다린다. */
 (async () => {
-  try { if (typeof LOCK !== "undefined" && await LOCK.isMasterSession()) { MST.bind(); MST.show(); } }
-  catch (e) {}
+  try {
+    if (typeof LOCK === "undefined") return;
+    await LOCK.ready;
+    if (!await LOCK.isMasterSession()) return;
+    MST.bind(); MST.show();
+  } catch (e) {}
 })();
 
 /* ---------------- 시작 ---------------- */
 /* 로그인할 때 넣은 업체명을 회사 이름으로 쓴다.
    한 주소를 여러 회사가 같이 쓰는데 회사 이름이 URL 에 박혀 있으면,
    베타브릭스가 들어와도 발주서 파일명·메일에 랩노마드가 나간다. */
-try {
-  const c = (typeof LOCK !== "undefined" && LOCK.company && LOCK.company()) || "";
-  if (c) { CONFIG.company = c; if (!CONFIG.orderTag) CONFIG.orderTag = c; }
-} catch (e) {}
+function applyLockCompany() {
+  try {
+    const c = (typeof LOCK !== "undefined" && LOCK.company && LOCK.company()) || "";
+    if (c) { CONFIG.company = c; if (!CONFIG.orderTag) CONFIG.orderTag = c; }
+  } catch (e) {}
+}
+applyLockCompany();
+/* 첫 로그인은 이 시점에 아직 업체명이 저장되기 전이다 — 로그인이 끝나면 한 번 더 맞춘다 */
+try { if (typeof LOCK !== "undefined") LOCK.ready.then(applyLockCompany); } catch (e) {}
 
 /* 저장소를 열기 전에, 마지막으로 로그인했던 계정 것으로 맞춘다.
    이걸 안 하면 앱을 켤 때마다 잠깐 다른 회사 자료가 보였다가 바뀐다. */
