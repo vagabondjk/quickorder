@@ -1911,8 +1911,10 @@ async function drawSettings() {
     <div style="font-size:11px;color:var(--muted);margin:4px 0 8px">메일에서 발주서·송장을 가져오고, 드라이브 파일을 불러오고, 결과를 메일로 보내려면 연결하세요.</div>
     <div style="font-size:11px;margin:0 0 8px;padding:8px 10px;border-radius:9px;background:var(--card2);border:1px solid var(--line);line-height:1.55">
       ${own ? "우리 회사 구글 프로젝트를 쓰는 중입니다." :
-              "지금은 <b>제공된 기본 프로젝트</b>를 쓰고 있습니다. 그 프로젝트에 <b>테스터로 등록된 구글 계정만</b> 연결됩니다.<br>" +
-              "<b>우리 회사 구글 계정을 붙이려면</b> 회사 구글 클라우드에서 OAuth 클라이언트 ID(웹)를 만들어 아래에 넣고 [저장] 하세요."}
+              "지금은 <b>제공된 기본 프로젝트</b>를 쓰고 있습니다.<br>" +
+              "연결이 <b>403 (액세스 차단됨)</b> 으로 막히면, 그 프로젝트가 아직 '테스트' 상태라 그렇습니다. " +
+              "관리자가 구글 콘솔에서 <b>[앱 게시]</b> 를 누르면 바로 풀립니다.<br>" +
+              "회사 전용 구글 프로젝트를 따로 쓰려면 그 <b>클라이언트 ID</b> 를 아래에 넣고 [저장] 하세요."}
     </div>
     <div class="fld"><label>클라이언트 ID</label>
       <input id="gmail-cid" value="${esc(cid)}" placeholder="xxxxx.apps.googleusercontent.com" spellcheck="false" autocapitalize="off"></div>
