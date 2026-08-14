@@ -1906,8 +1906,14 @@ async function drawSettings() {
   const cid = await clientId();          // 저장값 없으면 기본 내장 ID를 보여줌
   const gbox = document.createElement("div");
   gbox.className = "mitem"; gbox.style.marginBottom = "10px";
-  gbox.innerHTML = `<div style="font-weight:700;font-size:13px">📧 구글 메일 연결</div>
-    <div style="font-size:11px;color:var(--muted);margin:4px 0 8px">메일에서 발주서·송장을 가져오고, 결과를 메일로 보내려면 연결하세요.</div>
+  const own = cid && cid !== DEFAULT_CLIENT_ID;
+  gbox.innerHTML = `<div style="font-weight:700;font-size:13px">📧 구글 메일·드라이브 연결</div>
+    <div style="font-size:11px;color:var(--muted);margin:4px 0 8px">메일에서 발주서·송장을 가져오고, 드라이브 파일을 불러오고, 결과를 메일로 보내려면 연결하세요.</div>
+    <div style="font-size:11px;margin:0 0 8px;padding:8px 10px;border-radius:9px;background:var(--card2);border:1px solid var(--line);line-height:1.55">
+      ${own ? "우리 회사 구글 프로젝트를 쓰는 중입니다." :
+              "지금은 <b>제공된 기본 프로젝트</b>를 쓰고 있습니다. 그 프로젝트에 <b>테스터로 등록된 구글 계정만</b> 연결됩니다.<br>" +
+              "<b>우리 회사 구글 계정을 붙이려면</b> 회사 구글 클라우드에서 OAuth 클라이언트 ID(웹)를 만들어 아래에 넣고 [저장] 하세요."}
+    </div>
     <div class="fld"><label>클라이언트 ID</label>
       <input id="gmail-cid" value="${esc(cid)}" placeholder="xxxxx.apps.googleusercontent.com" spellcheck="false" autocapitalize="off"></div>
     <div style="display:flex;gap:7px">
@@ -1919,9 +1925,13 @@ async function drawSettings() {
   $("gmail-status").textContent = !gmailReady ? "미연결" : (GMAIL.signedIn() ? "로그인됨 ✓" : "준비됨");
   $("gmail-save").onclick = async () => {
     const cid = $("gmail-cid").value.trim();
+    const before = await clientId();
     await DB.set("gmailClientId", cid);
+    /* 프로젝트가 바뀌면 앞 프로젝트에서 받은 토큰은 쓸 수 없다 — 붙잡고 있으면
+       '로그인됨' 으로 보이면서 요청만 실패한다. 깨끗이 끊고 다시 로그인하게 한다. */
+    if ((cid || DEFAULT_CLIENT_ID) !== before) { try { GMAIL.signOut(); } catch (e) {} }
     $("gmail-status").textContent = "저장됨 · 라이브러리 준비 중…";
-    GMAIL.init(cid);
+    GMAIL.init(cid || DEFAULT_CLIENT_ID);
     gmailReady = await GMAIL.waitReady();
     updateGmailWho();
     $("gmail-status").textContent = gmailReady ? "✓ 준비됨 · 이제 [구글 로그인]" : "✕ 라이브러리 로드 실패 (새로고침/광고차단 확인)";
@@ -1930,7 +1940,7 @@ async function drawSettings() {
     $("gmail-status").textContent = "로그인 창 여는 중…";
     try { await ensureGmail(); const p = await GMAIL.profile();
       $("gmail-status").textContent = "✓ " + (p.emailAddress || "로그인됨"); updateGmailWho();
-    } catch (e) { $("gmail-status").textContent = "✕ " + e.message; alert(e.message); }
+    } catch (e) { $("gmail-status").textContent = "✕ 연결 실패"; alert(e.message); }
   };
 
   const hr = document.createElement("div");

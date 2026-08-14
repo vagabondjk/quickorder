@@ -49,11 +49,30 @@ const GMAIL = (() => {
               google.accounts.oauth2.initTokenClient);
   }
   function ready() { return !!clientId && !!tokenClient; }
+  /* 구글이 돌려주는 영문 오류를 무슨 뜻인지 알아볼 수 있게 바꾼다.
+     access_denied 는 대개 '비밀번호가 틀렸다' 가 아니라, 그 구글 프로젝트가 아직
+     테스트 상태라 등록된 사람만 들어올 수 있다는 뜻이다. */
+  function explain(msg) {
+    const m = String(msg || "");
+    if (/access_denied|has not completed|verification/i.test(m))
+      return "이 구글 프로젝트는 아직 '테스트' 상태라 등록된 계정만 들어올 수 있습니다.\n\n" +
+             "· 우리 회사 구글 프로젝트를 쓰려면\n" +
+             "  설정 → 구글 메일 연결 → 클라이언트 ID 에 그 프로젝트의 ID 를 넣고 [저장]\n" +
+             "· 지금 ID 를 그대로 쓰려면\n" +
+             "  관리자에게 이 구글 계정을 테스터로 등록해 달라고 요청\n\n(원문: " + m + ")";
+    if (/popup_closed|취소/i.test(m)) return "로그인 창이 닫혔습니다. 다시 시도하세요.";
+    return m;
+  }
   function signedIn() { return !!accessToken && Date.now() < tokenExp; }
 
-  // 클라이언트 ID 저장 + (가능하면) 토큰 클라이언트 생성
+  /* 클라이언트 ID 저장 + (가능하면) 토큰 클라이언트 생성
+     ★ ID 가 바뀌면 tokenClient 를 버려야 한다. ensureInit 은 없을 때만 만들기 때문에,
+       버리지 않으면 새 ID 를 저장해도 계속 옛 프로젝트로 로그인 창이 뜬다. */
   function init(cid) {
-    if (cid !== undefined) clientId = (cid || "").trim();
+    if (cid !== undefined) {
+      const v = (cid || "").trim();
+      if (v !== clientId) { clientId = v; tokenClient = null; }
+    }
     return ensureInit();
   }
   function ensureInit() {
@@ -88,13 +107,13 @@ const GMAIL = (() => {
       }
       if (!tokenClient) return rej(new Error("구글 로그인 준비가 안 됐어요. 설정에서 클라이언트 ID를 확인하세요."));
       tokenClient.callback = resp => {
-        if (resp.error) return rej(new Error(resp.error_description || resp.error));
+        if (resp.error) return rej(new Error(explain(resp.error_description || resp.error)));
         accessToken = resp.access_token;
         tokenExp = Date.now() + (Number(resp.expires_in || 3600) - 60) * 1000;
         saveToken();                       // 기기에 저장 + 승인이력 기록
         res(accessToken);
       };
-      try { tokenClient.error_callback = e => rej(new Error((e && (e.message || e.type)) || "로그인 취소")); } catch (e) {}
+      try { tokenClient.error_callback = e => rej(new Error(explain((e && (e.message || e.type)) || "로그인 취소"))); } catch (e) {}
       // hint(계정 이메일)를 주면 계정 선택 단계를 건너뛰고, 세션이 살아있으면 화면 없이 조용히 통과
       const hint = (function () { try { return localStorage.getItem(HKEY()) || ""; } catch (e) { return ""; } })();
       const cfg = { prompt: mode === undefined ? "" : mode };
