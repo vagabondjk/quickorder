@@ -2422,6 +2422,14 @@ async function syncOnStart() {
 }
 
 /* ---------------- 시작 ---------------- */
+/* 로그인할 때 넣은 업체명을 회사 이름으로 쓴다.
+   한 주소를 여러 회사가 같이 쓰는데 회사 이름이 URL 에 박혀 있으면,
+   베타브릭스가 들어와도 발주서 파일명·메일에 랩노마드가 나간다. */
+try {
+  const c = (typeof LOCK !== "undefined" && LOCK.company && LOCK.company()) || "";
+  if (c) { CONFIG.company = c; if (!CONFIG.orderTag) CONFIG.orderTag = c; }
+} catch (e) {}
+
 /* 저장소를 열기 전에, 마지막으로 로그인했던 계정 것으로 맞춘다.
    이걸 안 하면 앱을 켤 때마다 잠깐 다른 회사 자료가 보였다가 바뀐다. */
 try { const last = localStorage.getItem(ACCT_KEY); if (last) CONFIG.useAccount(last); } catch (e) {}

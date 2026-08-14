@@ -64,6 +64,42 @@ const LOCK = (() => {
   }
   const configured = () => !!MASTER || Object.keys(MONTHS).length > 0;
 
+  /* ── 업체명(아이디) 승인 ─────────────────────────────────────────
+     한 주소를 여러 회사가 같이 쓰기 때문에, 아무나 들어오지 못하게 업체명을 받는다.
+     승인은 마스터가 발급한 '승인코드' 로 한 번만 하면 그 기기에 기억된다.
+
+     ※ 서버가 없는 정적 사이트라, 소스를 읽을 줄 아는 사람은 이 검사를 우회할 수 있다.
+       월별 비밀번호와 같은 한계다. 실수·무단 사용을 막는 문턱으로 쓴다.
+       진짜 자료는 각 회사의 구글 계정으로 갈려 있어, 남의 계정 자료는 못 본다. */
+  const MASTER_ID = "7167ccfda76104466cce86b23ad897c6473a5342175fb6b2ac32c68e6d2bce7e";
+  const MASTER_PW = "27cbec30fa8a607bceb852c4b41ef7c3c494edb033dcd2b25ef5d3339dd35f4b";
+  const normId = v => String(v == null ? "" : v).trim().replace(/\s+/g, "");
+  const idHash = v => sha256Hex(SALT + "|id|" + normId(v));
+  /* 업체명 → 승인코드 (마스터가 발급해 업체에 알려준다) */
+  async function approvalCode(company) {
+    const h = await sha256Hex(SALT + "|approve|" + normId(company));
+    return h.slice(0, 10).toUpperCase();
+  }
+  const APPROVED_KEY = () => CONFIG.ls("qo_approved");
+  async function savedApproval() {
+    try {
+      const s2 = JSON.parse(localStorage.getItem(APPROVED_KEY()) || "null");
+      if (!s2 || !s2.company) return null;
+      if (s2.token !== await sha256Hex(deviceId() + SALT + "|ok|" + normId(s2.company))) return null;
+      return s2.company;
+    } catch (e) { return null; }
+  }
+  async function saveApproval(company) {
+    try {
+      localStorage.setItem(APPROVED_KEY(), JSON.stringify({
+        company: normId(company), token: await sha256Hex(deviceId() + SALT + "|ok|" + normId(company)) }));
+    } catch (e) {}
+  }
+  function clearApproval() { try { localStorage.removeItem(APPROVED_KEY()); } catch (e) {} }
+  async function isMaster(id, pw) {
+    return (await idHash(id)) === MASTER_ID && (await hashPw(pw)) === MASTER_PW;
+  }
+
   async function verify(pw) {
     const h = await hashPw(pw);
     if (MASTER && h === MASTER) return "master";
@@ -120,11 +156,14 @@ const LOCK = (() => {
       "<div class=\"card\">" +
       "<div class=\"lk\">🔒</div>" +
       "<h2>퀵오더 사용 승인</h2>" +
-      "<p>이번 달 비밀번호를 입력하세요.<br>" + (CONFIG.adminLabel || "관리자") + "에게 매달 전달받습니다.</p>" +
-      "<input id=\"qo-lock-pw\" type=\"password\" inputmode=\"text\" autocomplete=\"off\" " +
+      "<p>업체명과 이번 달 비밀번호를 입력하세요.<br>" + (CONFIG.adminLabel || "관리자") + "에게 전달받습니다.</p>" +
+      "<input id=\"qo-lock-id\" type=\"text\" autocomplete=\"username\" autocapitalize=\"off\" " +
+        "autocorrect=\"off\" placeholder=\"업체명\" style=\"letter-spacing:0;margin-bottom:8px\">" +
+      "<input id=\"qo-lock-pw\" type=\"password\" inputmode=\"text\" autocomplete=\"current-password\" " +
         "autocapitalize=\"characters\" autocorrect=\"off\" placeholder=\"비밀번호\">" +
       "<button id=\"qo-lock-go\">확인</button>" +
       "<div class=\"msg\" id=\"qo-lock-msg\"></div>" +
+      "<div id=\"qo-lock-extra\"></div>" +
       "</div>";
     return root;
   }
@@ -135,28 +174,74 @@ const LOCK = (() => {
       const root = buildOverlay();
       const attach = () => document.body.appendChild(root);
       if (document.body) attach(); else document.addEventListener("DOMContentLoaded", attach);
+      const idIn = root.querySelector("#qo-lock-id");
       const input = root.querySelector("#qo-lock-pw");
       const btn = root.querySelector("#qo-lock-go");
       const msg = root.querySelector("#qo-lock-msg");
+      const extra = root.querySelector("#qo-lock-extra");
 
-      isUnlocked().then(ok => {
-        if (ok) { root.remove(); return resolve(true); }
-        setTimeout(() => { try { input.focus(); } catch (e) {} }, 100);
+      isUnlocked().then(async ok => {
+        const approved = await savedApproval();
+        if (ok && approved) { root.remove(); return resolve(true); }
+        if (approved) idIn.value = approved;
+        setTimeout(() => { try { (approved ? input : idIn).focus(); } catch (e) {} }, 100);
         if (!MONTHS[currentYm()] && MASTER)
           msg.textContent = "이번 달 비밀번호가 없습니다. 관리자에게 문의하세요.";
+
+        /* 마스터 화면 — 업체명을 넣으면 그 업체에 줄 승인코드가 나온다 */
+        function showMaster() {
+          root.querySelector("h2").textContent = "마스터 — 사용 승인 발급";
+          root.querySelector("p").innerHTML = "승인할 업체명을 넣고 [승인코드 발급] 을 누르세요.<br>나온 코드를 그 업체에 알려주면, 업체는 첫 로그인 때 한 번만 입력합니다.";
+          idIn.value = ""; idIn.placeholder = "승인할 업체명"; input.style.display = "none";
+          btn.textContent = "승인코드 발급"; msg.textContent = "";
+          btn.onclick = async () => {
+            const nm = idIn.value.trim();
+            if (!nm) { idIn.focus(); return; }
+            const code = await approvalCode(nm);
+            extra.innerHTML = "<div style=\"margin-top:14px;padding:12px;border:2px solid #4f6ef7;border-radius:12px;background:#f5f7ff\">" +
+              "<div style=\"font-size:12px;color:#6b7280\">" + nm.replace(/[<>&]/g, "") + " 승인코드</div>" +
+              "<div style=\"font-size:24px;font-weight:800;letter-spacing:3px;color:#1e2b6b;margin-top:4px\">" + code + "</div>" +
+              "<div style=\"font-size:11.5px;color:#6b7280;margin-top:6px\">이 코드를 업체에 전달하세요. 업체명이 한 글자라도 다르면 안 맞습니다.</div></div>";
+          };
+          idIn.onkeydown = e => { if (e.key === "Enter") btn.onclick(); };
+        }
+
         let busy = false;
         async function go() {
           if (busy) return; busy = true; btn.disabled = true; msg.textContent = "";
-          const kind = await verify(input.value);
-          if (kind === "month" || kind === "master") { await saveUnlock(); root.remove(); resolve(true); }   // 7일 유지
-          else { msg.textContent = "비밀번호가 올바르지 않습니다."; input.value = ""; input.focus(); busy = false; btn.disabled = false; }
+          const id = idIn.value, pw = input.value;
+          const done = () => { busy = false; btn.disabled = false; };
+          if (!normId(id)) { msg.textContent = "업체명을 입력하세요."; idIn.focus(); return done(); }
+          // ① 마스터로 들어오면 승인 발급 화면
+          if (await isMaster(id, pw)) { done(); return showMaster(); }
+          // ② 승인된 업체인지 — 이 기기에서 한 번도 승인 안 했으면 승인코드를 받는다
+          const okName = await savedApproval();
+          if (normId(okName) !== normId(id)) {
+            const code = await approvalCode(id);
+            if (normId(pw).toUpperCase() === code) {      // 비번칸에 승인코드를 넣은 경우
+              await saveApproval(id);
+              msg.style.color = "#0a7a3d";
+              msg.textContent = "승인되었습니다. 이제 이번 달 비밀번호를 입력하세요.";
+              input.value = ""; input.focus(); return done();
+            }
+            msg.style.color = "#e5484d";
+            msg.textContent = "승인되지 않은 업체명입니다. 관리자에게 승인코드를 받아 비밀번호 칸에 입력하세요.";
+            return done();
+          }
+          // ③ 월별 비밀번호
+          const kind = await verify(pw);
+          if (kind === "month" || kind === "master") { await saveUnlock(); root.remove(); resolve(true); }
+          else { msg.style.color = "#e5484d"; msg.textContent = "비밀번호가 올바르지 않습니다."; input.value = ""; input.focus(); done(); }
         }
-        btn.addEventListener("click", go);
+        btn.addEventListener("click", () => { if (btn.textContent === "확인") go(); });
         input.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+        idIn.addEventListener("keydown", e => { if (e.key === "Enter") input.focus(); });
       });
     });
   }
 
   const ready = ensureUnlocked();
-  return { ready, ensureUnlocked, isUnlocked, verify, signOut, configured, currentYm };
+  return { ready, ensureUnlocked, isUnlocked, verify, signOut, configured, currentYm,
+           approvalCode, savedApproval, clearApproval, isMaster,
+           company: () => { try { return (JSON.parse(localStorage.getItem(APPROVED_KEY()) || "null") || {}).company || ""; } catch (e) { return ""; } } };
 })();
