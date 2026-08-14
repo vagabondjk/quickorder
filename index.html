@@ -32,6 +32,11 @@
   header .sub{font-size:12px;color:var(--faint);font-weight:600}
   .verbadge{font-size:11px;font-weight:800;color:#fff;background:var(--brand);
     padding:3px 9px;border-radius:999px;letter-spacing:.02em}
+  /* 누구로 들어와 있는지 — 버전 옆에 붙는다. 마스터면 눌러서 관리 화면으로 간다 */
+  .whobadge{display:none;margin-left:5px;font-size:11px;font-weight:800;padding:3px 9px;
+    border-radius:999px;letter-spacing:.02em;border:1.5px solid var(--line);
+    background:var(--card2);color:var(--ink);font-family:inherit}
+  .whobadge.master{background:#1e2b6b;border-color:#1e2b6b;color:#fff;cursor:pointer}
   .syncbox{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px 13px;margin-bottom:14px}
   .syncrow{display:flex;align-items:center;gap:8px}
   .syncrow b{font-size:13.5px;font-weight:800;flex:1}
@@ -333,9 +338,6 @@
 </head>
 <body>
 <div id="ptr" class="ptr"><span id="ptr-txt">↓ 당겨서 새로고침</span></div>
-<button id="mst-open" style="display:none;position:fixed;right:14px;bottom:calc(14px + env(safe-area-inset-bottom));
-  z-index:9990;padding:10px 14px;border:none;border-radius:999px;background:#1e2b6b;color:#fff;
-  font-family:inherit;font-size:12.5px;font-weight:800;box-shadow:0 6px 18px rgba(0,0,0,.25);cursor:pointer">👑 마스터</button>
 <div class="busy" id="busy">
   <div class="busybox">
     <div class="busyrun">🏃</div>
@@ -349,8 +351,10 @@
   <header>
     <b>퀵오더 웹</b><span class="sub">by JK</span>
     <span class="verbadge" id="app-ver">v6.1.1</span>
+    <button class="whobadge" id="who-badge" type="button"></button>
     <span style="margin-left:auto"></span>
     <button class="chip" id="btn-settings">설정</button>
+    <button class="chip" id="btn-logout" style="margin-left:6px">로그아웃</button>
   </header>
 
   <div class="tabs">
@@ -809,7 +813,7 @@
         <b>👤 <span id="set-company">-</span></b>
         <button class="minibtn" id="set-logout">로그아웃</button>
       </div>
-      <div class="synchint">로그아웃하면 다음에 열 때 업체명과 비밀번호를 다시 넣습니다. <b>저장된 자료는 지워지지 않습니다.</b></div>
+      <div class="synchint">로그아웃하면 다음에 열 때 업체명과 승인번호를 다시 넣습니다. <b>저장된 자료는 지워지지 않습니다.</b></div>
     </div>
     <div class="mlist" id="setlist"></div>
     <div class="row">

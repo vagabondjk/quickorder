@@ -1872,11 +1872,13 @@ function drawLogin() {
 $("set-close").onclick = () => $("setmodal").classList.remove("on");
 /* 로그아웃 — 잠금만 풀린 상태를 지운다. 저장된 자료(업체 양식·공급가표)는 그대로 둔다.
    로그인 화면으로 돌아갈 길이 없으면 다른 업체로 바꿔 들어갈 수도, 마스터로 다시 들어갈 수도 없다. */
-if ($("set-logout")) $("set-logout").onclick = () => {
+function doLogout() {
   if (!confirm("로그아웃할까요?\n다음에 열 때 업체명과 비밀번호를 다시 넣습니다.\n저장된 자료는 지워지지 않습니다.")) return;
   try { LOCK.signOut(); } catch (e) {}
   location.reload();
-};
+}
+if ($("set-logout")) $("set-logout").onclick = doLogout;
+if ($("btn-logout")) $("btn-logout").onclick = doLogout;
 $("sync-now").onclick = async function () {
   this.disabled = true;
   try {
@@ -2442,6 +2444,22 @@ async function syncOnStart() {
    ===================================================================== */
 const MST = (() => {
   let list = [];
+  /* clipboard API 는 보안 컨텍스트가 아니거나 권한이 없으면 조용히 실패한다.
+     복사가 됐는지 사용자는 알 수 없으니, 실패하면 옛 방식으로 한 번 더 시도하고
+     그래도 안 되면 값을 화면에 띄워 직접 고르게 한다. */
+  async function copyText(txt, okMsg) {
+    const say = m => { const el = $("mst-msg"); if (el) el.textContent = m; };
+    try { await navigator.clipboard.writeText(txt); return say(okMsg); } catch (e) {}
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = txt; ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      if (ok) return say(okMsg);
+    } catch (e) {}
+    say("복사가 막혀 있어요. 아래 값을 직접 선택해 복사하세요:\n" + txt);
+  }
   async function load() { list = await DB.get("masterCompanies", []) || []; }
   async function save() { await DB.set("masterCompanies", list); }
   async function draw() {
@@ -2453,14 +2471,20 @@ const MST = (() => {
         <div style="flex:1;min-width:0">
           <b style="font-size:13.5px;word-break:break-all">${esc(n)}</b>
           <div style="font-size:17px;font-weight:800;letter-spacing:2px;color:var(--brand);margin-top:2px">${codes[i]}</div></div>
-        <button class="minibtn mstcopy" data-i="${i}" style="flex:none">복사</button>
+        <button class="minibtn mstcopy" data-i="${i}" style="flex:none">번호 복사</button>
+        <button class="minibtn mstmsg" data-i="${i}" style="flex:none">안내문</button>
         <button class="minibtn mstdel" data-i="${i}" style="flex:none">삭제</button></div>`).join("");
-    box.querySelectorAll(".mstcopy").forEach(b => b.onclick = async () => {
+    /* ★ '복사' 는 승인번호만 복사한다.
+       안내 문구까지 같이 복사하면 그대로 붙여넣었을 때 로그인이 안 된다 (실제로 그랬다). */
+    box.querySelectorAll(".mstcopy").forEach(b => b.onclick = () => {
       const i = Number(b.dataset.i);
-      const txt = `[퀵오더] ${list[i]} 승인번호: ${codes[i]}
-로그인 화면에서 업체명 "${list[i]}", 승인번호 칸에 위 번호를 넣으면 됩니다.`;
-      try { await navigator.clipboard.writeText(txt); $("mst-msg").textContent = "복사했어요. 업체에 그대로 붙여넣으면 됩니다."; }
-      catch (e) { $("mst-msg").textContent = txt; }
+      copyText(codes[i], `승인번호 ${codes[i]} 복사했어요. 그대로 붙여넣으면 로그인됩니다.`);
+    });
+    box.querySelectorAll(".mstmsg").forEach(b => b.onclick = () => {
+      const i = Number(b.dataset.i);
+      copyText(`[퀵오더] ${list[i]} 로그인 안내
+업체명: ${list[i]}
+승인번호: ${codes[i]}`, "안내문을 복사했어요. 업체에 그대로 보내세요.");
     });
     box.querySelectorAll(".mstdel").forEach(b => b.onclick = async () => {
       const i = Number(b.dataset.i);
@@ -2524,7 +2548,20 @@ const MST = (() => {
     } catch (e) {}
     location.reload(true);
   }
-  const show = () => { const b = $("mst-open"); if (b) b.style.display = ""; };
+  /* 헤더 배지 — 마스터면 👑 마스터(눌러서 관리), 업체면 업체명 */
+  async function drawWho() {
+    const b = $("who-badge"); if (!b) return;
+    let master = false; try { master = await isMasterNow(); } catch (e) {}
+    if (master) {
+      b.textContent = "👑 마스터"; b.classList.add("master");
+      b.style.display = "inline-block"; b.onclick = open; return;
+    }
+    let who = ""; try { who = (LOCK.company && LOCK.company()) || ""; } catch (e) {}
+    b.classList.remove("master"); b.onclick = null;
+    if (!who) { b.style.display = "none"; return; }
+    b.textContent = who; b.style.display = "inline-block";
+  }
+  const show = drawWho;
 
   /* ★ 버튼 연결은 '한 번만' 하면 안 된다.
      하나라도 없는 요소를 만나면 거기서 예외가 나 뒤쪽 버튼이 통째로 죽는데,
@@ -2532,7 +2569,6 @@ const MST = (() => {
      그래서 요소마다 따로 감싸고, 모달을 열 때마다 다시 연결한다. */
   const on = (id, ev, fn) => { try { const el = $(id); if (el) el[ev] = fn; } catch (e) {} };
   function wire() {
-    on("mst-open", "onclick", open);
     on("set-master", "onclick", () => { $("setmodal").classList.remove("on"); open(); });
     on("mst-in", "onclick", signIn);
     on("mst-hard", "onclick", hardReload);
@@ -2558,7 +2594,7 @@ const MST = (() => {
   try {
     if (typeof LOCK === "undefined") return;
     await LOCK.ready;
-    if (await LOCK.isMasterSession()) MST.show();
+    await MST.show();                       // 마스터면 👑, 업체면 업체명
   } catch (e) {}
 })();
 

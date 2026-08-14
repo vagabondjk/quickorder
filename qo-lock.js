@@ -244,8 +244,11 @@ const LOCK = (() => {
           }
           clearMaster();
 
-          // ② 업체명 + 승인번호 — 이게 곧 비밀번호다. 두 단계로 나누지 않는다
-          if (normId(pw).toUpperCase() === await approvalCode(id)) {
+          /* ② 업체명 + 승인번호 — 이게 곧 비밀번호다. 두 단계로 나누지 않는다.
+             안내문을 통째로 붙여넣는 일이 잦아, 그 안에 번호가 들어 있으면 받아준다.
+             (번호를 모르면 여전히 못 들어온다 — 관대할 뿐 느슨하지 않다) */
+          const typed = normId(pw).toUpperCase(), want = await approvalCode(id);
+          if (typed === want || typed.indexOf(want) >= 0) {
             await saveApproval(id); await saveUnlock();
             root.remove(); return resolve(true);
           }
