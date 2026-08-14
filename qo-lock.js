@@ -110,6 +110,32 @@ const LOCK = (() => {
   }
   function clearMaster() { try { localStorage.removeItem(MKEY()); } catch (e) {} }
 
+  /* v1.3.7~1.3.9 에서는 잠금 상태가 계정별 키(…_u<해시>)에 저장됐다.
+     v1.4.0 에서 계정과 무관한 키로 옮겼는데, 그 사이 마스터로 들어와 있던 사람은
+     표시가 옛 키에 남아 마스터 메뉴가 사라져 보였다. 기기ID 도 같이 갈렸을 수 있어
+     남아 있는 옛 기기ID 를 전부 대입해 본다. 한 번 옮기면 다시 안 돈다. */
+  function legacyKeys(name) {
+    const base = CONFIG.lsBase(name), out = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k !== base && k.indexOf(base + "_u") === 0) out.push(k);
+      }
+    } catch (e) {}
+    return out;
+  }
+  async function migrateMaster() {
+    try {
+      if (localStorage.getItem(MKEY())) return;
+      const toks = legacyKeys("qo_master").map(k => localStorage.getItem(k)).filter(Boolean);
+      if (!toks.length) return;
+      const ids = legacyKeys("qo_device").map(k => localStorage.getItem(k)).filter(Boolean);
+      for (const id of ids) {
+        if (toks.indexOf(await sha256Hex(id + SALT + "|master|")) >= 0) { await saveMaster(); return; }
+      }
+    } catch (e) {}
+  }
+
   async function verify(pw) {
     const h = await hashPw(pw);
     if (MASTER && h === MASTER) return "master";
@@ -240,7 +266,7 @@ const LOCK = (() => {
     });
   }
 
-  const ready = ensureUnlocked();
+  const ready = migrateMaster().then(ensureUnlocked);
   return { ready, ensureUnlocked, isUnlocked, verify, signOut, configured, currentYm,
            approvalCode, savedApproval, clearApproval, isMaster,
            isMasterSession, clearMaster,
