@@ -628,7 +628,18 @@
   <div class="sheet">
     <div class="grip"></div>
     <h3>👑 마스터 — 승인 업체 관리</h3>
-    <p class="sub2">승인할 업체명을 넣으면 승인코드가 나옵니다. 그 코드를 업체에 전달하세요.</p>
+    <p class="sub2" id="mst-sub">승인할 업체명을 넣으면 승인코드가 나옵니다. 그 코드를 업체에 전달하세요.</p>
+    <div id="mst-auth" style="display:none">
+      <input id="mst-id" type="text" placeholder="마스터 아이디" autocapitalize="off" spellcheck="false"
+        style="width:100%;box-sizing:border-box;padding:12px;border:1.5px solid var(--line);border-radius:10px;
+               background:var(--card2);color:inherit;font-family:inherit;font-size:15px;margin-bottom:7px">
+      <input id="mst-pw" type="password" placeholder="비밀번호" autocapitalize="off"
+        style="width:100%;box-sizing:border-box;padding:12px;border:1.5px solid var(--line);border-radius:10px;
+               background:var(--card2);color:inherit;font-family:inherit;font-size:15px">
+      <button class="btn-go" id="mst-in" style="width:100%;margin-top:9px">확인</button>
+      <div id="mst-err" style="min-height:16px;margin-top:8px;font-size:12.5px;color:#e5484d;font-weight:700"></div>
+    </div>
+    <div id="mst-body">
     <div style="display:flex;gap:6px">
       <input id="mst-name" type="text" placeholder="업체명" autocapitalize="off" spellcheck="false"
         style="flex:1;min-width:0;padding:11px;border:1.5px solid var(--line);border-radius:10px;
@@ -637,6 +648,7 @@
     </div>
     <div id="mst-list" style="flex:1;min-height:0;overflow-y:auto;margin-top:10px"></div>
     <div id="mst-msg" style="font-size:12px;color:var(--muted);margin-top:8px;white-space:pre-wrap"></div>
+    </div>
     <div class="row" style="margin-top:10px">
       <button class="btn-ghost" id="mst-close">닫기</button>
     </div>
@@ -780,6 +792,13 @@
       </div>
       <div class="synctxt" id="notify-status"></div>
       <div class="synchint"><b>① 지정한 드라이브 발주파일이 바뀌거나 ② 업체가 송장 회신 메일을 보내면</b> 알려줍니다. 앱을 열어둔 동안만 동작합니다.</div>
+    </div>
+    <div class="syncbox">
+      <div class="syncrow">
+        <b>👑 마스터 메뉴</b>
+        <button class="minibtn" id="set-master">열기</button>
+      </div>
+      <div class="synchint">승인 업체를 관리합니다. 마스터 아이디와 비밀번호가 필요합니다.</div>
     </div>
     <div class="syncbox">
       <div class="syncrow">

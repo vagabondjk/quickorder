@@ -2469,13 +2469,37 @@ const MST = (() => {
       list.splice(i, 1); await save(); draw();
     });
   }
+  /* 마스터인지 저장된 표시로 판단하면, 기기를 바꾸거나 표시가 지워졌을 때 들어갈 길이 막힌다.
+     그래서 표시가 없으면 모달 안에서 아이디·비밀번호를 받아 그 자리에서 확인한다. */
   async function open() {
-    await load(); $("mst-msg").textContent = ""; await draw();
     $("mstmodal").classList.add("on");
+    let ok = false; try { ok = await LOCK.isMasterSession(); } catch (e) {}
+    if (!ok) return authMode();
+    $("mst-auth").style.display = "none"; $("mst-body").style.display = "";
+    $("mst-sub").textContent = "승인할 업체명을 넣으면 승인코드가 나옵니다. 그 코드를 업체에 전달하세요.";
+    await load(); $("mst-msg").textContent = ""; await draw();
   }
+  function authMode() {
+    $("mst-auth").style.display = ""; $("mst-body").style.display = "none";
+    $("mst-sub").textContent = "마스터 아이디와 비밀번호를 넣으세요.";
+    $("mst-err").textContent = ""; $("mst-pw").value = "";
+    setTimeout(() => { try { ($("mst-id").value ? $("mst-pw") : $("mst-id")).focus(); } catch (e) {} }, 80);
+  }
+  async function signIn() {
+    const id = $("mst-id").value, pw = $("mst-pw").value;
+    let ok = false; try { ok = await LOCK.signInMaster(id, pw); } catch (e) {}
+    if (!ok) { $("mst-err").textContent = "아이디 또는 비밀번호가 틀렸습니다."; $("mst-pw").value = ""; $("mst-pw").focus(); return; }
+    $("mst-pw").value = ""; show(); await open();
+  }
+  const show = () => { const b = $("mst-open"); if (b) b.style.display = ""; };
   function bind() {
-    const btn = $("mst-open"); if (!btn) return;
-    btn.onclick = open;
+    const btn = $("mst-open");
+    if (btn) btn.onclick = open;
+    if ($("set-master")) $("set-master").onclick = () => { $("setmodal").classList.remove("on"); open(); };
+    if (!$("mstmodal")) return;               // 옛 화면이면 여기서 멈춘다
+    $("mst-in").onclick = signIn;
+    $("mst-pw").onkeydown = e => { if (e.key === "Enter") signIn(); };
+    $("mst-id").onkeydown = e => { if (e.key === "Enter") $("mst-pw").focus(); };
     $("mst-close").onclick = () => $("mstmodal").classList.remove("on");
     $("mstmodal").onclick = e => { if (e.target === $("mstmodal")) $("mstmodal").classList.remove("on"); };
     $("mst-add").onclick = async () => {
@@ -2486,17 +2510,17 @@ const MST = (() => {
     };
     $("mst-name").onkeydown = e => { if (e.key === "Enter") $("mst-add").onclick(); };
   }
-  return { bind, open, show: () => { const b = $("mst-open"); if (b) b.style.display = ""; } };
+  return { bind, open, show };
 })();
 /* ★ 로그인 화면이 끝난 다음에 확인해야 한다.
    페이지가 뜨는 순간 확인하면, 그 자리에서 마스터로 로그인해도 이미 확인이 끝나 있어서
    버튼이 안 나타난다 (새로고침해야 보였다). LOCK.ready 를 기다린다. */
 (async () => {
+  try { MST.bind(); } catch (e) {}          // 설정 안의 입구는 항상 살아 있어야 한다
   try {
     if (typeof LOCK === "undefined") return;
     await LOCK.ready;
-    if (!await LOCK.isMasterSession()) return;
-    MST.bind(); MST.show();
+    if (await LOCK.isMasterSession()) MST.show();
   } catch (e) {}
 })();
 

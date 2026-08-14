@@ -267,7 +267,15 @@ const LOCK = (() => {
   }
 
   const ready = migrateMaster().then(ensureUnlocked);
-  return { ready, ensureUnlocked, isUnlocked, verify, signOut, configured, currentYm,
+  /* 앱 안에서 마스터로 들어오기 — 저장된 표시가 없어도(기기를 바꿨거나 표시가 지워졌어도)
+     아이디·비밀번호만 맞으면 언제든 마스터 메뉴를 열 수 있다. */
+  async function signInMaster(id, pw) {
+    if (!await isMaster(id, pw)) return false;
+    await saveMaster(); await saveApproval(id); await saveUnlock();
+    return true;
+  }
+
+  return { ready, ensureUnlocked, isUnlocked, verify, signOut, configured, currentYm, signInMaster,
            approvalCode, savedApproval, clearApproval, isMaster,
            isMasterSession, clearMaster,
            company: () => { try { return (JSON.parse(localStorage.getItem(APPROVED_KEY()) || "null") || {}).company || ""; } catch (e) { return ""; } } };
