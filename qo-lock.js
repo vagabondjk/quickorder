@@ -193,11 +193,11 @@ const LOCK = (() => {
       "<div class=\"card\">" +
       "<div class=\"lk\">🔒</div>" +
       "<h2>퀵오더 사용 승인</h2>" +
-      "<p>업체명과 이번 달 비밀번호를 입력하세요.<br>" + (CONFIG.adminLabel || "관리자") + "에게 전달받습니다.</p>" +
+      "<p>업체명과 승인번호를 입력하세요.<br>" + (CONFIG.adminLabel || "관리자") + "에게 전달받습니다.</p>" +
       "<input id=\"qo-lock-id\" type=\"text\" autocomplete=\"username\" autocapitalize=\"off\" " +
         "autocorrect=\"off\" placeholder=\"업체명\" style=\"letter-spacing:0;margin-bottom:8px\">" +
       "<input id=\"qo-lock-pw\" type=\"password\" inputmode=\"text\" autocomplete=\"current-password\" " +
-        "autocapitalize=\"characters\" autocorrect=\"off\" placeholder=\"비밀번호\">" +
+        "autocapitalize=\"characters\" autocorrect=\"off\" placeholder=\"승인번호\">" +
       "<button id=\"qo-lock-go\">확인</button>" +
       "<div class=\"msg\" id=\"qo-lock-msg\"></div>" +
       "<div id=\"qo-lock-extra\"></div>" +
@@ -224,17 +224,17 @@ const LOCK = (() => {
         if (ok && approved) { root.remove(); return resolve(true); }
         if (approved) idIn.value = approved;
         setTimeout(() => { try { (approved ? input : idIn).focus(); } catch (e) {} }, 100);
-        if (!MONTHS[currentYm()] && MASTER)
-          msg.textContent = "이번 달 비밀번호가 없습니다. 관리자에게 문의하세요.";
 
         let busy = false;
-        const BAD = "아이디 또는 비밀번호가 틀렸습니다.";
+        const BAD = "업체명 또는 승인번호가 틀렸습니다.";
         async function go() {
           if (busy) return; busy = true; btn.disabled = true; msg.textContent = "";
           const id = idIn.value, pw = input.value;
+          /* 빨간 글씨만으로는 못 보고 지나친다 — 팝업으로도 알린다 */
           const fail = () => { msg.style.color = "#e5484d"; msg.textContent = BAD;
-            input.value = ""; input.focus(); busy = false; btn.disabled = false; };
-          const done = () => { busy = false; btn.disabled = false; };
+            input.value = ""; busy = false; btn.disabled = false;
+            try { alert(BAD); } catch (e) {}
+            try { input.focus(); } catch (e) {} };
           if (!normId(id) || !String(pw).trim()) return fail();
 
           // ① 마스터 — 앱으로 들여보내고, 안에서 '마스터' 메뉴가 뜬다
@@ -244,20 +244,18 @@ const LOCK = (() => {
           }
           clearMaster();
 
-          // ② 승인코드를 넣은 경우 — 이 기기에서 그 업체를 승인한다
-          const code = await approvalCode(id);
-          if (normId(pw).toUpperCase() === code) {
-            await saveApproval(id);
-            msg.style.color = "#0a7a3d";
-            msg.textContent = "승인되었습니다. 이제 이번 달 비밀번호를 입력하세요.";
-            input.value = ""; input.focus(); return done();
+          // ② 업체명 + 승인번호 — 이게 곧 비밀번호다. 두 단계로 나누지 않는다
+          if (normId(pw).toUpperCase() === await approvalCode(id)) {
+            await saveApproval(id); await saveUnlock();
+            root.remove(); return resolve(true);
           }
-          // ③ 승인된 업체 + 월별 비밀번호
+          /* ③ 예비 경로 — 예전 월별 비밀번호도 그대로 받는다.
+             이미 승인된 업체가 승인번호를 아직 못 받았을 때 갑자기 막히지 않게. */
           const okName = await savedApproval();
-          if (normId(okName) !== normId(id)) return fail();
-          const kind = await verify(pw);
-          if (kind === "month" || kind === "master") { await saveUnlock(); root.remove(); resolve(true); }
-          else fail();
+          if (normId(okName) === normId(id) && await verify(pw)) {
+            await saveUnlock(); root.remove(); return resolve(true);
+          }
+          fail();
         }
         btn.addEventListener("click", go);
         input.addEventListener("keydown", e => { if (e.key === "Enter") go(); });

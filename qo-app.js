@@ -2457,15 +2457,15 @@ const MST = (() => {
         <button class="minibtn mstdel" data-i="${i}" style="flex:none">삭제</button></div>`).join("");
     box.querySelectorAll(".mstcopy").forEach(b => b.onclick = async () => {
       const i = Number(b.dataset.i);
-      const txt = `[퀵오더] ${list[i]} 승인코드: ${codes[i]}
-첫 로그인 때 업체명에 "${list[i]}", 비밀번호 칸에 이 코드를 넣으세요.`;
+      const txt = `[퀵오더] ${list[i]} 승인번호: ${codes[i]}
+로그인 화면에서 업체명 "${list[i]}", 승인번호 칸에 위 번호를 넣으면 됩니다.`;
       try { await navigator.clipboard.writeText(txt); $("mst-msg").textContent = "복사했어요. 업체에 그대로 붙여넣으면 됩니다."; }
       catch (e) { $("mst-msg").textContent = txt; }
     });
     box.querySelectorAll(".mstdel").forEach(b => b.onclick = async () => {
       const i = Number(b.dataset.i);
       if (!confirm(`'${list[i]}' 를 목록에서 지울까요?
-(이미 전달한 승인코드는 계속 쓸 수 있습니다)`)) return;
+(이미 전달한 승인번호는 계속 쓸 수 있습니다)`)) return;
       list.splice(i, 1); await save(); draw();
     });
   }
@@ -2481,7 +2481,7 @@ const MST = (() => {
     $("mstmodal").classList.add("on");
     if (!await isMasterNow()) return authMode();
     $("mst-auth").style.display = "none"; $("mst-body").style.display = "";
-    $("mst-sub").textContent = "승인할 업체명을 넣으면 승인코드가 나옵니다. 그 코드를 업체에 전달하세요.";
+    $("mst-sub").textContent = "승인할 업체명을 넣으면 승인번호가 나옵니다. 그 번호가 그 업체의 비밀번호입니다.";
     await load(); $("mst-msg").textContent = ""; await draw();
   }
   function authMode() {
@@ -2506,8 +2506,10 @@ const MST = (() => {
       else why = "앱 파일이 옛것입니다. [파일 새로 받기] 를 눌러 주세요.";
     } catch (e) { why = "확인 중 오류 — " + (e && e.message ? e.message : e); }
     if (!ok) {
-      err.textContent = why || "아이디 또는 비밀번호가 틀렸습니다.";
-      $("mst-pw").value = ""; $("mst-pw").focus(); return;
+      const m = why || "아이디 또는 비밀번호가 틀렸습니다.";
+      err.textContent = m; $("mst-pw").value = "";
+      try { alert(m); } catch (e) {}
+      try { $("mst-pw").focus(); } catch (e) {} return;
     }
     authedNow = true; $("mst-pw").value = ""; err.textContent = ""; show(); await open();
   }
