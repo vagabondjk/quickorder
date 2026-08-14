@@ -156,6 +156,7 @@ const LOCK = (() => {
         background:#4f6ef7;border:none;border-radius:12px;cursor:pointer}
       #qo-lock button:disabled{opacity:.5}
       #qo-lock .msg{min-height:18px;margin-top:12px;font-size:13px;color:#e5484d;font-weight:600}
+      #qo-lock .ver{margin-top:14px;font-size:12px;color:#9aa3b2;letter-spacing:.5px}
     `;
     document.head.appendChild(st);
   }
@@ -174,6 +175,8 @@ const LOCK = (() => {
       "<button id=\"qo-lock-go\">확인</button>" +
       "<div class=\"msg\" id=\"qo-lock-msg\"></div>" +
       "<div id=\"qo-lock-extra\"></div>" +
+      /* 최신본을 받았는지 로그인 화면에서 바로 확인할 수 있게 버전을 보여준다 */
+      "<div class=\"ver\">" + (typeof APP_VER !== "undefined" ? "v" + APP_VER : "") + "</div>" +
       "</div>";
     return root;
   }
