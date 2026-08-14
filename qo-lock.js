@@ -99,6 +99,16 @@ const LOCK = (() => {
   async function isMaster(id, pw) {
     return (await idHash(id)) === MASTER_ID && (await hashPw(pw)) === MASTER_PW;
   }
+  /* 마스터로 들어왔는지 — 앱 안의 '마스터' 메뉴를 띄울지 판단한다 */
+  const MKEY = () => CONFIG.ls("qo_master");
+  async function saveMaster() {
+    try { localStorage.setItem(MKEY(), await sha256Hex(deviceId() + SALT + "|master|")); } catch (e) {}
+  }
+  async function isMasterSession() {
+    try { return localStorage.getItem(MKEY()) === await sha256Hex(deviceId() + SALT + "|master|"); }
+    catch (e) { return false; }
+  }
+  function clearMaster() { try { localStorage.removeItem(MKEY()); } catch (e) {} }
 
   async function verify(pw) {
     const h = await hashPw(pw);
@@ -188,52 +198,39 @@ const LOCK = (() => {
         if (!MONTHS[currentYm()] && MASTER)
           msg.textContent = "이번 달 비밀번호가 없습니다. 관리자에게 문의하세요.";
 
-        /* 마스터 화면 — 업체명을 넣으면 그 업체에 줄 승인코드가 나온다 */
-        function showMaster() {
-          root.querySelector("h2").textContent = "마스터 — 사용 승인 발급";
-          root.querySelector("p").innerHTML = "승인할 업체명을 넣고 [승인코드 발급] 을 누르세요.<br>나온 코드를 그 업체에 알려주면, 업체는 첫 로그인 때 한 번만 입력합니다.";
-          idIn.value = ""; idIn.placeholder = "승인할 업체명"; input.style.display = "none";
-          btn.textContent = "승인코드 발급"; msg.textContent = "";
-          btn.onclick = async () => {
-            const nm = idIn.value.trim();
-            if (!nm) { idIn.focus(); return; }
-            const code = await approvalCode(nm);
-            extra.innerHTML = "<div style=\"margin-top:14px;padding:12px;border:2px solid #4f6ef7;border-radius:12px;background:#f5f7ff\">" +
-              "<div style=\"font-size:12px;color:#6b7280\">" + nm.replace(/[<>&]/g, "") + " 승인코드</div>" +
-              "<div style=\"font-size:24px;font-weight:800;letter-spacing:3px;color:#1e2b6b;margin-top:4px\">" + code + "</div>" +
-              "<div style=\"font-size:11.5px;color:#6b7280;margin-top:6px\">이 코드를 업체에 전달하세요. 업체명이 한 글자라도 다르면 안 맞습니다.</div></div>";
-          };
-          idIn.onkeydown = e => { if (e.key === "Enter") btn.onclick(); };
-        }
-
         let busy = false;
+        const BAD = "아이디 또는 비밀번호가 틀렸습니다.";
         async function go() {
           if (busy) return; busy = true; btn.disabled = true; msg.textContent = "";
           const id = idIn.value, pw = input.value;
+          const fail = () => { msg.style.color = "#e5484d"; msg.textContent = BAD;
+            input.value = ""; input.focus(); busy = false; btn.disabled = false; };
           const done = () => { busy = false; btn.disabled = false; };
-          if (!normId(id)) { msg.textContent = "업체명을 입력하세요."; idIn.focus(); return done(); }
-          // ① 마스터로 들어오면 승인 발급 화면
-          if (await isMaster(id, pw)) { done(); return showMaster(); }
-          // ② 승인된 업체인지 — 이 기기에서 한 번도 승인 안 했으면 승인코드를 받는다
-          const okName = await savedApproval();
-          if (normId(okName) !== normId(id)) {
-            const code = await approvalCode(id);
-            if (normId(pw).toUpperCase() === code) {      // 비번칸에 승인코드를 넣은 경우
-              await saveApproval(id);
-              msg.style.color = "#0a7a3d";
-              msg.textContent = "승인되었습니다. 이제 이번 달 비밀번호를 입력하세요.";
-              input.value = ""; input.focus(); return done();
-            }
-            msg.style.color = "#e5484d";
-            msg.textContent = "승인되지 않은 업체명입니다. 관리자에게 승인코드를 받아 비밀번호 칸에 입력하세요.";
-            return done();
+          if (!normId(id) || !String(pw).trim()) return fail();
+
+          // ① 마스터 — 앱으로 들여보내고, 안에서 '마스터' 메뉴가 뜬다
+          if (await isMaster(id, pw)) {
+            await saveMaster(); await saveApproval(id); await saveUnlock();
+            root.remove(); return resolve(true);
           }
-          // ③ 월별 비밀번호
+          clearMaster();
+
+          // ② 승인코드를 넣은 경우 — 이 기기에서 그 업체를 승인한다
+          const code = await approvalCode(id);
+          if (normId(pw).toUpperCase() === code) {
+            await saveApproval(id);
+            msg.style.color = "#0a7a3d";
+            msg.textContent = "승인되었습니다. 이제 이번 달 비밀번호를 입력하세요.";
+            input.value = ""; input.focus(); return done();
+          }
+          // ③ 승인된 업체 + 월별 비밀번호
+          const okName = await savedApproval();
+          if (normId(okName) !== normId(id)) return fail();
           const kind = await verify(pw);
           if (kind === "month" || kind === "master") { await saveUnlock(); root.remove(); resolve(true); }
-          else { msg.style.color = "#e5484d"; msg.textContent = "비밀번호가 올바르지 않습니다."; input.value = ""; input.focus(); done(); }
+          else fail();
         }
-        btn.addEventListener("click", () => { if (btn.textContent === "확인") go(); });
+        btn.addEventListener("click", go);
         input.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
         idIn.addEventListener("keydown", e => { if (e.key === "Enter") input.focus(); });
       });
@@ -243,5 +240,6 @@ const LOCK = (() => {
   const ready = ensureUnlocked();
   return { ready, ensureUnlocked, isUnlocked, verify, signOut, configured, currentYm,
            approvalCode, savedApproval, clearApproval, isMaster,
+           isMasterSession, clearMaster,
            company: () => { try { return (JSON.parse(localStorage.getItem(APPROVED_KEY()) || "null") || {}).company || ""; } catch (e) { return ""; } } };
 })();

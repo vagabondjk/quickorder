@@ -333,6 +333,9 @@
 </head>
 <body>
 <div id="ptr" class="ptr"><span id="ptr-txt">↓ 당겨서 새로고침</span></div>
+<button id="mst-open" style="display:none;position:fixed;right:14px;bottom:calc(14px + env(safe-area-inset-bottom));
+  z-index:9990;padding:10px 14px;border:none;border-radius:999px;background:#1e2b6b;color:#fff;
+  font-family:inherit;font-size:12.5px;font-weight:800;box-shadow:0 6px 18px rgba(0,0,0,.25);cursor:pointer">👑 마스터</button>
 <div class="busy" id="busy">
   <div class="busybox">
     <div class="busyrun">🏃</div>
@@ -616,6 +619,26 @@
     <div class="row">
       <button class="btn-cancel" id="mail-cancel">취소</button>
       <button class="btn-go" id="mail-ok" disabled>가져오기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 마스터 — 승인 업체 관리 (마스터로 로그인했을 때만 보인다) -->
+<div class="modal" id="mstmodal">
+  <div class="sheet">
+    <div class="grip"></div>
+    <h3>👑 마스터 — 승인 업체 관리</h3>
+    <p class="sub2">승인할 업체명을 넣으면 승인코드가 나옵니다. 그 코드를 업체에 전달하세요.</p>
+    <div style="display:flex;gap:6px">
+      <input id="mst-name" type="text" placeholder="업체명" autocapitalize="off" spellcheck="false"
+        style="flex:1;min-width:0;padding:11px;border:1.5px solid var(--line);border-radius:10px;
+               background:var(--card2);color:inherit;font-family:inherit;font-size:14px">
+      <button class="minibtn" id="mst-add" style="flex:none;padding:0 14px">승인 추가</button>
+    </div>
+    <div id="mst-list" style="flex:1;min-height:0;overflow-y:auto;margin-top:10px"></div>
+    <div id="mst-msg" style="font-size:12px;color:var(--muted);margin-top:8px;white-space:pre-wrap"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn-ghost" id="mst-close">닫기</button>
     </div>
   </div>
 </div>

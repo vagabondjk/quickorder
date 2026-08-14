@@ -2421,6 +2421,66 @@ async function syncOnStart() {
   drawSyncStatus();
 }
 
+/* =====================================================================
+   마스터 메뉴 — 승인 업체 관리
+   마스터 아이디로 들어왔을 때만 보인다.
+   승인코드는 업체명에서 계산된다(SALT + 업체명). 그래서 목록은 '누구를 승인했는지'
+   적어두는 장부이고, 실제 승인은 그 코드를 업체에 전달하는 순간 이뤄진다.
+   ※ 이미 나간 코드는 목록에서 지워도 계속 유효하다 — 완전히 막으려면 배포에 반영해야 한다.
+   ===================================================================== */
+const MST = (() => {
+  let list = [];
+  async function load() { list = await DB.get("masterCompanies", []) || []; }
+  async function save() { await DB.set("masterCompanies", list); }
+  async function draw() {
+    const box = $("mst-list"); if (!box) return;
+    if (!list.length) { box.innerHTML = '<div class="empty">승인한 업체가 없습니다.<br>위에 업체명을 넣고 [승인 추가] 를 누르세요.</div>'; return; }
+    const codes = await Promise.all(list.map(n => LOCK.approvalCode(n)));
+    box.innerHTML = list.map((n, i) => `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;
+        border:1px solid var(--line);border-radius:10px;margin-bottom:6px;background:var(--card2)">
+        <div style="flex:1;min-width:0">
+          <b style="font-size:13.5px;word-break:break-all">${esc(n)}</b>
+          <div style="font-size:17px;font-weight:800;letter-spacing:2px;color:var(--brand);margin-top:2px">${codes[i]}</div></div>
+        <button class="minibtn mstcopy" data-i="${i}" style="flex:none">복사</button>
+        <button class="minibtn mstdel" data-i="${i}" style="flex:none">삭제</button></div>`).join("");
+    box.querySelectorAll(".mstcopy").forEach(b => b.onclick = async () => {
+      const i = Number(b.dataset.i);
+      const txt = `[퀵오더] ${list[i]} 승인코드: ${codes[i]}
+첫 로그인 때 업체명에 "${list[i]}", 비밀번호 칸에 이 코드를 넣으세요.`;
+      try { await navigator.clipboard.writeText(txt); $("mst-msg").textContent = "복사했어요. 업체에 그대로 붙여넣으면 됩니다."; }
+      catch (e) { $("mst-msg").textContent = txt; }
+    });
+    box.querySelectorAll(".mstdel").forEach(b => b.onclick = async () => {
+      const i = Number(b.dataset.i);
+      if (!confirm(`'${list[i]}' 를 목록에서 지울까요?
+(이미 전달한 승인코드는 계속 쓸 수 있습니다)`)) return;
+      list.splice(i, 1); await save(); draw();
+    });
+  }
+  async function open() {
+    await load(); $("mst-msg").textContent = ""; await draw();
+    $("mstmodal").classList.add("on");
+  }
+  function bind() {
+    const btn = $("mst-open"); if (!btn) return;
+    btn.onclick = open;
+    $("mst-close").onclick = () => $("mstmodal").classList.remove("on");
+    $("mstmodal").onclick = e => { if (e.target === $("mstmodal")) $("mstmodal").classList.remove("on"); };
+    $("mst-add").onclick = async () => {
+      const n = $("mst-name").value.trim().replace(/\s+/g, "");
+      if (!n) { $("mst-name").focus(); return; }
+      if (list.indexOf(n) >= 0) { $("mst-msg").textContent = "이미 목록에 있어요."; return; }
+      list.push(n); await save(); $("mst-name").value = ""; $("mst-msg").textContent = ""; draw();
+    };
+    $("mst-name").onkeydown = e => { if (e.key === "Enter") $("mst-add").onclick(); };
+  }
+  return { bind, open, show: () => { const b = $("mst-open"); if (b) b.style.display = ""; } };
+})();
+(async () => {
+  try { if (typeof LOCK !== "undefined" && await LOCK.isMasterSession()) { MST.bind(); MST.show(); } }
+  catch (e) {}
+})();
+
 /* ---------------- 시작 ---------------- */
 /* 로그인할 때 넣은 업체명을 회사 이름으로 쓴다.
    한 주소를 여러 회사가 같이 쓰는데 회사 이름이 URL 에 박혀 있으면,
