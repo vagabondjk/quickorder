@@ -64,10 +64,35 @@ const CONFIG = (() => {
   };
 
   /* ── 아래는 자동 계산 — 건드리지 않는다 ────────────────────────── */
-  const suffix = C.tenant ? "_" + C.tenant : "";
-  C.dbName = "quickorder" + suffix;                                  // IndexedDB 이름
-  C.backupFile = "qo-backup" + (C.tenant ? "-" + C.tenant : "") + ".json";  // 드라이브 백업 파일명
-  C.ls = k => k + suffix;                                            // localStorage 키
+  /* 저장소는 '로그인한 구글 계정' 으로 가른다.
+     한 주소를 여러 회사가 같이 쓰기 때문에, tenant 만으로는 같은 브라우저에서 섞인다.
+     · 계정을 아직 모르면(로그인 전) tenant 기준 이름을 그대로 쓴다 — 예전과 같다.
+     · 계정을 알면 그 계정 전용 저장소로 갈아탄다. 드라이브 백업은 원래부터 계정별이라
+       거기서 그대로 복구된다.
+     ※ 이메일을 그대로 키에 쓰지 않고 짧은 해시로 줄인다 (저장소 이름에 주소가 남지 않게). */
+  const base = C.tenant ? "_" + C.tenant : "";
+  function acctHash(email) {
+    const t = String(email || "").trim().toLowerCase();
+    let h = 5381;
+    for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0;
+    return h.toString(36);
+  }
+  let suffix = base;                 // 지금 쓰고 있는 저장소 꼬리표
+  C.account = "";                    // 지금 로그인한 계정 (없으면 "")
+  function apply() {
+    C.dbName = "quickorder" + suffix;                                    // IndexedDB 이름
+    C.backupFile = "qo-backup" + (C.tenant ? "-" + C.tenant : "") + ".json";  // 드라이브 백업 (계정별 폴더라 이름은 그대로)
+    C.ls = k => k + suffix;                                              // localStorage 키
+  }
+  /* 계정이 정해지면 저장소를 그 계정 것으로 바꾼다. 바뀌었으면 true. */
+  C.useAccount = email => {
+    const e = String(email || "").trim().toLowerCase();
+    const want = e ? base + "_u" + acctHash(e) : base;
+    if (want === suffix) { C.account = e; return false; }
+    suffix = want; C.account = e; apply();
+    return true;
+  };
+  apply();
   // 파일명 앞부분: 20260727_랩노마드_업체명_발주양식.xlsx
   C.tag = () => C.company;
   return C;

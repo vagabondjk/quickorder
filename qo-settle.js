@@ -2250,7 +2250,14 @@ const ST = (() => {
   }
 
   init();
-  return { onShow, drawFilter: drawFilterLine, markSettled, calc, result: () => result, periodRange,
+  /* 로그인 계정이 바뀌어 저장소를 갈아탔을 때 — 이 탭 자료를 다시 읽는다 */
+  async function reload() {
+    files = []; payFiles = []; result = null; pbRaw = null;
+    await load();
+    drawFiles(); drawPriceBook(); drawPay(); drawBrands(); drawMd(); refresh();
+    const box = $("result-s"); if (box) box.style.display = "none";
+  }
+  return { onShow, reload, drawFilter: drawFilterLine, markSettled, calc, result: () => result, periodRange,
            /* 검증용 — 업체용 정산서(합계 수식·머리말)를 화면 없이 만들어 볼 수 있게 열어둔다 */
            _make: (r, v) => { result = r; const wb = new ExcelJS.Workbook(); vendorSheet(wb, v); return wb; },
            // 실제 calc() 와 같은 순서로 돌린다 (수수료 → 리워드 → 최종 마진)

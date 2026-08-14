@@ -133,6 +133,9 @@ const DB = (() => {
     set: async (k, v) => { const r = await tx("kv", "readwrite", s => s.put({ k, v })); fire(); return r; },
     onChange(fn) { afterWrite = fn; },       // 데이터가 바뀔 때마다 호출 (자동 업로드용)
     suspend(b) { suspended = b; },           // 복원 중 자동업로드 방지
+    /* 로그인 계정이 바뀌면 저장소 이름도 바뀐다 → 열려 있던 것을 닫고 다시 연다.
+       이걸 안 하면 계정을 바꿔도 앞 회사 데이터를 계속 보게 된다. */
+    reopen() { try { if (db) db.close(); } catch (e) {} db = null; return open(); },
   };
 })();
 
@@ -1977,8 +1980,11 @@ async function initGmail() {
 }
 
 function updateGmailWho() {
+  // 어느 계정으로 들어와 있는지 보여준다 — 한 주소를 두 회사가 같이 써서, 이게 안 보이면
+  // 남의 회사 자료를 보고 있어도 모른다
+  const who = CONFIG.account ? ` (${CONFIG.account})` : "";
   const txt = !gmailReady ? "⚠ 메일 연결 준비 안 됨 (설정에서 연결하세요)"
-    : GMAIL.signedIn() ? "✓ 구글 메일 연결됨" : "구글 계정 연결 필요 (버튼을 누르면 로그인)";
+    : GMAIL.signedIn() ? "✓ 구글 메일 연결됨" + who : "구글 계정 연결 필요 (버튼을 누르면 로그인)";
   const a = $("gmail-who-o"); if (a) a.textContent = txt;
 }
 /* ※ 로그인 팝업은 '사용자 클릭' 안에서 열려야 브라우저가 막지 않는다.
@@ -2375,8 +2381,33 @@ function drawSyncStatus() {
   el.textContent = t;
 }
 // 로그인돼 있으면 시작 시 내려받기 → 바뀌었으면 화면 갱신
+/* 로그인한 구글 계정으로 저장소를 갈아탄다.
+   한 주소를 여러 회사가 같이 쓰기 때문에, 계정이 바뀌면 저장소도 바뀌어야 한다.
+   갈아탄 뒤에는 그 계정의 드라이브 백업에서 업체 양식·설정을 그대로 내려받는다. */
+const ACCT_KEY = "qo_last_account";           // 마지막 로그인 계정 (다음에 켤 때 바로 그 저장소로)
+async function useAccountStore(email, opts) {
+  if (!email) return false;
+  const changed = CONFIG.useAccount(email);
+  try { localStorage.setItem(ACCT_KEY, email); } catch (e) {}
+  if (!changed) return false;
+  await DB.reopen();                          // 저장소 이름이 바뀌었으니 다시 연다
+  await loadForms();
+  try { if (window.CS) await CS.reload(); } catch (e) {}
+  try { if (window.ST) await ST.reload(); } catch (e) {}
+  drawOrderFilter(); drawReplyFilter(); drawDriveRecent(); drawSabRecent();
+  if (!(opts && opts.quiet)) msg("msg-o", "ok", `👤 ${email} 계정으로 바꿨어요. 이 계정의 자료를 불러옵니다.`);
+  return true;
+}
+/* 로그인이 확인되면 계정을 확인해 저장소를 맞춘다 */
+async function syncAccount() {
+  if (!GMAIL.signedIn()) return false;
+  let email = "";
+  try { email = ((await GMAIL.profile()).emailAddress || "").toLowerCase(); } catch (e) { return false; }
+  return await useAccountStore(email);
+}
 async function syncOnStart() {
   try {
+    await syncAccount();                      // 저장소를 먼저 맞추고
     const r = await SYNC.syncDown();
     if (r.changed) {
       await loadForms(); drawOrderFilter(); drawReplyFilter();
@@ -2391,6 +2422,9 @@ async function syncOnStart() {
 }
 
 /* ---------------- 시작 ---------------- */
+/* 저장소를 열기 전에, 마지막으로 로그인했던 계정 것으로 맞춘다.
+   이걸 안 하면 앱을 켤 때마다 잠깐 다른 회사 자료가 보였다가 바뀐다. */
+try { const last = localStorage.getItem(ACCT_KEY); if (last) CONFIG.useAccount(last); } catch (e) {}
 loadForms()
   .then(() => syncOnStart())
   .catch(e => { $("vlist").innerHTML = '<div class="empty">저장소를 열지 못했어요</div>'; });
