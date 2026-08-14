@@ -2606,6 +2606,15 @@ try { MST.bind(); } catch (e) {}            // 설정 안의 입구는 항상 �
    이걸 저장소에 반영하지 않으면, 한 주소를 나눠 쓰는 두 회사가 같은 자료를 본다
    (랩노마드가 올려둔 업체 양식이 베타브릭스로 로그인해도 그대로 보였다).
    저장소 이름이 바뀌었으면 true 를 돌려준다. */
+/* 화면에 회사 이름이 들어가는 자리는 <span class="co-name"> 로 표시해 두고 여기서 채운다.
+   HTML 에 이름을 박아 두면, 다른 업체로 로그인해도 앞 회사 이름이 그대로 보인다. */
+function drawCoName() {
+  try {
+    const n = CONFIG.company || "";
+    if (!n) return;
+    document.querySelectorAll(".co-name").forEach(el => { el.textContent = n; });
+  } catch (e) {}
+}
 function applyLockCompany() {
   try {
     const c = (typeof LOCK !== "undefined" && LOCK.company && LOCK.company()) || "";
@@ -2639,6 +2648,7 @@ function applyLockCompany() {
   drawOrderFilter();
   drawDriveRecent();
   drawSabRecent();
+  drawCoName();                             // 화면에 박힌 회사 이름을 로그인한 업체로
   try { await MST.show(); } catch (e) {}    // 헤더 배지 (👑 마스터 / 업체명)
   syncOnStart();                            // 저장소가 확정된 뒤에 동기화
 })();
