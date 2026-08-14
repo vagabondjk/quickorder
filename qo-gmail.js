@@ -15,13 +15,18 @@ const GMAIL = (() => {
   const HKEY = () => CONFIG.ls("qo_gmail_hint");      // 계정 이메일 힌트(재로그인 시 계정 선택 건너뛰기)
   let tokenClient = null, accessToken = null, tokenExp = 0, clientId = null;
 
-  // 저장해 둔 토큰 불러오기 (아직 유효하면 재로그인 불필요)
-  (function loadToken() {
+  /* 저장해 둔 토큰 불러오기 (아직 유효하면 재로그인 불필요)
+     ★ 이 파일이 로드되는 시점엔 아직 누가 로그인했는지 모른다. 그래서 앞사람의 토큰이
+       메모리에 올라와, 다른 업체로 들어가도 '구글 메일 연결됨' 으로 보였다.
+       업체가 정해진 뒤 reloadToken() 을 다시 불러 그 업체 것으로 맞춘다. */
+  function reloadToken() {
+    accessToken = null; tokenExp = 0;
     try {
       const s = JSON.parse(localStorage.getItem(TKEY()) || "null");
       if (s && s.token && s.exp && Date.now() < s.exp) { accessToken = s.token; tokenExp = s.exp; }
     } catch (e) {}
-  })();
+  }
+  reloadToken();
   function saveToken() {
     try {
       localStorage.setItem(TKEY(), JSON.stringify({ token: accessToken, exp: tokenExp }));
@@ -475,7 +480,7 @@ const GMAIL = (() => {
     return (await r.json()).id;
   }
 
-  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, listMails, listTextMails, getAttachment, send, profile,
+  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, reloadToken, listMails, listTextMails, getAttachment, send, profile,
            searchAddresses, driveFind, driveDownload, driveUpload, granted,
            driveIdFromLink, driveFileInfo, driveSearch, driveFetchExcel, driveListFolder, driveListShared, driveAncestors, driveUpdateFile, needLogin };
 })();

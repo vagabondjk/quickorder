@@ -2596,14 +2596,7 @@ const MST = (() => {
 /* ★ 로그인 화면이 끝난 다음에 확인해야 한다.
    페이지가 뜨는 순간 확인하면, 그 자리에서 마스터로 로그인해도 이미 확인이 끝나 있어서
    버튼이 안 나타난다 (새로고침해야 보였다). LOCK.ready 를 기다린다. */
-(async () => {
-  try { MST.bind(); } catch (e) {}          // 설정 안의 입구는 항상 살아 있어야 한다
-  try {
-    if (typeof LOCK === "undefined") return;
-    await LOCK.ready;
-    await MST.show();                       // 마스터면 👑, 업체면 업체명
-  } catch (e) {}
-})();
+try { MST.bind(); } catch (e) {}            // 설정 안의 입구는 항상 살아 있어야 한다
 
 /* ---------------- 시작 ---------------- */
 /* 로그인할 때 넣은 업체명을 회사 이름으로 쓴다.
@@ -2620,28 +2613,35 @@ function applyLockCompany() {
     return CONFIG.useCompany(c);
   } catch (e) { return false; }
 }
-applyLockCompany();
-/* 첫 로그인은 이 시점에 아직 업체명이 저장되기 전이다 — 로그인이 끝나면 한 번 더 맞추고,
-   저장소가 바뀌었으면 그 업체 것으로 다시 연다. */
-try {
-  if (typeof LOCK !== "undefined") LOCK.ready.then(async () => {
-    if (!applyLockCompany()) return;
-    try { const last = localStorage.getItem(ACCT_KEY()); CONFIG.useAccount(last || ""); } catch (e) {}
-    try { await reopenStore(); } catch (e) {}
-  });
-} catch (e) {}
-
-/* 저장소를 열기 전에, 마지막으로 로그인했던 계정 것으로 맞춘다.
-   이걸 안 하면 앱을 켤 때마다 잠깐 다른 회사 자료가 보였다가 바뀐다. */
-try { const last = localStorage.getItem(ACCT_KEY()); if (last) CONFIG.useAccount(last); } catch (e) {}
-loadForms()
-  .then(() => syncOnStart())
-  .catch(e => { $("vlist").innerHTML = '<div class="empty">저장소를 열지 못했어요</div>'; });
-initGmail();
-drawReplyFilter();
-drawOrderFilter();
-drawDriveRecent();
-drawSabRecent();
+/* ★★ 로그인이 끝나기 전에는 아무것도 읽지 않는다.
+   예전에는 페이지가 뜨자마자 loadForms() 와 구글 동기화를 시작했다. 그런데 그 시점에는
+   아직 앞사람(랩노마드)의 저장소가 열려 있어서,
+     · 화면에 앞 회사의 업체 양식이 뜨고,
+     · 진행 중이던 동기화가 앞 회사 백업을 내려받아 새 회사 저장소에 그대로 써 넣고,
+     · 구글 토큰이 메모리에 남아 새 회사가 앞 회사 계정으로 연결된 것처럼 보였다.
+   그래서 시작 전체를 LOCK.ready 뒤로 미룬다. */
+(async () => {
+  applyLockCompany();                       // 이미 로그인돼 있으면 이 값이 곧 정답이다
+  try { if (typeof LOCK !== "undefined") await LOCK.ready; } catch (e) {}
+  applyLockCompany();                       // 방금 로그인했다면 여기서 확정된다
+  try { const last = localStorage.getItem(ACCT_KEY()); if (last) CONFIG.useAccount(last); } catch (e) {}
+  try { GMAIL.reloadToken(); } catch (e) {}   // 앞사람 토큰이 메모리에 남아 있지 않게
+  /* ★ 저장소 연결도 다시 연다.
+     qo-cs.js 같은 모듈이 로드되면서 이미 DB 를 열어 둔다. 그 연결은 로그인 전 이름으로
+     열린 것이라, 이름만 바꿔서는 소용이 없다 — 읽고 쓰는 곳은 여전히 앞 회사 저장소다. */
+  try { await DB.reopen(); } catch (e) {}
+  try { if (window.CS && CS.reload) await CS.reload(); } catch (e) {}
+  try { if (window.ST && ST.reload) await ST.reload(); } catch (e) {}
+  try { await loadForms(); }
+  catch (e) { $("vlist").innerHTML = '<div class="empty">저장소를 열지 못했어요</div>'; }
+  initGmail();
+  drawReplyFilter();
+  drawOrderFilter();
+  drawDriveRecent();
+  drawSabRecent();
+  try { await MST.show(); } catch (e) {}    // 헤더 배지 (👑 마스터 / 업체명)
+  syncOnStart();                            // 저장소가 확정된 뒤에 동기화
+})();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 // 알림: 켜져 있으면 폴링 시작, 앱으로 돌아올 때마다 즉시 한 번 확인
 if (notifyEnabled()) { startNotify(); setTimeout(() => notifyTick(false), 4000); }
