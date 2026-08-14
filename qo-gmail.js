@@ -10,27 +10,27 @@ const GMAIL = (() => {
   /* 공용 메일 도메인 — 업체 회사 도메인인지 가릴 때 쓴다 */
   const FREEMAIL = /^(gmail|googlemail|naver|daum|hanmail|nate|kakao|hanmir|empas|korea|outlook|hotmail|live|msn|yahoo|icloud|me|proton|protonmail|aol|qq|163)\./i;
   // 회사별로 키를 분리 (같은 도메인에 여러 회사를 올려도 로그인이 섞이지 않게)
-  const TKEY = CONFIG.ls("qo_gmail_token4");    // 토큰을 기기에 보관 → 로그인 유지
-  const GKEY = CONFIG.ls("qo_gmail_granted4");  // 권한 승인 이력(토큰 만료 후 동의창 반복 방지)
-  const HKEY = CONFIG.ls("qo_gmail_hint");      // 계정 이메일 힌트(재로그인 시 계정 선택 건너뛰기)
+  const TKEY = () => CONFIG.ls("qo_gmail_token4");    // 토큰을 기기에 보관 → 로그인 유지
+  const GKEY = () => CONFIG.ls("qo_gmail_granted4");  // 권한 승인 이력(토큰 만료 후 동의창 반복 방지)
+  const HKEY = () => CONFIG.ls("qo_gmail_hint");      // 계정 이메일 힌트(재로그인 시 계정 선택 건너뛰기)
   let tokenClient = null, accessToken = null, tokenExp = 0, clientId = null;
 
   // 저장해 둔 토큰 불러오기 (아직 유효하면 재로그인 불필요)
   (function loadToken() {
     try {
-      const s = JSON.parse(localStorage.getItem(TKEY) || "null");
+      const s = JSON.parse(localStorage.getItem(TKEY()) || "null");
       if (s && s.token && s.exp && Date.now() < s.exp) { accessToken = s.token; tokenExp = s.exp; }
     } catch (e) {}
   })();
   function saveToken() {
     try {
-      localStorage.setItem(TKEY, JSON.stringify({ token: accessToken, exp: tokenExp }));
-      localStorage.setItem(GKEY, "1");   // 승인 이력 기록(토큰 만료돼도 유지)
+      localStorage.setItem(TKEY(), JSON.stringify({ token: accessToken, exp: tokenExp }));
+      localStorage.setItem(GKEY(), "1");   // 승인 이력 기록(토큰 만료돼도 유지)
     } catch (e) {}
   }
   // 이 기기에서 한 번이라도 구글 권한을 승인했는지 (동의창 반복 방지용)
-  function granted() { try { return localStorage.getItem(GKEY) === "1"; } catch (e) { return false; } }
-  function clearToken() { try { localStorage.removeItem(TKEY); localStorage.removeItem(GKEY); } catch (e) {} }
+  function granted() { try { return localStorage.getItem(GKEY()) === "1"; } catch (e) { return false; } }
+  function clearToken() { try { localStorage.removeItem(TKEY()); localStorage.removeItem(GKEY()); } catch (e) {} }
   function withTimeout(p, ms) {
     return new Promise((res, rej) => {
       const t = setTimeout(() => rej(new Error("timeout")), ms);
@@ -91,7 +91,7 @@ const GMAIL = (() => {
       };
       try { tokenClient.error_callback = e => rej(new Error((e && (e.message || e.type)) || "로그인 취소")); } catch (e) {}
       // hint(계정 이메일)를 주면 계정 선택 단계를 건너뛰고, 세션이 살아있으면 화면 없이 조용히 통과
-      const hint = (function () { try { return localStorage.getItem(HKEY) || ""; } catch (e) { return ""; } })();
+      const hint = (function () { try { return localStorage.getItem(HKEY()) || ""; } catch (e) { return ""; } })();
       const cfg = { prompt: mode === undefined ? "" : mode };
       if (hint) cfg.hint = hint;
       try { tokenClient.requestAccessToken(cfg); }
@@ -291,7 +291,7 @@ const GMAIL = (() => {
   async function profile() {
     const p = await api("/profile");
     // 로그인한 계정 이메일을 힌트로 저장 → 다음 재로그인 때 계정 선택 안 뜨게
-    try { if (p && p.emailAddress) localStorage.setItem(HKEY, p.emailAddress); } catch (e) {}
+    try { if (p && p.emailAddress) localStorage.setItem(HKEY(), p.emailAddress); } catch (e) {}
     return p;
   }
 

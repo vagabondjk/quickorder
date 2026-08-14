@@ -71,25 +71,44 @@ const CONFIG = (() => {
        거기서 그대로 복구된다.
      ※ 이메일을 그대로 키에 쓰지 않고 짧은 해시로 줄인다 (저장소 이름에 주소가 남지 않게). */
   const base = C.tenant ? "_" + C.tenant : "";
-  function acctHash(email) {
-    const t = String(email || "").trim().toLowerCase();
+  const HOME = String(C.company || "").trim().replace(/\s+/g, "");   // 이 배포본의 원래 회사
+  function shortHash(v) {
+    const t = String(v || "").trim().toLowerCase();
     let h = 5381;
     for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0;
     return h.toString(36);
   }
-  let suffix = base;                 // 지금 쓰고 있는 저장소 꼬리표
+  /* 저장소 꼬리표는 세 조각이다 — 배포본(tenant) + 로그인한 업체 + 구글 계정.
+     ★ 업체 조각이 없으면, 한 주소를 나눠 쓰는 두 회사가 같은 저장소를 본다
+       (랩노마드가 올린 업체 양식이 베타브릭스에게 그대로 보였다).
+     ★ 이 배포본의 원래 회사(HOME)는 조각을 비워 둔다 — 붙이면 이미 저장해 둔
+       업체 양식이 통째로 안 보이게 된다. */
+  let coPart = "", acctPart = "", suffix = base;
   C.account = "";                    // 지금 로그인한 계정 (없으면 "")
+  /* 잠금·승인·기기ID 처럼 '앱에 들어오기 전' 상태는 업체·계정과 무관해야 한다.
+     꼬리표를 붙이면 저장할 때와 읽을 때 키가 달라져 로그인 상태가 사라진다. */
+  C.lsBase = k => k + base;
+  /* '이 업체가 마지막에 쓴 구글 계정' 처럼 업체별이되 계정과는 무관해야 하는 값 */
+  C.lsCompany = k => k + base + coPart;
   function apply() {
+    suffix = base + coPart + acctPart;
     C.dbName = "quickorder" + suffix;                                    // IndexedDB 이름
-    C.backupFile = "qo-backup" + (C.tenant ? "-" + C.tenant : "") + ".json";  // 드라이브 백업 (계정별 폴더라 이름은 그대로)
+    C.backupFile = "qo-backup" + (C.tenant ? "-" + C.tenant : "") + coPart + ".json";  // 드라이브 백업
     C.ls = k => k + suffix;                                              // localStorage 키
   }
+  /* 로그인한 업체가 정해지면 그 업체 저장소로 바꾼다. 바뀌었으면 true. */
+  C.useCompany = name => {
+    const n = String(name || "").trim().replace(/\s+/g, "");
+    const want = (!n || n === HOME) ? "" : "_c" + shortHash(n);
+    if (want === coPart) return false;
+    coPart = want; apply(); return true;
+  };
   /* 계정이 정해지면 저장소를 그 계정 것으로 바꾼다. 바뀌었으면 true. */
   C.useAccount = email => {
     const e = String(email || "").trim().toLowerCase();
-    const want = e ? base + "_u" + acctHash(e) : base;
-    if (want === suffix) { C.account = e; return false; }
-    suffix = want; C.account = e; apply();
+    const want = e ? "_u" + shortHash(e) : "";
+    if (want === acctPart) { C.account = e; return false; }
+    acctPart = want; C.account = e; apply();
     return true;
   };
   apply();

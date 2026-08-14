@@ -2398,18 +2398,25 @@ function drawSyncStatus() {
 /* 로그인한 구글 계정으로 저장소를 갈아탄다.
    한 주소를 여러 회사가 같이 쓰기 때문에, 계정이 바뀌면 저장소도 바뀌어야 한다.
    갈아탄 뒤에는 그 계정의 드라이브 백업에서 업체 양식·설정을 그대로 내려받는다. */
-const ACCT_KEY = "qo_last_account";           // 마지막 로그인 계정 (다음에 켤 때 바로 그 저장소로)
-async function useAccountStore(email, opts) {
-  if (!email) return false;
-  const changed = CONFIG.useAccount(email);
-  try { localStorage.setItem(ACCT_KEY, email); } catch (e) {}
-  if (!changed) return false;
-  await DB.reopen();                          // 저장소 이름이 바뀌었으니 다시 연다
+/* 마지막 로그인 계정 — 업체별로 따로 기억한다.
+   한 브라우저를 두 회사가 나눠 쓰면, 앞 회사가 쓰던 구글 계정으로 저장소를 열어 버린다. */
+const ACCT_KEY = () => CONFIG.lsCompany("qo_last_account");
+/* 저장소 이름이 바뀌었을 때 화면까지 다시 그린다 (업체가 바뀌거나 계정이 바뀔 때) */
+async function reopenStore(note) {
+  await DB.reopen();
   await loadForms();
   try { if (window.CS) await CS.reload(); } catch (e) {}
   try { if (window.ST) await ST.reload(); } catch (e) {}
   drawOrderFilter(); drawReplyFilter(); drawDriveRecent(); drawSabRecent();
-  if (!(opts && opts.quiet)) msg("msg-o", "ok", `👤 ${email} 계정으로 바꿨어요. 이 계정의 자료를 불러옵니다.`);
+  if (note) msg("msg-o", "ok", note);
+}
+async function useAccountStore(email, opts) {
+  if (!email) return false;
+  try { localStorage.setItem(ACCT_KEY(), email); } catch (e) {}
+  const changed = CONFIG.useAccount(email);
+  if (!changed) return false;
+  await reopenStore((opts && opts.quiet) ? "" :
+    `👤 ${email} 계정으로 바꿨어요. 이 계정의 자료를 불러옵니다.`);
   return true;
 }
 /* 로그인이 확인되면 계정을 확인해 저장소를 맞춘다 */
@@ -2602,19 +2609,31 @@ const MST = (() => {
 /* 로그인할 때 넣은 업체명을 회사 이름으로 쓴다.
    한 주소를 여러 회사가 같이 쓰는데 회사 이름이 URL 에 박혀 있으면,
    베타브릭스가 들어와도 발주서 파일명·메일에 랩노마드가 나간다. */
+/* ★ 업체 이름은 화면 표시용이 아니라 '저장소를 가르는 기준' 이다.
+   이걸 저장소에 반영하지 않으면, 한 주소를 나눠 쓰는 두 회사가 같은 자료를 본다
+   (랩노마드가 올려둔 업체 양식이 베타브릭스로 로그인해도 그대로 보였다).
+   저장소 이름이 바뀌었으면 true 를 돌려준다. */
 function applyLockCompany() {
   try {
     const c = (typeof LOCK !== "undefined" && LOCK.company && LOCK.company()) || "";
     if (c) { CONFIG.company = c; if (!CONFIG.orderTag) CONFIG.orderTag = c; }
-  } catch (e) {}
+    return CONFIG.useCompany(c);
+  } catch (e) { return false; }
 }
 applyLockCompany();
-/* 첫 로그인은 이 시점에 아직 업체명이 저장되기 전이다 — 로그인이 끝나면 한 번 더 맞춘다 */
-try { if (typeof LOCK !== "undefined") LOCK.ready.then(applyLockCompany); } catch (e) {}
+/* 첫 로그인은 이 시점에 아직 업체명이 저장되기 전이다 — 로그인이 끝나면 한 번 더 맞추고,
+   저장소가 바뀌었으면 그 업체 것으로 다시 연다. */
+try {
+  if (typeof LOCK !== "undefined") LOCK.ready.then(async () => {
+    if (!applyLockCompany()) return;
+    try { const last = localStorage.getItem(ACCT_KEY()); CONFIG.useAccount(last || ""); } catch (e) {}
+    try { await reopenStore(); } catch (e) {}
+  });
+} catch (e) {}
 
 /* 저장소를 열기 전에, 마지막으로 로그인했던 계정 것으로 맞춘다.
    이걸 안 하면 앱을 켤 때마다 잠깐 다른 회사 자료가 보였다가 바뀐다. */
-try { const last = localStorage.getItem(ACCT_KEY); if (last) CONFIG.useAccount(last); } catch (e) {}
+try { const last = localStorage.getItem(ACCT_KEY()); if (last) CONFIG.useAccount(last); } catch (e) {}
 loadForms()
   .then(() => syncOnStart())
   .catch(e => { $("vlist").innerHTML = '<div class="empty">저장소를 열지 못했어요</div>'; });

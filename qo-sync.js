@@ -21,17 +21,17 @@ const SYNC = (() => {
 
     // v6.1.6 — 메일 문구
     "mailTemplates"];
-  const STAMP_KEY = CONFIG.ls("qo_sync_stamp");   // 이 기기가 마지막으로 반영/업로드한 시각
-  const TIME_KEY = CONFIG.ls("qo_sync_time");     // 마지막 동기화 시각(표시용)
+  const STAMP_KEY = () => CONFIG.ls("qo_sync_stamp");   // 이 기기가 마지막으로 반영/업로드한 시각
+  const TIME_KEY = () => CONFIG.ls("qo_sync_time");     // 마지막 동기화 시각(표시용)
 
   let fileId = null;
   let pushTimer = null;
   let onStatus = () => {};
 
-  const getStamp = () => { try { return Number(localStorage.getItem(STAMP_KEY)) || 0; } catch (e) { return 0; } };
-  const setStamp = t => { try { localStorage.setItem(STAMP_KEY, String(t)); } catch (e) {} };
-  const markTime = () => { try { localStorage.setItem(TIME_KEY, String(Date.now())); } catch (e) {} };
-  const lastTime = () => { try { return Number(localStorage.getItem(TIME_KEY)) || 0; } catch (e) { return 0; } };
+  const getStamp = () => { try { return Number(localStorage.getItem(STAMP_KEY())) || 0; } catch (e) { return 0; } };
+  const setStamp = t => { try { localStorage.setItem(STAMP_KEY(), String(t)); } catch (e) {} };
+  const markTime = () => { try { localStorage.setItem(TIME_KEY(), String(Date.now())); } catch (e) {} };
+  const lastTime = () => { try { return Number(localStorage.getItem(TIME_KEY())) || 0; } catch (e) { return 0; } };
 
   function status(state, detail) { try { onStatus(state, detail); } catch (e) {} }
 
