@@ -46,6 +46,17 @@
     border-radius:999px;font-weight:700;cursor:pointer;border:none;font-family:inherit}
   .chip+.chip{margin-left:6px}
 
+  /* 좁은 화면에서 헤더가 두 줄로 접히며 94px 를 먹었다 — 한 줄에 들어가게 줄인다 */
+  @media (max-width:430px){
+    header{gap:6px;padding:6px 2px 12px}
+    header b{font-size:19px}
+    header .sub{display:none}
+    .verbadge{font-size:10px;padding:3px 7px}
+    .whobadge{font-size:10px;padding:3px 7px;margin-left:3px;max-width:24vw;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .chip{font-size:10.5px;padding:4px 8px}
+    .chip+.chip{margin-left:4px}
+  }
   .tabs{display:flex;gap:6px;background:var(--card2);border:1px solid var(--line);
     border-radius:13px;padding:5px;margin-bottom:16px}
   .tabs button{flex:1;border:none;background:none;font-family:inherit;font-size:13.5px;font-weight:800;
@@ -54,7 +65,7 @@
   .pane{display:none}.pane.on{display:block}
 
   .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px}
-  .card h2{margin:0 0 3px;font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px}
+  .card h2{margin:0 0 8px;font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px}
   .card h2 .n{width:22px;height:22px;border-radius:7px;background:var(--brand-soft);color:var(--brand);
     font-size:12px;font-weight:800;display:grid;place-items:center;flex:none}
   .card p.hint{margin:0 0 12px;font-size:12.5px;color:var(--muted);padding-left:30px}
@@ -164,7 +175,8 @@
   .on>.box,.vrow.on .box,.brow.on .box,.rrow.on .box{background:var(--brand);border-color:var(--brand)}
 
   /* 업체 양식·회신 목록: 한 줄에 2~4개씩 들어가는 압축 카드 */
-  .vlist,#replist{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:8px}
+  .vlist,#replist{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:8px;margin-bottom:8px}
+  .vlist:empty,#replist:empty{margin-bottom:0}
   .vrow{display:block;border:1.5px solid var(--line);border-radius:11px;
     padding:9px 10px;cursor:pointer;user-select:none}
   .vrow.on{border-color:var(--brand);background:var(--brand-soft)}
@@ -178,8 +190,8 @@
     overflow:hidden;word-break:break-all}
   .vbtns{display:flex;gap:4px}
   .vbtns button{flex:1;min-width:0;font-size:10px;font-weight:700;font-family:inherit;
-    padding:5px 2px;border-radius:6px;border:1px solid var(--line);
-    background:var(--card2);color:var(--muted);cursor:pointer}
+    padding:6px 1px;border-radius:6px;border:1px solid var(--line);white-space:nowrap;
+    letter-spacing:-.03em;background:var(--card2);color:var(--muted);cursor:pointer}
   .vinfo{flex:1;min-width:0}
   .vinfo b{font-size:14px;font-weight:800;display:block}
   .vinfo span{font-size:11.5px;color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -234,14 +246,20 @@
   .modal{position:fixed;inset:0;background:rgba(8,12,20,.55);display:none;z-index:50;align-items:flex-end;justify-content:center}
   .modal.on{display:flex}
   .sheet{background:var(--card);width:100%;max-width:640px;max-height:88vh;border-radius:20px 20px 0 0;
-    display:flex;flex-direction:column;padding:10px 16px calc(16px + env(safe-area-inset-bottom))}
+    display:flex;flex-direction:column;overflow:hidden;
+    padding:10px 16px calc(16px + env(safe-area-inset-bottom))}
+  /* 내용이 길어지면 이 영역만 스크롤한다. 예전엔 목록(.mlist)에만 스크롤이 걸려 있어서
+     그 위 내용이 길면 아래 버튼줄이 시트 밖으로 밀려났다 (설정 화면에서 실제로 그랬다). */
+  .sheetbody{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    margin:0 -16px 12px;padding:0 16px}
+  .sheetbody .mlist{flex:none;overflow:visible;margin-bottom:0}
   @media(min-width:640px){.modal{align-items:center}.sheet{border-radius:18px;max-height:82vh}}
   .grip{width:40px;height:5px;border-radius:3px;background:var(--line);margin:4px auto 12px;flex:none}
   .sheet h3{margin:0 0 3px;font-size:16px;font-weight:800}
   .sheet .sub2{margin:0 0 12px;font-size:12px;color:var(--muted)}
-  .mlist{overflow-y:auto;display:flex;flex-direction:column;gap:8px;flex:1;margin-bottom:12px}
+  .mlist{overflow-y:auto;display:flex;flex-direction:column;gap:8px;flex:1;min-height:0;margin-bottom:12px}
   .mitem{border:1.5px solid var(--line);border-radius:12px;padding:11px}
-  .sheet .row{display:flex;gap:9px}
+  .sheet .row{display:flex;gap:9px;flex:none}
   .sheet .row button{flex:1;border:none;cursor:pointer;font-family:inherit;font-weight:800;font-size:14px;border-radius:12px;padding:14px}
   .btn-go{background:var(--brand);color:#fff}
   .btn-cancel{background:var(--card2);color:var(--ink);border:1px solid var(--line)!important;flex:0 0 90px!important}
@@ -417,10 +435,13 @@
 
     <div class="card">
       <h2><span class="n">2</span>업체 양식</h2>
+      <!-- 다른 기기에 반영됐는지 여기서 바로 보이게 (설정을 열어야만 알 수 있었다) -->
+      <div class="setrow" id="forms-sync-row"><span id="forms-sync">동기화 확인 중…</span>
+        <button class="minibtn" id="forms-sync-btn">지금 동기화</button></div>
       <div class="vlist" id="vlist"><div class="empty">불러오는 중…</div></div>
       <button class="go" id="drive-tpl" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
-      <label class="drop" id="drop-tpl" style="margin-top:10px;padding:14px">
-        ＋ 업체 양식 추가
+      <label class="drop" id="drop-tpl" style="margin-top:8px;padding:14px">
+        디바이스 파일 선택 또는 끌어오기
         <input type="file" id="f-tpl" accept=".xlsx,.xlsm" multiple>
       </label>
     </div>
@@ -468,14 +489,14 @@
 
     <div class="card">
       <h2><span class="n">2</span>업체 회신 송장</h2>
-      <button class="go" id="mail-rep" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
       <button class="go" id="drive-rep" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
+      <button class="go" id="mail-rep" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
       <div class="setrow"><span id="reply-filter">회신 검색조건: 송장, 운송장, 회신</span><button class="minibtn" id="reply-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-rep" style="padding:14px;margin-top:8px">
-        ＋ 회신 송장 파일 추가
+        디바이스 파일 선택 또는 끌어오기
         <input type="file" id="f-rep" accept=".xlsx,.xlsm" multiple>
       </label>
-      <div class="vlist" id="replist" style="margin-top:10px"></div>
+      <div class="vlist" id="replist" style="margin-top:8px"></div>
     </div>
 
     <button class="go" id="run-i" disabled><span class="spin"></span><span id="run-i-lbl">송장 취합하기</span></button>
@@ -538,7 +559,7 @@
         <b id="st-fname"></b>
         <input type="file" id="f-st" accept=".xlsx,.xlsm" multiple>
       </label>
-      <div class="vlist" id="st-files" style="margin-top:10px"></div>
+      <div class="vlist" id="st-files" style="margin-top:8px"></div>
       <div class="msg" id="msg-s"></div>
     </div>
 
@@ -564,7 +585,7 @@
         디바이스 파일 선택 또는 끌어오기
         <input type="file" id="f-pb" accept=".xlsx,.xlsm">
       </label>
-      <div class="pvfoot" id="pb-state" style="margin-top:10px"></div>
+      <div class="pvfoot" id="pb-state" style="margin-top:8px"></div>
       <div class="msg" id="msg-pb"></div>
     </div>
 
@@ -594,7 +615,7 @@
         📂 폴더째 업로드
         <input type="file" id="f-pay-dir" webkitdirectory directory multiple>
       </label>
-      <div class="pvfoot" id="pay-state" style="margin-top:10px"></div>
+      <div class="pvfoot" id="pay-state" style="margin-top:8px"></div>
       <div class="msg" id="msg-pay"></div>
     </div>
 
@@ -794,6 +815,7 @@
     <div class="grip"></div>
     <h3>설정</h3>
     <p class="sub2">이 기기에 저장된 정보입니다.</p>
+    <div class="sheetbody">
     <div class="syncbox">
       <div class="syncrow">
         <b>☁ 기기 간 동기화</b>
@@ -825,6 +847,7 @@
       <div class="synchint">로그아웃하면 다음에 열 때 업체명과 승인번호를 다시 넣습니다. <b>저장된 자료는 지워지지 않습니다.</b></div>
     </div>
     <div class="mlist" id="setlist"></div>
+    </div>
     <div class="row">
       <button class="btn-cancel" id="set-close">닫기</button>
       <button class="btn-go" id="set-add">＋ 업체 메일 추가</button>

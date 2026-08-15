@@ -1889,6 +1889,7 @@ function doLogout() {
 }
 if ($("set-logout")) $("set-logout").onclick = doLogout;
 if ($("btn-logout")) $("btn-logout").onclick = doLogout;
+if ($("forms-sync-btn")) $("forms-sync-btn").onclick = () => { const b = $("sync-now"); if (b) b.click(); };
 $("sync-now").onclick = async function () {
   this.disabled = true;
   try {
@@ -2461,6 +2462,10 @@ function drawSyncStatus() {
   else if (st === "offline") t = "구글 로그인하면 자동 동기화됩니다";
   else t = "✓ 동기화됨 · 마지막 " + fmtAgo(SYNC.lastTime());
   el.textContent = t;
+  /* 업체 양식 카드에도 같은 상태를 보여준다 — 모바일에서 '왜 안 넘어왔지' 를
+     설정까지 열어보지 않고 바로 알 수 있어야 한다. */
+  const f = $("forms-sync");
+  if (f) f.textContent = st === "offline" ? "☁ 구글 로그인하면 다른 기기와 자동으로 맞춰집니다" : "☁ " + t.replace(/^[✓🔄⚠]\s*/, "");
 }
 // 로그인돼 있으면 시작 시 내려받기 → 바뀌었으면 화면 갱신
 /* 로그인한 구글 계정으로 저장소를 갈아탄다.
