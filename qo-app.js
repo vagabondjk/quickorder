@@ -267,10 +267,10 @@ if (typeof GMAIL !== "undefined") {
 const MAILTPL = (() => {
   const DEF = {
     order:   { name: "발주서", subject: "[{회사}] {날짜}_발주서 송부",
-               body: "안녕하세요 발주서 송부드립니다. 감사합니다!",
+               body: "안녕하세요, {회사}입니다.\n\n발주서 송부드립니다.\n확인 부탁드립니다.\n\n감사합니다.",
                vars: ["회사", "업체", "날짜", "건수"] },
     invoice: { name: "송장 취합본", subject: "[{회사}] {날짜}_송장 취합본 송부",
-               body: "안녕하세요 송장 취합본 송부드립니다. 감사합니다!",
+               body: "안녕하세요, {회사}입니다.\n\n송장 취합본 송부드립니다.\n확인 부탁드립니다.\n\n감사합니다.",
                vars: ["회사", "업체", "날짜"] },
     settle:  { name: "정산서", subject: "[{회사}] {정산월} 정산서 - {업체}",
                body: "안녕하세요, {회사}입니다.\n\n{정산월} 정산 내역을 보내드립니다.\n정산기간 {정산기간} (출고완료된 주문건 기준)\n\n{요약}\n\n자세한 내역은 첨부 파일을 확인해주세요.\n감사합니다.",
@@ -291,10 +291,20 @@ const MAILTPL = (() => {
     return String(s == null ? "" : s).replace(/\{([^}\s]+)\}/g,
       (m, k) => (vars && vars[k] !== undefined && vars[k] !== null ? String(vars[k]) : m));
   }
+  /* ★ 문구에 회사 이름이 {회사} 가 아니라 글자로 박혀 있는 경우가 있다
+     (예전에 저장해 둔 문구, 다른 데서 복사해 온 문구).
+     그대로 두면 베타브릭스가 보내는 메일에 '랩노마드' 가 찍혀 나간다 — 사고다.
+     그래서 이 배포본의 원래 회사 이름은 로그인한 업체 이름으로 바꿔서 내보낸다. */
+  function swapCo(str) {
+    const home = String((typeof CONFIG !== "undefined" && CONFIG.homeCompany) || "").trim();
+    const co = String((typeof CONFIG !== "undefined" && CONFIG.company) || "").trim();
+    if (!home || !co || home === co) return str;
+    return String(str == null ? "" : str).split(home).join(co);
+  }
   /* vendor 를 주면 그 업체 전용 문구를 먼저 쓴다 (없으면 공통) */
   function render(kind, vars, vendor) {
     const t = get(kind, vendor !== undefined ? vendor : (vars && vars.업체));
-    return { subject: fill(t.subject, vars), body: fill(t.body, vars) };
+    return { subject: swapCo(fill(t.subject, vars)), body: swapCo(fill(t.body, vars)) };
   }
 
   let cur = null;
@@ -306,8 +316,8 @@ const MAILTPL = (() => {
     $("tpl-sub").textContent = v
       ? `${v} 에게 보낼 때만 이 문구를 씁니다. (되돌리기를 누르면 공통 문구로 돌아갑니다)`
       : "여기서 고친 제목·본문을 앞으로 계속 씁니다.";
-    $("tpl-subject").value = t.subject;
-    $("tpl-body").value = t.body;
+    $("tpl-subject").value = swapCo(t.subject);
+    $("tpl-body").value = swapCo(t.body);
     $("tpl-vars").innerHTML = "쓸 수 있는 값: " +
       d.vars.map(v => `<b>{${esc(v)}}</b>`).join(" · ") + " — 보낼 때 실제 값으로 바뀝니다";
     preview();
