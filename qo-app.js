@@ -316,37 +316,40 @@ const MAILTPL = (() => {
     $("tpl-sub").textContent = v
       ? `${v} 에게 보낼 때만 이 문구를 씁니다. (되돌리기를 누르면 공통 문구로 돌아갑니다)`
       : "여기서 고친 제목·본문을 앞으로 계속 씁니다.";
-    $("tpl-subject").value = swapCo(t.subject);
-    $("tpl-body").value = swapCo(t.body);
-    $("tpl-vars").innerHTML = "쓸 수 있는 값: " +
-      d.vars.map(v => `<b>{${esc(v)}}</b>`).join(" · ") + " — 보낼 때 실제 값으로 바뀝니다";
-    preview();
+    /* ★ 편집창에 {회사} 가 아니라 실제 값을 넣어 보여준다.
+       '{회사}입니다' 를 보여주면 무슨 글이 나갈지 가늠이 안 된다 — 그래서 미리보기도 없앴다.
+       대신 저장할 때 값을 다시 {키} 로 되돌려, 회사·업체가 바뀌어도 문구가 따라간다. */
+    $("tpl-subject").value = fill(swapCo(t.subject), cur.sample);
+    $("tpl-body").value = fill(swapCo(t.body), cur.sample);
+    $("tpl-vars").textContent = "회사·업체·날짜는 보낼 때 그 값으로 자동으로 바뀝니다"
+      + (cur.real ? "" : " (숫자는 예시입니다)");
     $("tplmodal").classList.add("on");
   }
-  function preview() {
-    if (!cur) return;
-    const s = fill($("tpl-subject").value, cur.sample);
-    const b = fill($("tpl-body").value, cur.sample);
-    // 견본 숫자를 실제 금액으로 오해하지 않게 제목을 다르게 적는다
-    const head = cur.real ? "미리보기 (실제 값)" : "미리보기 — 아래 숫자는 예시입니다";
-    $("tpl-preview").textContent = head + "\n제목: " + s + "\n\n" + b;
+  /* 실제 값 → {키} 되돌리기. 짧은 값(숫자 등)은 엉뚱한 곳이 바뀔 수 있어 3글자 이상만.
+     긴 값부터 바꿔야 '랩노마드' 가 '랩노마드물류' 안에서 잘려나가지 않는다. */
+  function unfill(str, vars) {
+    let out = String(str == null ? "" : str);
+    Object.keys(vars || {})
+      .filter(k => String(vars[k] == null ? "" : vars[k]).length >= 3)
+      .sort((a, b) => String(vars[b]).length - String(vars[a]).length)
+      .forEach(k => { out = out.split(String(vars[k])).join("{" + k + "}"); });
+    return out;
   }
   function close() { $("tplmodal").classList.remove("on"); cur = null; }
 
-  $("tpl-subject").oninput = $("tpl-body").oninput = preview;
   $("tpl-close").onclick = close;
   $("tplmodal").onclick = e => { if (e.target === $("tplmodal")) close(); };
   /* 되돌리기 — 업체별 창이면 공통 문구로, 공통 창이면 기본 문구로 */
   $("tpl-reset").onclick = () => {
     if (!cur) return;
     const base = cur.vendor ? get(cur.kind) : DEF[cur.kind];
-    $("tpl-subject").value = base.subject;
-    $("tpl-body").value = base.body;
-    preview();
+    $("tpl-subject").value = fill(swapCo(base.subject), cur.sample);
+    $("tpl-body").value = fill(swapCo(base.body), cur.sample);
   };
   $("tpl-save").onclick = async () => {
     if (!cur) return;
-    const val = { subject: $("tpl-subject").value, body: $("tpl-body").value };
+    const val = { subject: unfill($("tpl-subject").value, cur.sample),
+                  body: unfill($("tpl-body").value, cur.sample) };
     if (cur.vendor) {
       const common = get(cur.kind);
       // 공통과 똑같아졌으면 업체 전용을 지운다 (안 그러면 공통을 고쳐도 이 업체만 옛 문구가 남는다)
@@ -1889,7 +1892,7 @@ function doLogout() {
 }
 if ($("set-logout")) $("set-logout").onclick = doLogout;
 if ($("btn-logout")) $("btn-logout").onclick = doLogout;
-if ($("forms-sync-btn")) $("forms-sync-btn").onclick = () => { const b = $("sync-now"); if (b) b.click(); };
+if ($("btn-sync")) $("btn-sync").onclick = () => { const b = $("sync-now"); if (b) b.click(); };
 $("sync-now").onclick = async function () {
   this.disabled = true;
   try {
@@ -2464,8 +2467,13 @@ function drawSyncStatus() {
   el.textContent = t;
   /* 업체 양식 카드에도 같은 상태를 보여준다 — 모바일에서 '왜 안 넘어왔지' 를
      설정까지 열어보지 않고 바로 알 수 있어야 한다. */
-  const f = $("forms-sync");
-  if (f) f.textContent = st === "offline" ? "☁ 구글 로그인하면 다른 기기와 자동으로 맞춰집니다" : "☁ " + t.replace(/^[✓🔄⚠]\s*/, "");
+  /* 헤더 동기화 버튼도 상태를 보여준다 — 눌러도 되는지, 도는 중인지 알 수 있게 */
+  const b = $("btn-sync");
+  if (b) {
+    b.disabled = st === "syncing";
+    b.style.opacity = st === "syncing" ? ".6" : "";
+    b.title = st === "offline" ? "구글 로그인하면 다른 기기와 자동으로 맞춰집니다" : t;
+  }
 }
 // 로그인돼 있으면 시작 시 내려받기 → 바뀌었으면 화면 갱신
 /* 로그인한 구글 계정으로 저장소를 갈아탄다.
