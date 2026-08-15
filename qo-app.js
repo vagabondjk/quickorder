@@ -750,7 +750,7 @@ async function drawDriveRecent() {
 
 /* --- ② 업체 양식 (여러 개 선택 가능) --- */
 $("drive-tpl").onclick = () => openDrivePicker({
-  key: "tpl", title: "드라이브에서 업체 양식 가져오기", multiple: true,
+  key: "tpl", title: "드라이브에서 발주서 양식 가져오기", multiple: true,
   onPick: async files => {
     const list = [];
     for (const f of files) {
@@ -761,7 +761,7 @@ $("drive-tpl").onclick = () => openDrivePicker({
     if (!named) return;
     const r = await saveForms(named);
     await loadForms();
-    msg("msg-o", "ok", `✔ 드라이브에서 업체 양식 ${r.added + r.updated}개 저장 — ${r.names.join(", ")}`
+    msg("msg-o", "ok", `✔ 드라이브에서 발주서 양식 ${r.added + r.updated}개 저장 — ${r.names.join(", ")}`
       + (r.updated ? ` (${r.updated}개는 기존 양식 갱신)` : ""));
   },
 });
@@ -1044,7 +1044,7 @@ function askVendorNames(list) {
         const ex = existing.find(f => f.name === n);
         return ex && ex.file !== list[i].fileName;
       });
-      if (clash && !confirm(`'${clash}' 업체 양식이 이미 있습니다.\n새 파일로 바꿀까요?`)) return;
+      if (clash && !confirm(`'${clash}' 발주서 양식이 이미 있습니다.\n새 파일로 바꿀까요?`)) return;
       close();
       resolve(list.map((it, i) => Object.assign({}, it, { name: names[i] })));
     };
@@ -1100,7 +1100,7 @@ async function addForms(files) {
   if (!named) return;                      // 사용자가 취소
   const r = await saveForms(named);
   await loadForms();
-  msg("msg-o", "ok", `✔ 업체 양식 ${r.added + r.updated}개 저장 — ${r.names.join(", ")}`
+  msg("msg-o", "ok", `✔ 발주서 양식 ${r.added + r.updated}개 저장 — ${r.names.join(", ")}`
     + (r.updated ? ` (${r.updated}개는 기존 양식 갱신)` : "")
     + "\n다음부터는 체크만 하면 됩니다.");
 }
@@ -1111,7 +1111,7 @@ async function renameForm(f) {
   if (v === null) return;
   const newName = v.trim().replace(/[\\/:*?"<>|]/g, "");
   if (!newName || newName === f.name) return;
-  if (S.forms.some(x => x.name === newName)) { alert("같은 이름의 업체 양식이 이미 있어요."); return; }
+  if (S.forms.some(x => x.name === newName)) { alert("같은 이름의 발주서 양식이 이미 있어요."); return; }
   await dropForm(f.name);
   await addForm({ name: newName, file: f.file, data: f.data, checked: f.checked !== false });
   for (const b in S.brandVendor) if (S.brandVendor[b] === f.name) S.brandVendor[b] = newName;
@@ -1202,7 +1202,7 @@ function addDupFixer(box, groups) {
 }
 function drawForms() {
   const box = $("vlist");
-  if (!S.forms.length) { box.innerHTML = '<div class="empty">저장된 업체 양식이 없습니다</div>'; return; }
+  if (!S.forms.length) { box.innerHTML = '<div class="empty">저장된 발주서 양식이 없습니다</div>'; return; }
   box.innerHTML = "";
   const dups = dupNameGroups(S.forms, f => f.name);
   addDupWarning(box, dups, f => f.name,
