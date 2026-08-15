@@ -2013,11 +2013,12 @@ function updateGmailWho() {
   // 어느 계정으로 들어와 있는지 보여준다 — 한 주소를 두 회사가 같이 써서, 이게 안 보이면
   // 남의 회사 자료를 보고 있어도 모른다
   const who = CONFIG.account ? ` (${CONFIG.account})` : "";
-  const txt = !gmailReady ? "⚠ 메일 연결 준비 안 됨 (설정에서 연결하세요)"
-    : GMAIL.signedIn() ? "✓ 구글 메일 연결됨" + who : "구글 계정 연결 필요 (버튼을 누르면 로그인)";
-  ["gmail-who-o", "gmail-who-i", "gmail-who-s"].forEach(id => {
-    const el = $(id); if (el) el.textContent = txt;
-  });
+  /* 드라이브와 메일은 같은 구글 계정 하나로 연결된다 — '메일' 이라고만 쓰면
+     드라이브는 따로 붙여야 하는 줄 안다. 문구를 '구글 계정' 으로 둔다. */
+  const txt = !gmailReady ? "⚠ 구글 연결 준비 안 됨 (설정에서 연결하세요)"
+    : GMAIL.signedIn() ? "✓ 구글 계정 연결됨 (드라이브·메일)" + who
+    : "구글 계정 연결 필요 (버튼을 누르면 로그인)";
+  document.querySelectorAll(".gwho").forEach(el => { el.textContent = txt; });
 }
 /* 구글 계정 바꾸기 — 탭마다 [계정 변경] 버튼에 걸린다.
    계정을 바꾸면 그 계정 저장소로 갈아타야 한다(useAccountStore). 안 그러면

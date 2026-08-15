@@ -59,8 +59,11 @@
     font-size:12px;font-weight:800;display:grid;place-items:center;flex:none}
   .card p.hint{margin:0 0 12px;font-size:12.5px;color:var(--muted);padding-left:30px}
 
-  .drop{border:1.5px dashed var(--line);border-radius:12px;background:var(--card2);padding:20px;
-    text-align:center;color:var(--faint);font-size:13px;cursor:pointer;display:block;transition:.15s}
+  /* 위쪽 큰 버튼 두 개에 눌려 잘 안 보인다는 지적 → 테두리·글자를 또렷하게 */
+  .drop{border:2px dashed color-mix(in srgb,var(--brand) 38%,var(--line));border-radius:12px;
+    background:color-mix(in srgb,var(--brand) 4%,var(--card2));padding:22px;
+    text-align:center;color:var(--ink);font-size:13.5px;font-weight:700;cursor:pointer;display:block;transition:.15s}
+  .drop::before{content:"⬆ ";font-weight:800;color:var(--brand)}
   .drop:hover,.drop.hi{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
   .drop b{display:block;color:var(--ink);font-size:13.5px;margin-top:5px;word-break:break-all}
   .drop.on{border-style:solid;border-color:color-mix(in srgb,var(--brand) 45%,var(--line));
@@ -369,6 +372,7 @@
     <div class="card">
       <h2><span class="n">1</span>쇼핑몰 주문 파일</h2>
       <button class="go" id="drive-again" style="margin:0 0 6px;font-size:15px;padding:14px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
+      <div class="setrow"><span class="gwho">메일 연결 확인 중…</span><button class="minibtn gacct" type="button">계정변경</button></div>
       <div class="pinrow" id="order-pinrow" style="display:none;font-size:12.5px;background:var(--card2);
         border:1px solid var(--line);border-radius:10px;padding:9px 10px;margin:0 0 8px">
         <span style="flex:1;min-width:0">지정 파일: <b id="order-pinname">-</b></span>
@@ -376,9 +380,10 @@
           background:var(--brand-soft);color:var(--brand);border-color:var(--brand)">📁 다른 파일로 변경</button>
         <button class="minibtn" id="order-pin-clear">해제</button></div>
       <button class="minibtn" id="order-pin-set" style="margin:0 0 8px">📌 바로 가져올 발주서 파일 지정</button>
-      <button class="go" id="mail-order" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 퀵로딩</button>
-      <div class="setrow"><span id="gmail-who-o">메일 연결 확인 중…</span><button class="minibtn gacct" type="button">계정 변경</button></div>
-      <div class="setrow"><span id="order-filter">발주서 검색: onekglobal.co.kr · 키워드 랩노마드</span><button class="minibtn" id="order-filter-btn">검색조건</button></div>
+      <button class="go" id="mail-order" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
+      <div class="setrow"><span class="gwho" id="gmail-who-o">메일 연결 확인 중…</span><span id="order-filter" hidden></span>
+        <button class="minibtn gacct" type="button">계정변경</button>
+        <button class="minibtn" id="order-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-order" style="margin-top:8px">
         디바이스 파일 선택 또는 끌어오기
         <b id="order-name"></b>
@@ -439,6 +444,7 @@
     <div class="card">
       <h2><span class="n">1</span>송장취합양식</h2>
       <button class="go" id="sab-again" style="margin:0 0 6px;font-size:15px;padding:14px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
+      <div class="setrow"><span class="gwho">메일 연결 확인 중…</span><button class="minibtn gacct" type="button">계정변경</button></div>
       <div class="pinrow" id="sab-pinrow" style="display:none;font-size:12.5px;background:var(--card2);
         border:1px solid var(--line);border-radius:10px;padding:9px 10px;margin:0 0 8px">
         <span style="flex:1;min-width:0">지정 파일: <b id="sab-pinname">-</b></span>
@@ -446,8 +452,9 @@
           background:var(--brand-soft);color:var(--brand);border-color:var(--brand)">📁 다른 파일로 변경</button>
         <button class="minibtn" id="sab-pin-clear">해제</button></div>
       <button class="minibtn" id="sab-pin-set" style="margin:0 0 8px">📌 바로 가져올 송장취합양식 파일 지정</button>
-      <button class="go" id="mail-sab" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 퀵로딩</button>
-      <div class="setrow"><span id="gmail-who-i">메일 연결 확인 중…</span><button class="minibtn gacct" type="button">계정 변경</button></div>
+      <button class="go" id="mail-sab" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
+      <div class="setrow"><span class="gwho" id="gmail-who-i">메일 연결 확인 중…</span>
+        <button class="minibtn gacct" type="button">계정변경</button></div>
       <label class="drop" id="drop-sab">
         디바이스 파일 선택 또는 끌어오기
         <b id="sab-name"></b>
@@ -461,7 +468,7 @@
 
     <div class="card">
       <h2><span class="n">2</span>업체 회신 송장</h2>
-      <button class="go" id="mail-rep" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 퀵로딩</button>
+      <button class="go" id="mail-rep" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
       <button class="go" id="drive-rep" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <div class="setrow"><span id="reply-filter">회신 검색조건: 송장, 운송장, 회신</span><button class="minibtn" id="reply-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-rep" style="padding:14px;margin-top:8px">
@@ -486,7 +493,7 @@
   <div class="pane" id="pane-c">
     <div class="card">
       <h2><span class="n">1</span>CS 불러오기</h2>
-      <button class="go" id="cs-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 퀵로딩</button>
+      <button class="go" id="cs-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
       <button class="go" id="cs-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <div class="setrow"><span id="cs-filter">CS 검색: 문의, 교환, 반품, 취소</span><button class="minibtn" id="cs-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-cs" style="margin-top:8px;padding:16px">
@@ -524,8 +531,9 @@
     <div class="card">
       <h2><span class="n">1</span>쇼핑몰 정산 파일</h2>
       <button class="go" id="st-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
-      <button class="go" id="st-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 퀵로딩</button>
-      <div class="setrow"><span id="gmail-who-s">메일 연결 확인 중…</span><button class="minibtn gacct" type="button">계정 변경</button></div>
+      <div class="setrow"><span class="gwho">메일 연결 확인 중…</span><button class="minibtn gacct" type="button">계정변경</button></div>
+      <button class="go" id="st-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
+      <div class="setrow"><span class="gwho" id="gmail-who-s">메일 연결 확인 중…</span><button class="minibtn gacct" type="button">계정변경</button></div>
       <label class="drop" id="drop-st" style="margin-top:8px;padding:16px">
         디바이스 파일 선택 또는 끌어오기
         <b id="st-fname"></b>
