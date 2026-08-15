@@ -2057,12 +2057,27 @@ async function ensureGmail() {
   syncOnStart();          // 로그인 직후 다른 기기 데이터 내려받기
 }
 
+/* ★ 검색조건 기본값은 '이 배포본의 원래 회사' 기준으로 적혀 있다.
+   한 주소를 여러 회사가 나눠 쓰므로, 다른 업체로 로그인하면 그 업체 이름으로 만들어 준다.
+   (베타브릭스로 들어갔는데 '랩노마드 발주서' 가 기본 키워드로 보이던 문제)
+   ※ 저장해 둔 값이 있으면 그게 우선이다 — 여기는 아직 아무것도 안 정한 경우만 쓴다. */
+function defaultOrderFilter() {
+  const co = String(CONFIG.company || "").trim();
+  const home = String(CONFIG.homeCompany || "").trim().replace(/\s+/g, "");
+  if (!co || co.replace(/\s+/g, "") === home) return CONFIG.order;
+  return {
+    senders: [],                                   // 발주서가 오는 곳은 회사마다 다르다
+    keywords: [co + " 발주서", co + "발주서", "★" + co, co],
+    exclude: ["송장", "회신", "운송장", "택배"],    // 업체명은 빼고 공통 단어만
+  };
+}
 /* 발주서 검색조건 (PC 앱과 동일한 기본값) */
 async function getOrderFilter() {
+  const d = defaultOrderFilter();
   return {
-    senders: await DB.get("orderSenders", CONFIG.order.senders),
-    keywords: await DB.get("orderKeywords", CONFIG.order.keywords),
-    exclude: await DB.get("orderExclude", CONFIG.order.exclude),
+    senders: await DB.get("orderSenders", d.senders),
+    keywords: await DB.get("orderKeywords", d.keywords),
+    exclude: await DB.get("orderExclude", d.exclude),
   };
 }
 async function drawOrderFilter() {
@@ -2123,7 +2138,7 @@ function drawChipList(boxId, items, kind) {
 async function getList(kind) {
   const key = FKEY[filterMode][kind];
   const DEF = {
-    order: CONFIG.order,
+    order: defaultOrderFilter(),
     reply: CONFIG.reply,
     cs: { senders: [], keywords: ["문의", "교환", "반품", "취소", "환불", "누락", "파손", "불량", "CS"],
           exclude: ["발주", "정산"] },
