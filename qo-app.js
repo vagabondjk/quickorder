@@ -1916,6 +1916,10 @@ async function drawSettings() {
               "관리자가 구글 콘솔에서 <b>[앱 게시]</b> 를 누르면 바로 풀립니다.<br>" +
               "회사 전용 구글 프로젝트를 따로 쓰려면 그 <b>클라이언트 ID</b> 를 아래에 넣고 [저장] 하세요."}
     </div>
+    <div style="font-size:11px;color:var(--muted);margin:0 0 6px">
+      연결에 쓰는 구글 프로젝트 번호 <b style="color:var(--ink);font-size:12px">${esc(GMAIL.projectNo(cid))}</b>
+      &nbsp;— 막히면 이 번호를 관리자에게 알려주세요
+    </div>
     <div class="fld"><label>클라이언트 ID</label>
       <input id="gmail-cid" value="${esc(cid)}" placeholder="xxxxx.apps.googleusercontent.com" spellcheck="false" autocapitalize="off"></div>
     <div style="display:flex;gap:7px">

@@ -52,16 +52,17 @@ const GMAIL = (() => {
   /* 구글이 돌려주는 영문 오류를 무슨 뜻인지 알아볼 수 있게 바꾼다.
      access_denied 는 대개 '비밀번호가 틀렸다' 가 아니라, 그 구글 프로젝트가 아직
      테스트 상태라 등록된 사람만 들어올 수 있다는 뜻이다. */
+  /* 클라이언트 ID 앞의 숫자가 곧 구글 프로젝트 번호다.
+     '게시했는데 왜 막히지' 는 대개 다른 프로젝트를 게시한 경우라, 번호를 눈에 보이게 둔다. */
+  function projectNo(cid) { return String(cid || clientId || "").split("-")[0] || "?"; }
   function explain(msg) {
     const m = String(msg || "");
     if (/access_denied|has not completed|verification/i.test(m))
       return "이 구글 프로젝트가 아직 '테스트' 상태라 등록된 계정만 들어올 수 있습니다.\n\n" +
-             "가장 빠른 해결 — 관리자에게 이렇게 요청하세요.\n" +
-             "  구글 클라우드 콘솔 → API 및 서비스 → OAuth 동의 화면(대상)\n" +
-             "  → [앱 게시] 를 눌러 '프로덕션' 으로 바꾸기\n" +
-             "  테스터 등록 없이 바로 연결됩니다.\n" +
-             "  (연결할 때 '확인되지 않은 앱' 경고가 한 번 뜨는데,\n" +
-             "   고급 → 이동 을 누르면 됩니다)\n\n" +
+             "▶ 지금 쓰고 있는 구글 프로젝트 번호: " + projectNo() + "\n" +
+             "   관리자에게 이 번호를 알려주고 '이 프로젝트'를 게시해 달라고 하세요.\n" +
+             "   콘솔 → API 및 서비스 → OAuth 동의 화면(대상) → [앱 게시] → 프로덕션\n" +
+             "   ※ 게시했는데도 이 창이 뜨면 다른 프로젝트를 게시한 것입니다.\n\n" +
              "다른 방법 — 회사 전용 구글 프로젝트를 쓰려면\n" +
              "  설정 → 구글 메일·드라이브 연결 → 클라이언트 ID 에 그 프로젝트 ID 를 넣고 [저장]\n\n" +
              "(원문: " + m + ")";
@@ -516,7 +517,7 @@ const GMAIL = (() => {
     return (await r.json()).id;
   }
 
-  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, reloadToken, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
+  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, reloadToken, projectNo, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
            searchAddresses, driveFind, driveDownload, driveUpload, granted,
            driveIdFromLink, driveFileInfo, driveSearch, driveFetchExcel, driveListFolder, driveListShared, driveAncestors, driveUpdateFile, needLogin };
 })();
