@@ -156,6 +156,13 @@ const GMAIL = (() => {
     accessToken = null; tokenExp = 0; clearToken();
   }
   function hasToken() { return !!accessToken; }
+  /* 계정 바꾸기 — 힌트가 남아 있으면 구글이 계정 선택 단계를 건너뛰어 버려서,
+     '다른 계정으로 바꾸고 싶은데 늘 같은 계정으로 들어가지는' 일이 생긴다. 힌트부터 지운다. */
+  async function switchAccount() {
+    try { localStorage.removeItem(HKEY()); } catch (e) {}
+    accessToken = null; tokenExp = 0;
+    return await signIn("select_account");
+  }
 
   async function api(path, opts) {
     const t = await token();
@@ -517,7 +524,7 @@ const GMAIL = (() => {
     return (await r.json()).id;
   }
 
-  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, reloadToken, projectNo, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
+  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, switchAccount, reloadToken, projectNo, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
            searchAddresses, driveFind, driveDownload, driveUpload, granted,
            driveIdFromLink, driveFileInfo, driveSearch, driveFetchExcel, driveListFolder, driveListShared, driveAncestors, driveUpdateFile, needLogin };
 })();

@@ -2015,7 +2015,33 @@ function updateGmailWho() {
   const who = CONFIG.account ? ` (${CONFIG.account})` : "";
   const txt = !gmailReady ? "⚠ 메일 연결 준비 안 됨 (설정에서 연결하세요)"
     : GMAIL.signedIn() ? "✓ 구글 메일 연결됨" + who : "구글 계정 연결 필요 (버튼을 누르면 로그인)";
-  const a = $("gmail-who-o"); if (a) a.textContent = txt;
+  ["gmail-who-o", "gmail-who-i", "gmail-who-s"].forEach(id => {
+    const el = $(id); if (el) el.textContent = txt;
+  });
+}
+/* 구글 계정 바꾸기 — 탭마다 [계정 변경] 버튼에 걸린다.
+   계정을 바꾸면 그 계정 저장소로 갈아타야 한다(useAccountStore). 안 그러면
+   화면은 새 계정인데 자료는 앞 계정 것을 보게 된다. */
+async function switchGoogleAccount(btn) {
+  const old = btn ? btn.textContent : "";
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = "여는 중…"; }
+    if (!gmailReady) gmailReady = await GMAIL.waitReady();
+    if (!gmailReady) throw new Error("구글 로그인 라이브러리를 불러오지 못했어요.\n새로고침 후 다시 시도하세요.");
+    await GMAIL.switchAccount();
+    let email = "";
+    try { email = ((await GMAIL.profile()).emailAddress || "").toLowerCase(); } catch (e) {}
+    updateGmailWho();
+    if (email) await useAccountStore(email);
+    else msg("msg-o", "ok", "구글 계정을 바꿨어요.");
+  } catch (e) {
+    alert(e.message || String(e));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = old || "계정 변경"; }
+  }
+}
+function bindAccountButtons() {
+  document.querySelectorAll(".gacct").forEach(b => { b.onclick = () => switchGoogleAccount(b); });
 }
 /* ※ 로그인 팝업은 '사용자 클릭' 안에서 열려야 브라우저가 막지 않는다.
    그래서 토큰 요청 전에 await(DB 읽기 등)를 하지 않도록, 클라이언트 ID는 시작할 때 미리 받아둔다. */
@@ -2665,6 +2691,7 @@ function applyLockCompany() {
   drawDriveRecent();
   drawSabRecent();
   drawCoName();                             // 화면에 박힌 회사 이름을 로그인한 업체로
+  bindAccountButtons();                     // 탭마다 [계정 변경]
   try { await MST.show(); } catch (e) {}    // 헤더 배지 (👑 마스터 / 업체명)
   syncOnStart();                            // 저장소가 확정된 뒤에 동기화
 })();
