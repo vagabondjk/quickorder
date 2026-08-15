@@ -81,34 +81,55 @@ const LOCK = (() => {
     return h.slice(0, 10).toUpperCase();
   }
   const APPROVED_KEY = () => CONFIG.lsBase("qo_approved");
+  /* 마스터로 들어온 경우는 이 탭에서만 유지해야 해서 sessionStorage 에 둔다.
+     둘 다 있으면 세션(이 탭) 것이 먼저다. */
+  const sstore = () => { try { return window.sessionStorage; } catch (e) { return null; } };
+  const readAt = (st, k) => { try { return st ? st.getItem(k) : null; } catch (e) { return null; } };
   async function savedApproval() {
-    try {
-      const s2 = JSON.parse(localStorage.getItem(APPROVED_KEY()) || "null");
-      if (!s2 || !s2.company) return null;
-      if (s2.token !== await sha256Hex(deviceId() + SALT + "|ok|" + normId(s2.company))) return null;
-      return s2.company;
-    } catch (e) { return null; }
+    for (const raw of [readAt(sstore(), APPROVED_KEY()), readAt(localStorage, APPROVED_KEY())]) {
+      try {
+        const s2 = JSON.parse(raw || "null");
+        if (!s2 || !s2.company) continue;
+        if (s2.token !== await sha256Hex(deviceId() + SALT + "|ok|" + normId(s2.company))) continue;
+        return s2.company;
+      } catch (e) {}
+    }
+    return null;
   }
-  async function saveApproval(company) {
+  async function saveApproval(company, tabOnly) {
     try {
-      localStorage.setItem(APPROVED_KEY(), JSON.stringify({
-        company: normId(company), token: await sha256Hex(deviceId() + SALT + "|ok|" + normId(company)) }));
+      const v = JSON.stringify({
+        company: normId(company), token: await sha256Hex(deviceId() + SALT + "|ok|" + normId(company)) });
+      (tabOnly ? sstore() : localStorage).setItem(APPROVED_KEY(), v);
     } catch (e) {}
   }
-  function clearApproval() { try { localStorage.removeItem(APPROVED_KEY()); } catch (e) {} }
+  function clearApproval() {
+    try { localStorage.removeItem(APPROVED_KEY()); } catch (e) {}
+    try { sstore().removeItem(APPROVED_KEY()); } catch (e) {}
+  }
   async function isMaster(id, pw) {
     return (await idHash(id)) === MASTER_ID && (await hashPw(pw)) === MASTER_PW;
   }
   /* 마스터로 들어왔는지 — 앱 안의 '마스터' 메뉴를 띄울지 판단한다 */
+  /* ★ 마스터는 '이 탭에서만' 유지한다 (sessionStorage).
+     예전엔 localStorage 라 한 번 들어가면 새 창·새 탭도 계속 마스터로 열렸다.
+     승인번호를 발급하는 관리자 권한이라, 창을 새로 열면 다시 확인받는 게 맞다. */
   const MKEY = () => CONFIG.lsBase("qo_master");
+  const mstore = () => { try { return window.sessionStorage; } catch (e) { return null; } };
   async function saveMaster() {
-    try { localStorage.setItem(MKEY(), await sha256Hex(deviceId() + SALT + "|master|")); } catch (e) {}
+    try { mstore().setItem(MKEY(), await sha256Hex(deviceId() + SALT + "|master|")); } catch (e) {}
+    try { localStorage.removeItem(MKEY()); } catch (e) {}   // 예전에 남은 것 정리
   }
   async function isMasterSession() {
-    try { return localStorage.getItem(MKEY()) === await sha256Hex(deviceId() + SALT + "|master|"); }
-    catch (e) { return false; }
+    try {
+      const st = mstore(); if (!st) return false;
+      return st.getItem(MKEY()) === await sha256Hex(deviceId() + SALT + "|master|");
+    } catch (e) { return false; }
   }
-  function clearMaster() { try { localStorage.removeItem(MKEY()); } catch (e) {} }
+  function clearMaster() {
+    try { mstore().removeItem(MKEY()); } catch (e) {}
+    try { localStorage.removeItem(MKEY()); } catch (e) {}
+  }
 
   /* v1.3.7~1.3.9 에서는 잠금 상태가 계정별 키(…_u<해시>)에 저장됐다.
      v1.4.0 에서 계정과 무관한 키로 옮겼는데, 그 사이 마스터로 들어와 있던 사람은
@@ -124,15 +145,12 @@ const LOCK = (() => {
     } catch (e) {}
     return out;
   }
+  /* 옛 버전이 localStorage 에 남긴 마스터 표시를 지운다.
+     남겨두면 창을 새로 열 때마다 마스터로 들어가진다 (이제는 탭 단위가 원칙이다). */
   async function migrateMaster() {
     try {
-      if (localStorage.getItem(MKEY())) return;
-      const toks = legacyKeys("qo_master").map(k => localStorage.getItem(k)).filter(Boolean);
-      if (!toks.length) return;
-      const ids = legacyKeys("qo_device").map(k => localStorage.getItem(k)).filter(Boolean);
-      for (const id of ids) {
-        if (toks.indexOf(await sha256Hex(id + SALT + "|master|")) >= 0) { await saveMaster(); return; }
-      }
+      localStorage.removeItem(MKEY());
+      legacyKeys("qo_master").forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
     } catch (e) {}
   }
 
@@ -148,19 +166,30 @@ const LOCK = (() => {
 
   async function isUnlocked() {
     if (!configured()) return true;
-    try {
-      const s = JSON.parse(localStorage.getItem(CONFIG.lsBase("qo_lock")) || "null");
-      if (!s || !s.exp || Date.now() >= s.exp) return false;   // 없거나 7일 지남
-      if (s.token !== await signExp(s.exp)) return false;
-      await saveUnlock();          // 슬라이딩: 열 때마다 만료를 다시 7일 뒤로 연장
-      return true;
-    } catch (e) { return false; }
+    const tabOnly = !!readAt(sstore(), CONFIG.lsBase("qo_lock"));
+    for (const raw of [readAt(sstore(), CONFIG.lsBase("qo_lock")), readAt(localStorage, CONFIG.lsBase("qo_lock"))]) {
+      try {
+        const s = JSON.parse(raw || "null");
+        if (!s || !s.exp || Date.now() >= s.exp) continue;      // 없거나 7일 지남
+        if (s.token !== await signExp(s.exp)) continue;
+        await saveUnlock(tabOnly);   // 슬라이딩: 열 때마다 만료를 다시 7일 뒤로 연장
+        return true;
+      } catch (e) {}
+    }
+    return false;
   }
-  async function saveUnlock() {
+  async function saveUnlock(tabOnly) {
     const exp = Date.now() + UNLOCK_MS;
-    try { localStorage.setItem(CONFIG.lsBase("qo_lock"),JSON.stringify({ exp, token: await signExp(exp) })); } catch (e) {}
+    try {
+      const v = JSON.stringify({ exp, token: await signExp(exp) });
+      (tabOnly ? sstore() : localStorage).setItem(CONFIG.lsBase("qo_lock"), v);
+    } catch (e) {}
   }
-  function signOut() { try { localStorage.removeItem(CONFIG.lsBase("qo_lock")); } catch (e) {} }
+  function signOut() {
+    try { localStorage.removeItem(CONFIG.lsBase("qo_lock")); } catch (e) {}
+    try { sstore().removeItem(CONFIG.lsBase("qo_lock")); } catch (e) {}
+    clearMaster(); clearApproval();
+  }
 
   /* ---------- 잠금 화면 UI ---------- */
   function injectStyle() {
@@ -239,7 +268,8 @@ const LOCK = (() => {
 
           // ① 마스터 — 앱으로 들여보내고, 안에서 '마스터' 메뉴가 뜬다
           if (await isMaster(id, pw)) {
-            await saveMaster(); await saveApproval(id); await saveUnlock();
+            /* 관리자 권한이라 흔적을 기기에 남기지 않는다 — 창을 새로 열면 다시 확인받는다 */
+            await saveMaster(); await saveApproval(id, true); await saveUnlock(true);
             root.remove(); return resolve(true);
           }
           clearMaster();
@@ -272,12 +302,17 @@ const LOCK = (() => {
      아이디·비밀번호만 맞으면 언제든 마스터 메뉴를 열 수 있다. */
   async function signInMaster(id, pw) {
     if (!await isMaster(id, pw)) return false;
-    await saveMaster(); await saveApproval(id); await saveUnlock();
+    await saveMaster();          // 이 탭에서만. 업체로 들어와 있던 상태는 건드리지 않는다
     return true;
   }
 
   return { ready, ensureUnlocked, isUnlocked, verify, signOut, configured, currentYm, signInMaster,
            approvalCode, savedApproval, clearApproval, isMaster,
            isMasterSession, clearMaster,
-           company: () => { try { return (JSON.parse(localStorage.getItem(APPROVED_KEY()) || "null") || {}).company || ""; } catch (e) { return ""; } } };
+           company: () => {
+             for (const raw of [readAt(sstore(), APPROVED_KEY()), readAt(localStorage, APPROVED_KEY())]) {
+               try { const c = (JSON.parse(raw || "null") || {}).company; if (c) return c; } catch (e) {}
+             }
+             return "";
+           } };
 })();

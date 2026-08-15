@@ -543,7 +543,8 @@ const ST = (() => {
     skipped = [];
     for (const f of files) {
       const g = (r, k) => (f.map[k] === undefined ? "" : r[f.map[k]]);
-      for (const r of f.rows) {
+      for (let ri = 0; ri < f.rows.length; ri++) {
+        const r = f.rows[ri];
         const product = s(g(r, "product"));
         const option = s(g(r, "option"));
         const qty = num(g(r, "qty")) || 1;
@@ -552,7 +553,13 @@ const ST = (() => {
         const amount = unitPrice ? unitPrice * qty : num(g(r, "amount"));
         // 고객 결제금액 (몰이 소비자에게 받은 값). 매출 계산엔 안 쓰고 화면 표시용이다.
         const mallAmount = f.map.mallAmount === undefined ? 0 : num(g(r, "mallAmount"));
-        if (!product && !amount) { skipped.push({ src: f.name, raw: r }); continue; }
+        if (!product && !amount) {
+          /* 무엇이 빠졌는지 모르면 사람이 확인할 방법이 없다 — 그 줄에 있던 글을 그대로 담아 둔다.
+             (실제로 통합파일 끝에 발주담당자 연락처·인수인계 메모가 세 줄 들어 있었다) */
+          const txt = Object.keys(r).map(k => s(r[k])).filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+          skipped.push({ src: f.name, line: ri + 1, qty: num(g(r, "qty")), text: txt, raw: r });
+          continue;
+        }
         // 브랜드는 파일에 열이 있으면 그걸 그대로 쓴다(상품명에서 추측하는 것보다 정확).
         const brand = (f.map.brand === undefined ? "" : s(g(r, "brand")))
           || CS.findBrand(product, option) || "";
@@ -1208,9 +1215,20 @@ const ST = (() => {
     const outQty = vendors.reduce((s, v) => s + (v.rows.reduce((t, r) => t + (r.qty || 0), 0)), 0);
     const outPay = vendors.reduce((s, v) => s + v.pay, 0);
 
-    if (skipped.length)
-      err(`올린 파일 ${fileRows}줄 중 ${skipped.length}줄이 정산에서 빠졌어요`,
-          "상품명과 금액이 모두 비어 있는 줄입니다. 열 맞추기가 잘못됐을 수 있어요");
+    if (skipped.length) {
+      /* 몇 줄 안 되면 담당자 메모·빈 줄이다 — 오류로 띄우면 진짜 문제와 구분이 안 된다.
+         열 맞추기가 잘못된 경우는 대부분의 줄이 한꺼번에 빠지므로 비율로 가린다. */
+      const bulk = fileRows > 0 && skipped.length / fileRows >= 0.1;
+      const show = skipped.slice(0, 5)
+        .map(x => `${x.line}번째 줄: ${x.text ? (x.text.length > 60 ? x.text.slice(0, 60) + "…" : x.text) : "(빈 줄)"}`);
+      if (skipped.length > show.length) show.push(`… 외 ${skipped.length - show.length}줄`);
+      const head = bulk
+        ? "상품명과 금액이 모두 비어 있습니다. 열 맞추기가 잘못됐을 수 있어요."
+        : "상품명도 금액도 없는 줄입니다. 담당자 메모·빈 줄이면 그대로 두셔도 됩니다.";
+      (bulk ? err : warn)(
+        `올린 파일 ${fileRows}줄 중 ${skipped.length}줄은 정산에 넣지 않았어요`,
+        head + "\n" + show.join("\n"));
+    }
     // 송장이 없는 건은 아직 출고 전이라 빼는 게 정상이다 — 오류가 아니라 안내로 남긴다
     if (unshipped.length)
       warn(`송장이 없어 이번 정산에서 뺀 주문이 ${unshipped.length}건 (수량 ${unshipped.reduce((s, r) => s + (r.qty || 0), 0)}) 있어요`,
@@ -1288,7 +1306,8 @@ const ST = (() => {
       <div style="margin-top:4px;font-size:12px;color:var(--muted)">${esc(line)}</div>
       <div style="margin-top:6px;font-size:12.5px;line-height:1.8">${c.issues.map(i =>
         `<div style="color:var(${i.level === "error" ? "--danger" : "--warn"})">· ${esc(i.why)}${
-          i.detail ? `<br><span style="color:var(--muted);font-size:11.5px">&nbsp;&nbsp;&nbsp;${esc(i.detail)}</span>` : ""}</div>`).join("")}</div>
+          i.detail ? `<br><span style="color:var(--muted);font-size:11.5px">&nbsp;&nbsp;&nbsp;${
+            esc(i.detail).replace(/\n/g, "<br>&nbsp;&nbsp;&nbsp;")}</span>` : ""}</div>`).join("")}</div>
     </div>`;
   }
 
@@ -1961,7 +1980,7 @@ const ST = (() => {
       t.font = { bold: true, color: { argb: c.ok && !c.issues.length ? "FF0A7A3D" : "FFCC0000" } };
       ws.addRow([`주문 ${c.orderCount}건 · 수량 ${c.orderQty}개 → 업체 정산 ${c.settledCount}건 · 수량 ${c.settledQty}개`]);
       c.issues.forEach(i => {
-        const row = ws.addRow([`· ${i.why}${i.detail ? " (" + i.detail + ")" : ""}`]);
+        const row = ws.addRow([`· ${i.why}${i.detail ? " (" + String(i.detail).replace(/\n/g, " / ") + ")" : ""}`]);
         row.font = { color: { argb: i.level === "error" ? "FFCC0000" : "FF8A6D00" } };
       });
     }
