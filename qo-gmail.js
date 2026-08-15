@@ -69,6 +69,18 @@ const GMAIL = (() => {
     return m;
   }
   function signedIn() { return !!accessToken && Date.now() < tokenExp; }
+  /* ★ '오늘' 은 오늘 날짜여야 한다.
+     newer_than:1d 는 '최근 24시간' 이라, 지금이 15:00 이면 어제 15:00~24:00 메일이 함께 걸린다.
+     실제로 어제 15:41 메일이 '오늘' 에 떴다. 하루짜리는 오늘 0시 이후로 못박는다.
+     (3일·7일은 이름 그대로 '최근 N일' 이므로 그대로 둔다) */
+  function sinceQuery(days) {
+    const d = Number(days) || 0;
+    if (d === 1) {
+      const t = new Date(); t.setHours(0, 0, 0, 0);
+      return `after:${Math.floor(t.getTime() / 1000)}`;
+    }
+    return `newer_than:${d}d`;
+  }
 
   /* 클라이언트 ID 저장 + (가능하면) 토큰 클라이언트 생성
      ★ ID 가 바뀌면 tokenClient 를 버려야 한다. ensureInit 은 없을 때만 만들기 때문에,
@@ -212,7 +224,7 @@ const GMAIL = (() => {
      union    : true면 발신자+키워드 합집합(회신용), false면 발신자 우선(발주서용)
   ------------------------------------------------------------------ */
   async function listMails({ days = 7, senders = [], keywords = [], exclude = [], union = false, scanText = false, max = 40, onProgress } = {}) {
-    const q = `newer_than:${days}d has:attachment (filename:xlsx OR filename:xlsm)`;
+    const q = `${sinceQuery(days)} has:attachment (filename:xlsx OR filename:xlsm)`;
     const listed = await api(`/messages?q=${encodeURIComponent(q)}&maxResults=${max}`);
     const ids = (listed.messages || []).map(m => m.id);
     const fromHits = [], nameHits = [];
@@ -254,7 +266,7 @@ const GMAIL = (() => {
      listMails 는 '엑셀 첨부가 있는 메일'만 본다. CS는 첨부 없이 본문만 오는
      고객/고객센터 문의가 대부분이라 별도로 검색한다. 첨부가 있으면 함께 준다. */
   async function listTextMails({ days = 7, keywords = [], senders = [], exclude = [], max = 30, onProgress } = {}) {
-    const qp = [`newer_than:${days}d`, "-in:chats"];
+    const qp = [sinceQuery(days), "-in:chats"];
     const or = [];
     if (keywords.length) or.push("(" + keywords.map(k => `"${String(k).replace(/"/g, "")}"`).join(" OR ") + ")");
     if (senders.length) or.push("(" + senders.map(s => `from:${String(s).trim()}`).join(" OR ") + ")");
@@ -332,7 +344,7 @@ const GMAIL = (() => {
   }
   async function searchAddresses({ query, max = 15, days = 365 } = {}) {
     if (!query) return [];
-    const q = `${query} newer_than:${days}d`;
+    const q = `${query} ${sinceQuery(days)}`;
     let listed;
     try { listed = await api(`/messages?q=${encodeURIComponent(q)}&maxResults=${max}`); }
     catch (e) { return []; }
@@ -504,7 +516,7 @@ const GMAIL = (() => {
     return (await r.json()).id;
   }
 
-  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, reloadToken, listMails, listTextMails, getAttachment, send, profile,
+  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, reloadToken, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
            searchAddresses, driveFind, driveDownload, driveUpload, granted,
            driveIdFromLink, driveFileInfo, driveSearch, driveFetchExcel, driveListFolder, driveListShared, driveAncestors, driveUpdateFile, needLogin };
 })();
