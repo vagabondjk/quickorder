@@ -186,7 +186,8 @@
   .vdel{background:none;border:none;color:var(--faint);font-size:14px;cursor:pointer;flex:none;padding:0 2px;line-height:1}
   button.pv{background:var(--card2);border:1px solid var(--line);color:var(--muted);font-family:inherit;
     font-size:11px;font-weight:700;cursor:pointer;flex:none;padding:5px 10px;border-radius:7px}
-  .empty{text-align:center;color:var(--faint);font-size:12.5px;padding:16px 8px;line-height:1.6}
+  /* 빈 상태는 '없다'는 사실만 알리면 된다 — 두 줄로 늘려 카드를 밀어내지 않게 한 줄·낮은 여백 */
+  .empty{text-align:center;color:var(--faint);font-size:12.5px;padding:9px 8px;line-height:1.5}
 
   .vendorbox{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:10px}
   .vendorbox .vh{background:var(--card2);padding:10px 12px;font-size:13px;font-weight:800;display:flex;align-items:center;gap:8px}
@@ -509,7 +510,7 @@
       <input class="srch" id="cs-q" placeholder="주문번호·고객명·상품·내용 검색" spellcheck="false" autocapitalize="off">
       <div class="segbar" id="cs-fstatus"></div>
       <div class="segbar" id="cs-ftype"></div>
-      <div id="cs-list"><div class="empty">아직 등록된 CS가 없습니다.<br>위에서 엑셀·메일로 불러오거나 직접 등록하세요.</div></div>
+      <div id="cs-list"><div class="empty">아직 등록된 CS가 없습니다</div></div>
       <div class="pvfoot" id="cs-foot"></div>
     </div>
 

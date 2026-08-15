@@ -315,7 +315,7 @@ const CS = (() => {
         onProgress: (i, n) => { const p = $("csmail-prog"); if (p) p.textContent = `${i} / ${n}`; },
       });
       if (!mailItems.length) {
-        list.innerHTML = `<div class="empty">${dayTxt}간 해당하는 메일이 없어요.<br>기간을 늘리거나 검색조건을 바꿔보세요.</div>`;
+        list.innerHTML = `<div class="empty">${dayTxt}간 해당하는 메일이 없어요 — 기간을 늘리거나 검색조건을 바꿔보세요</div>`;
         $("csmail-sub").textContent = "결과 없음";
         return;
       }
@@ -433,7 +433,7 @@ const CS = (() => {
     const list = items.filter(match);
     $("cs-count").textContent = `${list.length} / ${items.length}건`;
     if (!items.length) {
-      box.innerHTML = `<div class="empty">아직 등록된 CS가 없습니다.<br>위에서 엑셀·메일로 불러오거나 직접 등록하세요.</div>`;
+      box.innerHTML = `<div class="empty">아직 등록된 CS가 없습니다</div>`;
       $("cs-foot").textContent = ""; drawActions(); return;
     }
     if (!list.length) {

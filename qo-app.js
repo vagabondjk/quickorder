@@ -1202,7 +1202,7 @@ function addDupFixer(box, groups) {
 }
 function drawForms() {
   const box = $("vlist");
-  if (!S.forms.length) { box.innerHTML = '<div class="empty">저장된 업체 양식이 없습니다.<br>아래에서 추가하세요.</div>'; return; }
+  if (!S.forms.length) { box.innerHTML = '<div class="empty">저장된 업체 양식이 없습니다</div>'; return; }
   box.innerHTML = "";
   const dups = dupNameGroups(S.forms, f => f.name);
   addDupWarning(box, dups, f => f.name,
@@ -2272,7 +2272,7 @@ async function loadMail() {
       } else mailHidden = 0;
     } else mailHidden = 0;
     if (!mailItems.length) {
-      list.innerHTML = `<div class="empty">${dayTxt}간 해당 엑셀 첨부를 찾지 못했어요.<br>위에서 기간을 늘려보세요.</div>`;
+      list.innerHTML = `<div class="empty">${dayTxt}간 해당 엑셀 첨부를 찾지 못했어요 — 위에서 기간을 늘려보세요</div>`;
       $("mail-sub").textContent = "결과 없음"; return;
     }
     $("mail-sub").textContent = (mailMulti ? "여러 개 선택 가능 · " : "하나 선택 · ") + mailItems.length + "건"
@@ -2539,7 +2539,7 @@ const MST = (() => {
   async function save() { await DB.set("masterCompanies", list); }
   async function draw() {
     const box = $("mst-list"); if (!box) return;
-    if (!list.length) { box.innerHTML = '<div class="empty">승인한 업체가 없습니다.<br>위에 업체명을 넣고 [승인 추가] 를 누르세요.</div>'; return; }
+    if (!list.length) { box.innerHTML = '<div class="empty">승인한 업체가 없습니다</div>'; return; }
     const codes = await Promise.all(list.map(n => LOCK.approvalCode(n)));
     box.innerHTML = list.map((n, i) => `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;
         border:1px solid var(--line);border-radius:10px;margin-bottom:6px;background:var(--card2)">
