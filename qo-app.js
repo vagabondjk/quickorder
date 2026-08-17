@@ -1941,7 +1941,7 @@ $("set-add").onclick = async () => {
   await DB.set("vendorEmails", S.vendorEmails); drawSettings();
 };
 async function drawSettings() {
-  const box = $("setlist"); box.innerHTML = "";
+  let box = $("setlist"); box.innerHTML = "";
 
   // --- 구글 메일 연결 ---
   const cid = await clientId();          // 저장값 없으면 기본 내장 ID를 보여줌
@@ -1999,12 +1999,19 @@ async function drawSettings() {
   hr.style.cssText = "border-top:1px solid var(--line);margin:6px 0 12px";
   box.appendChild(hr);
 
-  const title = document.createElement("div");
-  title.style.cssText = "font-size:12px;font-weight:700;margin-bottom:8px;color:var(--muted)";
-  title.textContent = "업체 이메일";
-  box.appendChild(title);
-
   const names = [...new Set([...Object.keys(S.vendorEmails), ...S.forms.map(f => f.name)])].sort();
+  /* 업체마다 입력칸이 둘씩 붙어 화면을 다 잡아먹었다. 자주 고치는 값이 아니라 접어 둔다.
+     (한 번 펴두면 그 상태를 기억한다 — 손볼 일이 있는 날엔 계속 펴져 있게) */
+  const sec = document.createElement("details");
+  sec.open = localStorage.getItem(CONFIG.ls("qo_open_vmail")) === "1";
+  sec.innerHTML = `<summary style="font-size:12px;font-weight:700;color:var(--muted);cursor:pointer;
+    padding:4px 0;list-style:revert">업체 이메일 <span style="color:var(--faint);font-weight:600">(${names.length})</span></summary>`;
+  sec.addEventListener("toggle", () => {
+    try { localStorage.setItem(CONFIG.ls("qo_open_vmail"), sec.open ? "1" : "0"); } catch (e) {}
+  });
+  box.appendChild(sec);
+  box = sec;                                   // 아래 업체 카드들은 이 안에 담는다
+
   if (!names.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "저장된 업체가 없습니다."; box.appendChild(e); return; }
   const istyle = "width:100%;box-sizing:border-box;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);border-radius:9px;padding:9px 10px;font-family:inherit;font-size:13px;outline:none";
   names.forEach(name => {
