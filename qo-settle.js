@@ -2212,9 +2212,9 @@ const ST = (() => {
        각 카드가 찾는 단어만 다르고 나머지는 같아서 한 곳으로 모았다. */
     $("pb-mail").onclick = () => openMail("pb");
     $("pay-mail").onclick = () => openMail("pay");
-    $("st-filter-btn").onclick = () => openFilter("settle");
-    $("pb-filter-btn").onclick = () => openFilter("pb");
-    $("pay-filter-btn").onclick = () => openFilter("pay");
+    /* 검색조건 버튼은 설정 안으로 옮겼다 (2026-08-17) — 여기엔 없다.
+       ※ 예전 코드는 $("st-filter-btn").onclick 처럼 확인 없이 붙였다.
+         버튼 하나만 없어져도 bind() 가 통째로 멈춰 정산 탭이 죽는다. */
     $("st-md-add").onclick = async () => {
       rewards.push({ id: "md" + Date.now(), md: "", picks: {} });
       await saveRewards(); drawMd();

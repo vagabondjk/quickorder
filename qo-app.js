@@ -1968,7 +1968,7 @@ $("sync-now").onclick = async function () {
     await ensureGmail();                 // 로그인 보장(드라이브 권한 포함)
     const r = await SYNC.syncDown();      // 원격이 최신이면 내려받고
     if (r.changed) {
-      await loadForms(); drawOrderFilter(); drawReplyFilter(); drawSettings();
+      await loadForms(); drawSettings();
       try { if (window.CS) await CS.reload(); } catch (e) {}
     }
     await SYNC.syncUpNow();               // 이 기기 상태도 올려서 최신 유지
@@ -2185,12 +2185,6 @@ async function getOrderFilter() {
     exclude: await DB.get("orderExclude", d.exclude),
   };
 }
-async function drawOrderFilter() {
-  const f = await getOrderFilter();
-  const info = $("order-filter");
-  if (info) info.textContent = "";
-}
-
 /* 회신 검색조건 */
 async function getReplyFilter() {
   return {
@@ -2198,11 +2192,6 @@ async function getReplyFilter() {
     keywords: await DB.get("replyKeywords", CONFIG.reply.keywords),
     exclude: await DB.get("replyExclude", CONFIG.reply.exclude),
   };
-}
-async function drawReplyFilter() {
-  const f = await getReplyFilter();
-  const el = $("reply-filter");
-  if (el) el.textContent = "";
 }
 
 /* ---------- 검색조건 관리 모달 (발주서/회신 공용) ---------- */
@@ -2276,7 +2265,6 @@ async function getFilter(mode) {
 async function setList(kind, arr) {
   await DB.set(FKEY[filterMode][kind], arr);
   await renderFilterLists();
-  drawOrderFilter(); drawReplyFilter();
   try { if (window.CS) CS.drawFilter(); } catch (e) {}
   try { if (window.ST) ST.drawFilter(); } catch (e) {}
 }
@@ -2310,8 +2298,12 @@ $("flt-keyword-in").onkeydown = e => { if (e.key === "Enter") { e.preventDefault
 $("flt-exclude-in").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); addFilterItem("exclude", "flt-exclude-in"); } };
 $("filter-close").onclick = () => filterModal.classList.remove("on");
 filterModal.onclick = e => { if (e.target === filterModal) filterModal.classList.remove("on"); };
-$("order-filter-btn") && ($("order-filter-btn").onclick = () => openFilter("order"));
-$("reply-filter-btn") && ($("reply-filter-btn").onclick = () => openFilter("reply"));
+/* 검색조건은 카드마다 두지 않고 설정 안에 모았다 (2026-08-17).
+   한 번 정하면 거의 안 건드리는 값인데 카드마다 버튼이 있어 자리만 먹었다.
+   ※ 설정 창 위에 떠야 한다 — #filtermodal 의 z-index 로 처리했다. */
+document.querySelectorAll("#setmodal [data-filter]").forEach(b => {
+  b.onclick = () => openFilter(b.dataset.filter);
+});
 
 /* 메일 선택 모달 */
 const mailModal = $("mailmodal");
@@ -2468,7 +2460,6 @@ $("mail-ok").onclick = async function () {
 };
 $("mail-order").onclick = () => openMail("order");
 $("mail-sab").onclick = () => openMail("sab");
-if ($("sab-filter-btn")) $("sab-filter-btn").onclick = () => openFilter("order");
 $("mail-rep").onclick = () => openMail("rep");
 
 // setOrder 를 버퍼 기반으로도 쓰도록 분리
@@ -2605,7 +2596,6 @@ async function reopenStore(note) {
   await loadForms();
   try { if (window.CS) await CS.reload(); } catch (e) {}
   try { if (window.ST) await ST.reload(); } catch (e) {}
-  drawOrderFilter(); drawReplyFilter();
   if (note) msg("msg-o", "ok", note);
 }
 async function useAccountStore(email, opts) {
@@ -2629,7 +2619,7 @@ async function syncOnStart() {
     await syncAccount();                      // 저장소를 먼저 맞추고
     const r = await SYNC.syncDown();
     if (r.changed) {
-      await loadForms(); drawOrderFilter(); drawReplyFilter();
+      await loadForms();
       if ($("setmodal").classList.contains("on")) drawSettings();
       try { if (window.CS) await CS.reload(); } catch (e) {}
     }
@@ -3123,8 +3113,6 @@ function applyLockCompany() {
   await initGmail();                        // 구글이 준비된 뒤에 차단 확인을 해야 한다
   await ensureAccountMatches();             // ★ 토큰이 정말 이 계정 것인지 먼저 확인
   checkBlockedBySheet();
-  drawReplyFilter();
-  drawOrderFilter();
   drawCoName();                             // 화면에 박힌 회사 이름을 로그인한 업체로
   /* 마스터면 퀵오더 화면을 아예 안 보여준다 */
   try {

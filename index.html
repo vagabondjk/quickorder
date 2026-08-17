@@ -283,6 +283,10 @@
   .foot{color:var(--faint);font-size:11.5px;text-align:center;margin-top:18px;line-height:1.6}
 
   .modal{position:fixed;inset:0;background:rgba(8,12,20,.55);display:none;z-index:50;align-items:flex-end;justify-content:center}
+  /* 검색조건은 설정 안에서 열린다 — 설정 위에 떠야 한다 (문서 순서상 아래에 있어 가려졌다) */
+  #filtermodal{z-index:60}
+  /* 설정 안 '메일 검색조건' 버튼 줄 */
+  .fbtns{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
   .modal.on{display:flex}
   .sheet{background:var(--card);width:100%;max-width:640px;max-height:88vh;border-radius:20px 20px 0 0;
     display:flex;flex-direction:column;overflow:hidden;
@@ -446,8 +450,6 @@
            지난번에 고른 폴더에서 열리므로 누르는 횟수는 거의 그대로다. -->
       <button class="go" id="drive-again" style="margin:0 0 8px;font-size:15px;padding:14px;background:var(--ok);color:#fff">📁 구글 드라이브에서 발주서 고르기</button>
       <button class="go" id="mail-order" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
-      <div class="setrow"><span id="order-filter" hidden></span>
-        <button class="minibtn" id="order-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-order" style="margin-top:8px">
         디바이스 파일 선택 또는 끌어오기
         <span class="drophint">여러 쇼핑몰 · 폴더째 끌어오면 한 장으로 합칩니다</span>
@@ -512,8 +514,6 @@
       <!-- 발주서 카드와 같은 이유로 지정 파일(📌) 기능을 없앴다 (위 주석 참고) -->
       <button class="go" id="sab-again" style="margin:0 0 8px;font-size:15px;padding:14px;background:var(--ok);color:#fff">📁 구글 드라이브에서 양식 고르기</button>
       <button class="go" id="mail-sab" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
-      <div class="setrow"><span style="flex:1"></span>
-        <button class="minibtn" id="sab-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-sab">
         디바이스 파일 선택 또는 끌어오기
         <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
@@ -531,7 +531,6 @@
       <h2><span class="n">2</span>공급사 회신 송장 취합</h2>
       <button class="go" id="drive-rep" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <button class="go" id="mail-rep" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
-      <div class="setrow"><span id="reply-filter">회신 검색조건: 송장, 운송장, 회신</span><button class="minibtn" id="reply-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-rep" style="padding:14px;margin-top:8px">
         디바이스 파일 선택 또는 끌어오기
         <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
@@ -596,8 +595,6 @@
       <!-- 발주·송장과 같은 이유로 지정 파일(📌) 기능을 없앴다 — 누르면 바로 고른다 -->
       <button class="go" id="st-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 정산 파일 고르기</button>
       <button class="go" id="st-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
-      <div class="setrow"><span style="flex:1"></span>
-        <button class="minibtn" id="st-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-st" style="margin-top:8px;padding:16px">
         디바이스 파일 선택 또는 끌어오기
         <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
@@ -628,8 +625,6 @@
         <button class="minibtn" id="pb-clear" style="flex:none">해제</button></div>
       <button class="go" id="pb-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <button class="go" id="pb-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
-      <div class="setrow"><span style="flex:1"></span>
-        <button class="minibtn" id="pb-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-pb" style="margin:0 0 8px;padding:16px">
         디바이스 파일 선택 또는 끌어오기
         <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
@@ -660,8 +655,6 @@
       <div id="pay-loaded" style="display:none;margin:2px 0 10px"></div>
       <button class="go" id="pay-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <button class="go" id="pay-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
-      <div class="setrow"><span style="flex:1"></span>
-        <button class="minibtn" id="pay-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-pay" style="margin:0 0 8px;padding:16px">
         디바이스 파일 선택 또는 끌어오기
         <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
@@ -891,13 +884,25 @@
       <div class="synctxt" id="sync-status">구글 로그인하면 자동 동기화됩니다</div>
       <div class="synchint">같은 구글 계정으로 로그인한 다른 기기에도 그대로 나타납니다.</div>
     </div>
+    <!-- 검색조건은 한 번 정하면 거의 안 건드리는 값이라, 카드마다 두지 않고 여기 모았다 -->
+    <div class="syncbox">
+      <div class="syncrow"><b>🔍 메일 검색조건</b></div>
+      <div class="synchint">‘📧 메일에서 파일 퀵로딩’ 이 메일함에서 파일을 찾을 때 쓰는 발신자·키워드입니다.</div>
+      <div class="fbtns">
+        <button class="minibtn" data-filter="order">발주서 · 송장양식</button>
+        <button class="minibtn" data-filter="reply">회신 송장</button>
+        <button class="minibtn" data-filter="settle">정산 파일</button>
+        <button class="minibtn" data-filter="pb">공급가표</button>
+        <button class="minibtn" data-filter="pay">대금지급 내역</button>
+      </div>
+    </div>
     <div class="syncbox">
       <div class="syncrow">
-        <b>🔔 새 발주·송장 알림</b>
+        <b>🔔 새 송장 알림</b>
         <button class="minibtn" id="notify-toggle">켜기</button>
       </div>
       <div class="synctxt" id="notify-status"></div>
-      <div class="synchint"><b>① 지정한 드라이브 발주파일이 바뀌거나 ② 업체가 송장 회신 메일을 보내면</b> 알려줍니다. 앱을 열어둔 동안만 동작합니다.</div>
+      <div class="synchint"><b>업체가 송장 회신 메일을 보내면</b> 알려줍니다. 앱을 열어둔 동안만 동작합니다.</div>
     </div>
     <div class="syncbox" id="set-master-box" style="display:none">
       <div class="syncrow">
