@@ -2638,7 +2638,8 @@ const MST = (() => {
         <div style="flex:1;min-width:0">
           <b style="font-size:13.5px;word-break:break-all">${esc(c.name)}</b>
           ${on ? "" : '<span style="font-size:11px;font-weight:800;color:var(--danger);margin-left:6px">사용 중지</span>'}
-          <div style="font-size:17px;font-weight:800;letter-spacing:2px;color:var(--brand);margin-top:2px">${codes[i]}</div>
+          <div style="font-size:17px;font-weight:800;letter-spacing:2px;color:var(--brand);margin-top:2px">${codes[i]}
+            <span style="font-size:10.5px;font-weight:700;letter-spacing:0;color:var(--muted)">${ymLabel()} 전용</span></div>
           ${c.email ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${esc(c.email)}${c.tel ? " · " + esc(c.tel) : ""}</div>` : ""}
         </div>
         <button class="minibtn mstonoff" data-i="${i}" style="flex:none;${on ? "" : "color:var(--danger);border-color:var(--danger)"}">${on ? "사용 중" : "중지됨"}</button>
@@ -2686,15 +2687,17 @@ const MST = (() => {
     try { return await LOCK.isMasterSession(); } catch (e) { return false; }
   }
   const APP_URL = location.origin + location.pathname;
+  const ymLabel = () => { const y = LOCK.currentYm(); return y.slice(0, 4) + "-" + y.slice(4); };
   function guideText(name, code) {
-    return `[퀵오더] ${name} 로그인 안내
+    return `[퀵오더] ${name} ${ymLabel()} 승인번호 안내
 
 주소: ${APP_URL}
 업체명: ${name}
-승인번호: ${code}
+승인번호: ${code}   (${ymLabel()} 전용)
 
 로그인 화면에서 업체명과 승인번호를 넣으시면 됩니다.
-승인번호가 곧 비밀번호입니다. 다른 곳에 공유하지 마세요.`;
+★ 승인번호는 달마다 바뀝니다. 다음 달에는 새 번호를 보내드립니다.
+다른 곳에 공유하지 마세요.`;
   }
   /* 안내문을 그 업체 메일로 바로 보낸다. 마스터는 구글에 로그인돼 있으므로 그 계정으로 나간다. */
   async function sendGuide(c, code) {
@@ -2704,7 +2707,7 @@ const MST = (() => {
     say("보내는 중…");
     try {
       await ensureGmail();
-      await GMAIL.send({ to: c.email, subject: `[퀵오더] ${c.name} 로그인 안내`, body: guideText(c.name, code) });
+      await GMAIL.send({ to: c.email, subject: `[퀵오더] ${c.name} ${ymLabel()} 승인번호`, body: guideText(c.name, code) });
       c.sentAt = Date.now(); await save(); draw();
       say(`✔ ${c.email} 로 보냈습니다.`);
     } catch (e) { say("⚠ 보내지 못했어요 — " + (e.message || e)); }
@@ -2773,7 +2776,7 @@ const MST = (() => {
     $("mstmodal").classList.add("on");
     if (!await isMasterNow()) return authMode();
     $("mst-auth").style.display = "none"; $("mst-body").style.display = "";
-    $("mst-sub").textContent = "승인할 업체명을 넣으면 승인번호가 나옵니다. 그 번호가 그 업체의 비밀번호입니다.";
+    $("mst-sub").textContent = "승인번호는 달마다 바뀝니다. 매달 새 번호를 업체에 보내주세요 — 안 보내면 그 업체는 다음 달에 못 들어옵니다.";
     await load(); $("mst-msg").textContent = ""; await draw();
   }
   function authMode() {

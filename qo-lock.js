@@ -75,10 +75,18 @@ const LOCK = (() => {
   const MASTER_PW = "27cbec30fa8a607bceb852c4b41ef7c3c494edb033dcd2b25ef5d3339dd35f4b";
   const normId = v => String(v == null ? "" : v).trim().replace(/\s+/g, "");
   const idHash = v => sha256Hex(SALT + "|id|" + normId(v));
-  /* 업체명 → 승인코드 (마스터가 발급해 업체에 알려준다) */
-  async function approvalCode(company) {
-    const h = await sha256Hex(SALT + "|approve|" + normId(company));
+  /* 업체명 + 그 달 → 승인번호 (마스터가 발급해 업체에 알려준다)
+     ★ 달마다 번호가 바뀐다. 그래서 '막는 방법 = 다음 달 번호를 안 주는 것' 이 된다.
+       서버가 없어 마스터의 중지 스위치가 업체 기기까지 전달될 수 없기 때문에,
+       유효기간으로 통제하는 방식을 택했다. (2026-08 결정) */
+  async function approvalCode(company, ym) {
+    const h = await sha256Hex(SALT + "|approve|" + normId(company) + "|" + (ym || currentYm()));
     return h.slice(0, 10).toUpperCase();
+  }
+  /* 이 달의 마지막 순간. 로그인 유지도 여기서 끊어야 번호를 다시 받게 된다. */
+  function monthEnd() {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime() - 1;
   }
   const APPROVED_KEY = () => CONFIG.lsBase("qo_approved");
   /* 마스터로 들어온 경우는 이 탭에서만 유지해야 해서 sessionStorage 에 둔다.
@@ -193,7 +201,8 @@ const LOCK = (() => {
     if (MONTHS[ym] && h === MONTHS[ym]) return "month";
     return false;
   }
-  const UNLOCK_MS = 7 * 24 * 60 * 60 * 1000;                 // 7일 유지
+  /* 예전에는 7일 슬라이딩이었다. 승인번호가 달마다 바뀌므로 로그인 유지도 그 달까지다 —
+     안 그러면 번호가 바뀌어도 계속 들어와 있어서 유효기간이 무의미해진다. */
   const signExp = exp => sha256Hex(deviceId() + SALT + "|exp|" + exp);
 
   async function isUnlocked() {
@@ -202,7 +211,7 @@ const LOCK = (() => {
     for (const raw of [readAt(sstore(), CONFIG.lsBase("qo_lock")), readAt(localStorage, CONFIG.lsBase("qo_lock"))]) {
       try {
         const s = JSON.parse(raw || "null");
-        if (!s || !s.exp || Date.now() >= s.exp) continue;      // 없거나 7일 지남
+        if (!s || !s.exp || Date.now() >= s.exp) continue;      // 없거나 이 달이 지남
         if (s.token !== await signExp(s.exp)) continue;
         await saveUnlock(tabOnly);   // 슬라이딩: 열 때마다 만료를 다시 7일 뒤로 연장
         return true;
@@ -211,7 +220,7 @@ const LOCK = (() => {
     return false;
   }
   async function saveUnlock(tabOnly) {
-    const exp = Date.now() + UNLOCK_MS;
+    const exp = monthEnd();
     try {
       const v = JSON.stringify({ exp, token: await signExp(exp) });
       (tabOnly ? sstore() : localStorage).setItem(CONFIG.lsBase("qo_lock"), v);
@@ -259,7 +268,7 @@ const LOCK = (() => {
       "<div class=\"card\">" +
       "<div class=\"lk\">🔒</div>" +
       "<h2>퀵오더 사용 승인</h2>" +
-      "<p>업체명과 승인번호를 입력하세요.<br>" + (CONFIG.adminLabel || "관리자") + "에게 전달받습니다.</p>" +
+      "<p>업체명과 <b>이번 달</b> 승인번호를 입력하세요.<br>" + (CONFIG.adminLabel || "관리자") + "에게 전달받습니다.</p>" +
       "<input id=\"qo-lock-id\" type=\"text\" autocomplete=\"username\" autocapitalize=\"off\" " +
         "autocorrect=\"off\" placeholder=\"업체명\" style=\"letter-spacing:0;margin-bottom:8px\">" +
       "<input id=\"qo-lock-pw\" type=\"password\" inputmode=\"text\" autocomplete=\"current-password\" " +
@@ -304,7 +313,7 @@ const LOCK = (() => {
         setTimeout(() => { try { (approved ? input : idIn).focus(); } catch (e) {} }, 100);
 
         let busy = false;
-        const BAD = "업체명 또는 승인번호가 틀렸습니다.";
+        const BAD = "업체명 또는 승인번호가 틀렸습니다.\n승인번호는 달마다 바뀝니다 — 이번 달 번호인지 확인해 주세요.";
         async function go() {
           if (busy) return; busy = true; btn.disabled = true; msg.textContent = "";
           const id = idIn.value, pw = input.value;
@@ -399,7 +408,7 @@ const LOCK = (() => {
   }
 
   return { ready, ensureUnlocked, isUnlocked, verify, signOut, configured, currentYm, signInMaster,
-           approvalCode, savedApproval, clearApproval, isMaster, blocked,
+           approvalCode, savedApproval, clearApproval, isMaster, blocked, monthEnd,
            isMasterSession, clearMaster,
            company: () => {
              for (const raw of [readAt(sstore(), APPROVED_KEY()), readAt(localStorage, APPROVED_KEY())]) {
