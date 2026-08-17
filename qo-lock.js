@@ -357,14 +357,24 @@ const LOCK = (() => {
         idIn.addEventListener("keydown", e => { if (e.key === "Enter") input.focus(); });
 
         /* ── 사용 신청 ──────────────────────────────────────────────
-           서버가 없으니 신청서는 메일로 보낸다. 신청자는 아직 구글 로그인 전이라
-           앱이 대신 보낼 수 없어, 기본 메일 프로그램을 열어준다.
-           제목의 표식을 마스터가 신청함에서 찾는다 — 형식을 바꾸면 안 읽힌다. */
+           서버가 없으니 신청 내용을 '신청 코드' 한 줄로 만들어 준다.
+           예전엔 메일 앱을 열었는데, 모바일에서 잘 막히고 업체가 쓰는 메일이
+           회사 메일이 아닌 경우도 있어 카톡·문자로도 보낼 수 있게 바꿨다.
+           마스터 화면에서 이 코드를 붙여넣으면 신청서로 펼쳐진다. */
+        function makeCode(o) {
+          const bytes = new TextEncoder().encode(JSON.stringify(o));
+          let bin = ""; bytes.forEach(b => { bin += String.fromCharCode(b); });
+          return "QO1-" + btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+        }
         const su = root.querySelector("#qo-signup");
         const suLink = root.querySelector("#qo-signup-open");
         const suMsg = root.querySelector("#su-msg");
         suLink.addEventListener("click", e => {
           e.preventDefault();
+          /* 구글폼을 세팅해 뒀으면 그걸 연다 — 업체는 폼만 채우면 되고,
+             마스터는 응답 시트를 퀵오더 안에서 바로 본다. */
+          const formUrl = (CONFIG && CONFIG.signupFormUrl) || "";
+          if (formUrl) { window.open(formUrl, "_blank", "noopener"); return; }
           const open = su.style.display === "none";
           su.style.display = open ? "block" : "none";
           suLink.textContent = open ? "신청 접기" : "처음이신가요? 사용 신청하기";
@@ -379,20 +389,18 @@ const LOCK = (() => {
             suMsg.textContent = "업체명과 이메일은 꼭 넣어주세요.";
             return;
           }
-          const admin = (CONFIG && CONFIG.adminEmail) || "";
-          const subject = "[퀵오더 가입신청] " + name;
-          const body = "업체명: " + name + "\n이메일: " + mail + "\n연락처: " + tel +
-                       "\n\n퀵오더 사용을 신청합니다.";
+          const code = makeCode({ n: name, e: mail, t: tel });
+          const out = root.querySelector("#su-out");
+          const cp = root.querySelector("#su-copy");
+          out.value = code; out.style.display = "block"; cp.style.display = "block";
           suMsg.style.color = "#6b7280";
-          if (admin) {
-            try {
-              window.location.href = "mailto:" + encodeURIComponent(admin) +
-                "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
-              suMsg.textContent = "메일 앱이 열립니다. 그대로 보내주시면 승인 후 승인번호를 보내드립니다.";
-              return;
-            } catch (e2) {}
-          }
-          suMsg.textContent = "아래 내용을 " + (admin || "관리자") + " 로 보내주세요.\n제목: " + subject + "\n" + body;
+          suMsg.textContent = "이 코드를 " + ((CONFIG && CONFIG.adminLabel) || "관리자") +
+            " 에게 보내주세요. 카톡·문자·메일 아무거나 괜찮습니다.\n승인되면 승인번호를 받으시게 됩니다.";
+          cp.onclick = async () => {
+            try { await navigator.clipboard.writeText(code); cp.textContent = "복사됨 ✓"; }
+            catch (e2) { out.select(); try { document.execCommand("copy"); cp.textContent = "복사됨 ✓"; } catch (e3) {} }
+            setTimeout(() => { cp.textContent = "코드 복사"; }, 1800);
+          };
         });
       });
     });

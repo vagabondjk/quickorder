@@ -1947,27 +1947,25 @@ async function drawSettings() {
   const cid = await clientId();          // 저장값 없으면 기본 내장 ID를 보여줌
   const gbox = document.createElement("div");
   gbox.className = "mitem"; gbox.style.marginBottom = "10px";
-  const own = cid && cid !== DEFAULT_CLIENT_ID;
+  /* 평소엔 [구글 로그인] 하나만 보이면 된다. 프로젝트 번호·클라이언트 ID 같은 것은
+     막혔을 때만 필요한 값이라 '고급 설정' 안으로 접어 넣는다. */
   gbox.innerHTML = `<div style="font-weight:700;font-size:13px">📧 구글 메일·드라이브 연결</div>
-    <div style="font-size:11px;color:var(--muted);margin:4px 0 8px">메일에서 발주서·송장을 가져오고, 드라이브 파일을 불러오고, 결과를 메일로 보내려면 연결하세요.</div>
-    <div style="font-size:11px;margin:0 0 8px;padding:8px 10px;border-radius:9px;background:var(--card2);border:1px solid var(--line);line-height:1.55">
-      ${own ? "우리 회사 구글 프로젝트를 쓰는 중입니다." :
-              "지금은 <b>제공된 기본 프로젝트</b>를 쓰고 있습니다.<br>" +
-              "연결이 <b>403 (액세스 차단됨)</b> 으로 막히면, 그 프로젝트가 아직 '테스트' 상태라 그렇습니다. " +
-              "관리자가 구글 콘솔에서 <b>[앱 게시]</b> 를 누르면 바로 풀립니다.<br>" +
-              "회사 전용 구글 프로젝트를 따로 쓰려면 그 <b>클라이언트 ID</b> 를 아래에 넣고 [저장] 하세요."}
-    </div>
-    <div style="font-size:11px;color:var(--muted);margin:0 0 6px">
-      연결에 쓰는 구글 프로젝트 번호 <b style="color:var(--ink);font-size:12px">${esc(GMAIL.projectNo(cid))}</b>
-      &nbsp;— 막히면 이 번호를 관리자에게 알려주세요
-    </div>
-    <div class="fld"><label>클라이언트 ID</label>
-      <input id="gmail-cid" value="${esc(cid)}" placeholder="xxxxx.apps.googleusercontent.com" spellcheck="false" autocapitalize="off"></div>
-    <div style="display:flex;gap:7px">
-      <button class="minibtn" id="gmail-save" style="padding:0 12px">저장</button>
+    <div style="font-size:11px;color:var(--muted);margin:4px 0 8px">메일·드라이브에서 파일을 가져오고, 결과를 메일로 보냅니다.</div>
+    <div style="display:flex;gap:7px;align-items:center">
       <button class="minibtn" id="gmail-connect" style="padding:0 12px;color:var(--brand)">구글 로그인</button>
-      <span id="gmail-status" style="flex:1;font-size:11px;color:var(--muted);align-self:center"></span>
-    </div>`;
+      <span id="gmail-status" style="flex:1;font-size:11px;color:var(--muted)"></span>
+    </div>
+    <details style="margin-top:8px">
+      <summary style="font-size:11px;color:var(--muted);cursor:pointer">고급 설정</summary>
+      <div style="font-size:11px;color:var(--muted);margin:8px 0 6px;line-height:1.55">
+        연결이 <b>403</b> 으로 막히면 구글 프로젝트가 '테스트' 상태입니다 —
+        관리자에게 프로젝트 번호 <b style="color:var(--ink)">${esc(GMAIL.projectNo(cid))}</b> 를 알려주세요.<br>
+        회사 전용 프로젝트를 쓰려면 그 클라이언트 ID 를 넣고 [저장].
+      </div>
+      <div class="fld"><label>클라이언트 ID</label>
+        <input id="gmail-cid" value="${esc(cid)}" placeholder="xxxxx.apps.googleusercontent.com" spellcheck="false" autocapitalize="off"></div>
+      <button class="minibtn" id="gmail-save" style="padding:0 12px">저장</button>
+    </details>`;
   box.appendChild(gbox);
   $("gmail-status").textContent = !gmailReady ? "미연결" : (GMAIL.signedIn() ? "로그인됨 ✓" : "준비됨");
   $("gmail-save").onclick = async () => {
@@ -2723,17 +2721,56 @@ const MST = (() => {
     };
     return { name: g("업체명"), email: g("이메일"), tel: g("연락처") };
   }
+  /* 아주 단순한 CSV 파서 — 구글폼 응답 시트는 따옴표 안에 쉼표·줄바꿈이 들어올 수 있다 */
+  function parseCsv(text) {
+    const rows = []; let row = [], cell = "", q = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (q) {
+        if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+        else if (c === '"') q = false;
+        else cell += c;
+      } else if (c === '"') q = true;
+      else if (c === ",") { row.push(cell); cell = ""; }
+      else if (c === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; }
+      else if (c !== "\r") cell += c;
+    }
+    if (cell || row.length) { row.push(cell); rows.push(row); }
+    return rows.filter(r => r.some(x => String(x).trim()));
+  }
+  /* 응답 시트에서 신청서를 읽는다. 열 이름으로 찾아야 질문 순서가 바뀌어도 버틴다. */
+  async function reqsFromSheet(id) {
+    const csv = await GMAIL.driveExportCsv(id);
+    const rows = parseCsv(csv);
+    if (rows.length < 2) return [];
+    const head = rows[0].map(h => String(h).trim());
+    const find = re => head.findIndex(h => re.test(h));
+    const iName = find(/업체|회사|상호/), iMail = find(/메일|이메일|email/i), iTel = find(/연락처|전화|휴대|tel|phone/i);
+    const out = [];
+    for (let i = rows.length - 1; i >= 1; i--) {           // 최근 것부터
+      const r = rows[i];
+      const name = (iName >= 0 ? r[iName] : r[1] || "").trim();
+      if (!name) continue;
+      if (out.some(x => x.name === name)) continue;        // 같은 업체가 여러 번 내면 최근 것만
+      out.push({ name, email: (iMail >= 0 ? r[iMail] : "").trim(),
+                 tel: (iTel >= 0 ? r[iTel] : "").trim(), at: (r[0] || "").trim() });
+    }
+    return out;
+  }
   async function loadReqs() {
     const box = $("mst-reqs"); if (!box) return;
     box.innerHTML = '<div class="empty">신청함을 확인하는 중…</div>';
     try {
       await ensureGmail();
+      const sheet = (CONFIG && CONFIG.signupSheetId) || "";
+      if (sheet) { drawReqs(await reqsFromSheet(sheet)); return; }   // 구글폼 응답 시트
+      // 폼을 안 쓰면 예전처럼 메일함에서 찾는다
       const items = await GMAIL.listTextMails({ days: 90, keywords: [SIGNUP_TAG], senders: [], max: 30 });
       const reqs = [];
       for (const m of items) {
         const r = parseReq(m.text || m.snippet || "");
         if (!r.name) continue;
-        if (reqs.some(x => x.name === r.name)) continue;      // 같은 업체가 여러 번 보내면 하나만
+        if (reqs.some(x => x.name === r.name)) continue;
         r.at = m.date || ""; reqs.push(r);
       }
       drawReqs(reqs);

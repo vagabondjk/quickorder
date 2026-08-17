@@ -420,6 +420,18 @@ const GMAIL = (() => {
   }
   /* ---------- 드라이브: 내 파일 읽기(발주서 끌어오기) ---------- */
   const DRIVE = "https://www.googleapis.com/drive/v3";
+  /* 구글 시트를 CSV 로 받아온다 (구글폼 응답 시트를 읽을 때 쓴다).
+     시트 API 를 따로 켤 필요 없이, 이미 가진 드라이브 권한으로 내보내기 하면 된다. */
+  async function driveExportCsv(fileId) {
+    const t = await token();
+    const r = await fetch(`${DRIVE}/files/${encodeURIComponent(fileId)}/export?mimeType=text%2Fcsv`,
+      { headers: { Authorization: "Bearer " + t } });
+    if (!r.ok) {
+      let d = {}; try { d = await r.json(); } catch (e) {}
+      throw new Error((d.error && d.error.message) || ("시트를 읽지 못했어요 (HTTP " + r.status + ")"));
+    }
+    return await r.text();
+  }
   const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   const GSHEET_MIME = "application/vnd.google-apps.spreadsheet";
   async function driveApiGet(path) {
@@ -530,7 +542,7 @@ const GMAIL = (() => {
     return (await r.json()).id;
   }
 
-  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, switchAccount, persistToken, dropStored, reloadToken, projectNo, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
+  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, switchAccount, persistToken, dropStored, reloadToken, projectNo, driveExportCsv, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
            searchAddresses, driveFind, driveDownload, driveUpload, granted,
            driveIdFromLink, driveFileInfo, driveSearch, driveFetchExcel, driveListFolder, driveListShared, driveAncestors, driveUpdateFile, needLogin };
 })();
