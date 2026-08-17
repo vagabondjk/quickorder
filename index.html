@@ -141,6 +141,10 @@
   .busyrun{font-size:34px;line-height:1;animation:runx 1s ease-in-out infinite alternate}
   @keyframes runx{from{transform:translateX(-26px) scaleX(1)}to{transform:translateX(26px) scaleX(1)}}
   .busytrack{height:4px;border-radius:99px;background:var(--line);margin:10px 0 12px;overflow:hidden}
+  /* 진행률을 아는 작업(메일 훑기·여러 파일 받기)에서는 막대가 실제 비율로 찬다 */
+  .busybox.pct .busytrack i{animation:none;width:0;transition:width .18s ease}
+  .busypct{font-size:12.5px;font-weight:800;color:var(--brand);margin-top:-4px;
+    font-variant-numeric:tabular-nums;min-height:16px}
   .busytrack i{display:block;height:100%;width:40%;border-radius:99px;background:var(--brand);
     animation:runbar 1.1s ease-in-out infinite}
   @keyframes runbar{0%{margin-left:-40%}100%{margin-left:100%}}
@@ -368,6 +372,7 @@
   <div class="busybox">
     <div class="busyrun">🏃</div>
     <div class="busytrack"><i></i></div>
+    <div class="busypct" id="busy-pct"></div>
     <div class="busytxt">로딩중…</div>
     <div class="busysub" id="busy-sub"></div>
   </div>
@@ -476,6 +481,8 @@
         <button class="minibtn" id="sab-pin-clear">해제</button></div>
       <button class="minibtn" id="sab-pin-set" style="margin:0 0 8px">📌 바로 가져올 송장취합양식 파일 지정</button>
       <button class="go" id="mail-sab" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
+      <div class="setrow"><span style="flex:1"></span>
+        <button class="minibtn" id="sab-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-sab">
         디바이스 파일 선택 또는 끌어오기
         <b id="sab-name"></b>
@@ -556,6 +563,8 @@
       <button class="go" id="st-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <div class="setrow"><span class="gwho">메일 연결 확인 중…</span><button class="minibtn gacct" type="button">계정변경</button></div>
       <button class="go" id="st-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
+      <div class="setrow"><span style="flex:1"></span>
+        <button class="minibtn" id="st-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-st" style="margin-top:8px;padding:16px">
         디바이스 파일 선택 또는 끌어오기
         <b id="st-fname"></b>
@@ -584,6 +593,8 @@
       <button class="go" id="pb-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <div class="setrow"><span class="gwho">구글 연결 확인 중…</span><button class="minibtn gacct" type="button">계정변경</button></div>
       <button class="go" id="pb-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
+      <div class="setrow"><span style="flex:1"></span>
+        <button class="minibtn" id="pb-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-pb" style="margin:0 0 8px;padding:16px">
         디바이스 파일 선택 또는 끌어오기
         <input type="file" id="f-pb" accept=".xlsx,.xlsm">
@@ -614,6 +625,8 @@
       <button class="go" id="pay-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <div class="setrow"><span class="gwho">구글 연결 확인 중…</span><button class="minibtn gacct" type="button">계정변경</button></div>
       <button class="go" id="pay-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
+      <div class="setrow"><span style="flex:1"></span>
+        <button class="minibtn" id="pay-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-pay" style="margin:0 0 8px;padding:16px">
         디바이스 파일 선택 또는 끌어오기
         <input type="file" id="f-pay" accept=".xlsx,.xlsm" multiple>

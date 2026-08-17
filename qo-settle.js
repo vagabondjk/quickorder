@@ -2189,11 +2189,15 @@ const ST = (() => {
     });
     /* 메일에서 첨부 엑셀 가져오기 — 정산 파일(①)과 같은 방식으로 공급가표·보정에도 붙인다.
        각 카드가 찾는 단어만 다르고 나머지는 같아서 한 곳으로 모았다. */
-    async function mailInto(kw, box, take, what) {
+    async function mailInto(kind, box, take, what) {
       try { await ensureGmail(); } catch (e) { return; }
       msg(box, "", "");
       try {
-        const items = await GMAIL.listTextMails({ days: 60, keywords: kw, senders: [], max: 30 });
+        /* 검색어를 코드에 박아두면 회사마다 못 바꾼다 — 검색조건에서 읽어 쓴다 */
+        const f = await getFilter(kind);
+        const items = await GMAIL.listTextMails({ days: 60, keywords: f.keywords, senders: f.senders,
+                                                 exclude: f.exclude, max: 30,
+                                                 onProgress: (i, n) => BUSY.progress(i, n) });
         const withAtt = items.filter(m => m.atts.length);
         if (!withAtt.length) { msg(box, "warn", `최근 60일 메일에서 ${what} 엑셀 첨부를 찾지 못했어요.`); return; }
         let n = 0;
@@ -2206,10 +2210,11 @@ const ST = (() => {
         msg(box, "ok", `✔ 메일에서 ${n}개 파일을 불러왔어요.`);
       } catch (e) { msg(box, "err", "⚠ " + e.message); }
     }
-    $("pb-mail").onclick = () => mailInto(["공급가", "단가", "상품리스트", "정산참고"], "msg-pb",
-      (buf, name) => addPriceBook(buf, name), "공급가표");
-    $("pay-mail").onclick = () => mailInto(["대금", "지급", "매입", "정산"], "msg-pay",
-      (buf, name) => addPayFile(buf, name), "대금지급 내역");
+    $("pb-mail").onclick = () => mailInto("pb", "msg-pb", (buf, name) => addPriceBook(buf, name), "공급가표");
+    $("pay-mail").onclick = () => mailInto("pay", "msg-pay", (buf, name) => addPayFile(buf, name), "대금지급 내역");
+    $("st-filter-btn").onclick = () => openFilter("settle");
+    $("pb-filter-btn").onclick = () => openFilter("pb");
+    $("pay-filter-btn").onclick = () => openFilter("pay");
     $("st-md-add").onclick = async () => {
       rewards.push({ id: "md" + Date.now(), md: "", picks: {} });
       await saveRewards(); drawMd();

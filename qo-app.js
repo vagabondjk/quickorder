@@ -210,6 +210,17 @@ const BUSY = (() => {
     if (s) s.textContent = label || "";
     b.classList.add("on");
   }
+  /* 진행률 표시 — 실제로 셀 수 있는 작업에서만 부른다.
+     모르는 작업에 가짜 숫자를 띄우면 '멈춘 것처럼' 보여서 더 나쁘다. */
+  function progress(done, total) {
+    const b = el(); if (!b) return;
+    const box = b.querySelector(".busybox"), bar = b.querySelector(".busytrack i"), p = document.getElementById("busy-pct");
+    if (!total || total < 0) { if (box) box.classList.remove("pct"); if (p) p.textContent = ""; if (bar) bar.style.width = ""; return; }
+    const v = Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+    if (box) box.classList.add("pct");
+    if (bar) bar.style.width = v + "%";
+    if (p) p.textContent = v + "%" + (total > 1 ? `  (${done}/${total})` : "");
+  }
   function start(txt) {
     n++; label = txt || label;
     if (timer || el() && el().classList.contains("on")) return;
@@ -221,6 +232,8 @@ const BUSY = (() => {
     label = "";
     if (timer) { clearTimeout(timer); timer = null; }
     const b = el(); if (b) b.classList.remove("on");
+    progress(0, 0);                       // 다음 작업이 옛 퍼센트를 물려받지 않게
+
   }
   /* 함수 하나를 '로딩 뜨는 함수'로 바꿔 끼운다 */
   function wrap(get, set, txt) {
@@ -241,7 +254,7 @@ const BUSY = (() => {
     if (!obj) return;
     wrap(() => obj[name], v => { obj[name] = v; }, txt);
   }
-  return { start, end, hook, wrap };
+  return { start, end, progress, hook, wrap };
 })();
 // 파일 읽기
 BUSY.wrap(() => readFile, v => { readFile = v; }, "파일 읽는 중");
@@ -509,8 +522,12 @@ async function openDrivePicker(opts) {
   DRV.multiple = !!opts.multiple; DRV.onPick = opts.onPick; DRV.sel = new Map();
   DRV.key = opts.key || "";
   $("drv-title").textContent = opts.title || "구글 드라이브에서 가져오기";
-  $("drv-sub").textContent = opts.sub || (opts.multiple
-    ? "폴더 안에서 파일을 여러 개 고를 수 있어요." : "폴더 안에서 파일을 고르세요.");
+  /* 어느 구글 계정의 드라이브를 보고 있는지 함께 적는다.
+     이게 안 보여서 '베타브릭스로 로그인했는데 랩노마드 드라이브가 보인다' 를
+     한참 뒤에야 알아챘다. */
+  const acct = CONFIG.account ? ` · 👤 ${CONFIG.account}` : "";
+  $("drv-sub").textContent = (opts.sub || (opts.multiple
+    ? "폴더 안에서 파일을 여러 개 고를 수 있어요." : "폴더 안에서 파일을 고르세요.")) + acct;
   $("drv-done").style.display = opts.multiple ? "" : "none";
   $("drv-done").textContent = "선택 완료";
   $("drv-msg").textContent = ""; $("drv-q").value = ""; $("drv-link").value = "";
@@ -2046,9 +2063,14 @@ async function switchGoogleAccount(btn) {
     await GMAIL.switchAccount();
     let email = "";
     try { email = ((await GMAIL.profile()).emailAddress || "").toLowerCase(); } catch (e) {}
+    /* ★ 순서가 중요하다. 로그인은 '앞 계정' 자리에서 끝나므로,
+       ① 그 자리에 잘못 저장된 토큰을 지우고 ② 저장소를 새 계정 것으로 바꾼 뒤
+       ③ 토큰을 새 자리에 다시 써넣는다. 안 그러면 다음에 열 때 앞 계정 드라이브가 보인다. */
+    try { GMAIL.dropStored(); } catch (e) {}
+    if (email) await useAccountStore(email, { quiet: true });
+    try { GMAIL.persistToken(); } catch (e) {}
     updateGmailWho();
-    if (email) await useAccountStore(email);
-    else msg("msg-o", "ok", "구글 계정을 바꿨어요.");
+    msg("msg-o", "ok", email ? `👤 ${email} 계정으로 바꿨어요.` : "구글 계정을 바꿨어요.");
   } catch (e) {
     alert(e.message || String(e));
   } finally {
@@ -2124,8 +2146,13 @@ const FKEY = {
   reply: { senders: "replySenders", keywords: "replyKeywords", exclude: "replyExclude" },
   cs: { senders: "csSenders", keywords: "csKeywords", exclude: "csExclude" },
   settle: { senders: "stSenders", keywords: "stKeywords", exclude: "stExclude" },
+  pb: { senders: "pbSenders", keywords: "pbKeywords", exclude: "pbExclude" },
+  pay: { senders: "paySenders", keywords: "payKeywords", exclude: "payExclude" },
 };
-const FTITLE = { order: "발주서 검색조건", reply: "회신 송장 검색조건", cs: "CS 검색조건", settle: "정산 파일 검색조건" };
+/* 발주서와 송장취합양식은 같은 파일(사방넷 통합본)을 찾으므로 조건을 함께 쓴다 —
+   제목에 둘 다 적어야 어느 쪽에서 열어도 헷갈리지 않는다. */
+const FTITLE = { order: "발주서·송장취합양식 검색조건", reply: "회신 송장 검색조건", cs: "CS 검색조건",
+                 settle: "정산 파일 검색조건", pb: "공급가표 검색조건", pay: "대금지급 내역 검색조건" };
 
 async function openFilter(mode) {
   filterMode = mode;
@@ -2150,17 +2177,33 @@ function drawChipList(boxId, items, kind) {
     box.appendChild(el);
   });
 }
-async function getList(kind) {
-  const key = FKEY[filterMode][kind];
-  const DEF = {
+/* 검색조건 기본값 — 저장해 둔 값이 없을 때만 쓴다 */
+function filterDefaults() {
+  return {
     order: defaultOrderFilter(),
     reply: CONFIG.reply,
     cs: { senders: [], keywords: ["문의", "교환", "반품", "취소", "환불", "누락", "파손", "불량", "CS"],
           exclude: ["발주", "정산"] },
     settle: { senders: [], keywords: ["정산", "정산내역", "지급"], exclude: ["발주", "송장"] },
+    pb: { senders: [], keywords: ["공급가", "단가", "상품리스트", "정산참고"], exclude: [] },
+    pay: { senders: [], keywords: ["대금", "지급", "매입", "정산"], exclude: [] },
   };
+}
+async function getList(kind) {
+  const key = FKEY[filterMode][kind];
+  const DEF = filterDefaults();
   const def = (DEF[filterMode] || DEF.order)[kind] || [];
   return await DB.get(key, def);
+}
+/* 화면 밖(정산 등)에서 그 종류의 검색조건을 통째로 읽어갈 때 쓴다 */
+async function getFilter(mode) {
+  const k = FKEY[mode] ? mode : "order";
+  const def = filterDefaults()[k] || {};
+  const out = {};
+  for (const which of ["senders", "keywords", "exclude"]) {
+    out[which] = await DB.get(FKEY[k][which], def[which] || []);
+  }
+  return out;
 }
 async function setList(kind, arr) {
   await DB.set(FKEY[filterMode][kind], arr);
@@ -2248,7 +2291,10 @@ async function loadMail() {
       const f = await getOrderFilter();
       opt = { days: mailDays, senders: f.senders, keywords: f.keywords, exclude: f.exclude, union: false, scanText: true };
     }
-    opt.onProgress = (i, n) => { const p = $("mail-prog"); if (p) p.textContent = `${i} / ${n}`; };
+    opt.onProgress = (i, n) => {
+      const p = $("mail-prog"); if (p) p.textContent = `${i} / ${n}`;
+      BUSY.progress(i, n);                     // 로딩창 막대·퍼센트
+    };
     mailItems = await GMAIL.listMails(opt);
     /* 회신 송장은 '보낸사람 또는 키워드' 로 찾는다(union). 그래서 본문에 '회신' 같은 말이
        들어간 남의 메일까지 딸려온다. 업체 주소를 알고 있으면 그것만 남긴다.
@@ -2344,6 +2390,7 @@ $("mail-ok").onclick = async function () {
 };
 $("mail-order").onclick = () => openMail("order");
 $("mail-sab").onclick = () => openMail("sab");
+if ($("sab-filter-btn")) $("sab-filter-btn").onclick = () => openFilter("order");
 $("mail-rep").onclick = () => openMail("rep");
 
 // setOrder 를 버퍼 기반으로도 쓰도록 분리

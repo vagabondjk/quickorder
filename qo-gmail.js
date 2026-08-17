@@ -160,9 +160,15 @@ const GMAIL = (() => {
      '다른 계정으로 바꾸고 싶은데 늘 같은 계정으로 들어가지는' 일이 생긴다. 힌트부터 지운다. */
   async function switchAccount() {
     try { localStorage.removeItem(HKEY()); } catch (e) {}
+    clearToken();                       // 떠나는 계정의 토큰을 그 자리에서 지운다
     accessToken = null; tokenExp = 0;
     return await signIn("select_account");
   }
+  /* 저장 자리(회사·계정)가 바뀐 뒤 지금 토큰을 그 자리에 다시 써넣는다.
+     ★ 로그인 시점엔 아직 '앞 계정' 자리라, 여기서 옮기지 않으면 새 계정 토큰이
+       앞 계정 칸에 남는다 — 다음에 열 때 남의 드라이브가 보이는 원인이었다. */
+  function persistToken() { if (accessToken) saveToken(); }
+  function dropStored() { clearToken(); }   // 메모리는 그대로, 저장된 것만 지운다
 
   async function api(path, opts) {
     const t = await token();
@@ -524,7 +530,7 @@ const GMAIL = (() => {
     return (await r.json()).id;
   }
 
-  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, switchAccount, reloadToken, projectNo, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
+  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, switchAccount, persistToken, dropStored, reloadToken, projectNo, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
            searchAddresses, driveFind, driveDownload, driveUpload, granted,
            driveIdFromLink, driveFileInfo, driveSearch, driveFetchExcel, driveListFolder, driveListShared, driveAncestors, driveUpdateFile, needLogin };
 })();
