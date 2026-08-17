@@ -212,6 +212,11 @@ const LOCK = (() => {
       #qo-lock button:disabled{opacity:.5}
       #qo-lock .msg{min-height:18px;margin-top:12px;font-size:13px;color:#e5484d;font-weight:600}
       #qo-lock .ver{margin-top:14px;font-size:12px;color:#9aa3b2;letter-spacing:.5px}
+      #qo-lock .signup{margin-top:14px;font-size:12.5px}
+      #qo-lock .signup a{color:#4f6ef7;font-weight:700;text-decoration:none}
+      #qo-lock #qo-signup{margin-top:12px;padding-top:12px;border-top:1px solid #eef0f6}
+      #qo-lock #qo-signup input{font-size:14px;padding:11px;text-align:left}
+      #qo-lock #qo-signup button{margin-top:9px;padding:12px;font-size:14px}
     `;
     document.head.appendChild(st);
   }
@@ -230,6 +235,14 @@ const LOCK = (() => {
       "<button id=\"qo-lock-go\">확인</button>" +
       "<div class=\"msg\" id=\"qo-lock-msg\"></div>" +
       "<div id=\"qo-lock-extra\"></div>" +
+      "<div class=\"signup\"><a href=\"#\" id=\"qo-signup-open\">처음이신가요? 사용 신청하기</a></div>" +
+      "<div id=\"qo-signup\" style=\"display:none\">" +
+        "<input id=\"su-name\" type=\"text\" placeholder=\"업체명\" autocapitalize=\"off\" style=\"letter-spacing:0;margin-bottom:7px\">" +
+        "<input id=\"su-mail\" type=\"email\" placeholder=\"이메일 (승인번호를 받을 주소)\" autocapitalize=\"off\" style=\"letter-spacing:0;margin-bottom:7px\">" +
+        "<input id=\"su-tel\" type=\"text\" placeholder=\"담당자 연락처\" autocapitalize=\"off\" style=\"letter-spacing:0\">" +
+        "<button id=\"qo-signup-go\">신청서 보내기</button>" +
+        "<div class=\"msg\" id=\"su-msg\" style=\"color:var(--muted)\"></div>" +
+      "</div>" +
       /* 최신본을 받았는지 로그인 화면에서 바로 확인할 수 있게 버전을 보여준다 */
       "<div class=\"ver\">" + (typeof APP_VER !== "undefined" ? "v" + APP_VER : "") + "</div>" +
       "</div>";
@@ -293,6 +306,45 @@ const LOCK = (() => {
         btn.addEventListener("click", go);
         input.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
         idIn.addEventListener("keydown", e => { if (e.key === "Enter") input.focus(); });
+
+        /* ── 사용 신청 ──────────────────────────────────────────────
+           서버가 없으니 신청서는 메일로 보낸다. 신청자는 아직 구글 로그인 전이라
+           앱이 대신 보낼 수 없어, 기본 메일 프로그램을 열어준다.
+           제목의 표식을 마스터가 신청함에서 찾는다 — 형식을 바꾸면 안 읽힌다. */
+        const su = root.querySelector("#qo-signup");
+        const suLink = root.querySelector("#qo-signup-open");
+        const suMsg = root.querySelector("#su-msg");
+        suLink.addEventListener("click", e => {
+          e.preventDefault();
+          const open = su.style.display === "none";
+          su.style.display = open ? "block" : "none";
+          suLink.textContent = open ? "신청 접기" : "처음이신가요? 사용 신청하기";
+          if (open) setTimeout(() => { try { root.querySelector("#su-name").focus(); } catch (e2) {} }, 60);
+        });
+        root.querySelector("#qo-signup-go").addEventListener("click", () => {
+          const name = root.querySelector("#su-name").value.trim();
+          const mail = root.querySelector("#su-mail").value.trim();
+          const tel = root.querySelector("#su-tel").value.trim();
+          if (!name || !mail) {
+            suMsg.style.color = "#e5484d";
+            suMsg.textContent = "업체명과 이메일은 꼭 넣어주세요.";
+            return;
+          }
+          const admin = (CONFIG && CONFIG.adminEmail) || "";
+          const subject = "[퀵오더 가입신청] " + name;
+          const body = "업체명: " + name + "\n이메일: " + mail + "\n연락처: " + tel +
+                       "\n\n퀵오더 사용을 신청합니다.";
+          suMsg.style.color = "#6b7280";
+          if (admin) {
+            try {
+              window.location.href = "mailto:" + encodeURIComponent(admin) +
+                "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+              suMsg.textContent = "메일 앱이 열립니다. 그대로 보내주시면 승인 후 승인번호를 보내드립니다.";
+              return;
+            } catch (e2) {}
+          }
+          suMsg.textContent = "아래 내용을 " + (admin || "관리자") + " 로 보내주세요.\n제목: " + subject + "\n" + body;
+        });
       });
     });
   }

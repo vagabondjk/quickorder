@@ -2595,35 +2595,59 @@ const MST = (() => {
     } catch (e) {}
     say("복사가 막혀 있어요. 아래 값을 직접 선택해 복사하세요:\n" + txt);
   }
-  async function load() { list = await DB.get("masterCompanies", []) || []; }
+  /* 예전엔 업체명 문자열만 담았다. 이제 사용여부·연락처까지 담아야 해서 객체로 바꾼다.
+     옛 데이터를 읽을 때 그 자리에서 객체로 올려준다 (이미 쓰고 있는 사람이 있다). */
+  const norm = x => (typeof x === "string" ? { name: x, on: true } : Object.assign({ on: true }, x));
+  async function load() { list = ((await DB.get("masterCompanies", [])) || []).map(norm); }
   async function save() { await DB.set("masterCompanies", list); }
+  /* 업체 목록을 공용 명단 형태로 — 나중에 드라이브·배포에 올려 로그인 차단에 쓴다 */
+  function roster() {
+    return { at: Date.now(), companies: list.map(c => ({ name: c.name, on: c.on !== false })) };
+  }
   async function draw() {
     const box = $("mst-list"); if (!box) return;
     if (!list.length) { box.innerHTML = '<div class="empty">승인한 업체가 없습니다</div>'; return; }
-    const codes = await Promise.all(list.map(n => LOCK.approvalCode(n)));
-    box.innerHTML = list.map((n, i) => `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;
-        border:1px solid var(--line);border-radius:10px;margin-bottom:6px;background:var(--card2)">
+    const codes = await Promise.all(list.map(c => LOCK.approvalCode(c.name)));
+    box.innerHTML = list.map((c, i) => {
+      const on = c.on !== false;
+      return `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;
+        border:1px solid var(--line);border-radius:10px;margin-bottom:6px;
+        background:var(--card2);opacity:${on ? 1 : .55}">
         <div style="flex:1;min-width:0">
-          <b style="font-size:13.5px;word-break:break-all">${esc(n)}</b>
-          <div style="font-size:17px;font-weight:800;letter-spacing:2px;color:var(--brand);margin-top:2px">${codes[i]}</div></div>
+          <b style="font-size:13.5px;word-break:break-all">${esc(c.name)}</b>
+          ${on ? "" : '<span style="font-size:11px;font-weight:800;color:var(--danger);margin-left:6px">사용 중지</span>'}
+          <div style="font-size:17px;font-weight:800;letter-spacing:2px;color:var(--brand);margin-top:2px">${codes[i]}</div>
+          ${c.email ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${esc(c.email)}${c.tel ? " · " + esc(c.tel) : ""}</div>` : ""}
+        </div>
+        <button class="minibtn mstonoff" data-i="${i}" style="flex:none;${on ? "" : "color:var(--danger);border-color:var(--danger)"}">${on ? "사용 중" : "중지됨"}</button>
         <button class="minibtn mstcopy" data-i="${i}" style="flex:none">번호 복사</button>
         <button class="minibtn mstmsg" data-i="${i}" style="flex:none">안내문</button>
-        <button class="minibtn mstdel" data-i="${i}" style="flex:none">삭제</button></div>`).join("");
+        <button class="minibtn mstdel" data-i="${i}" style="flex:none">삭제</button></div>`;
+    }).join("");
+    box.querySelectorAll(".mstonoff").forEach(b => b.onclick = async () => {
+      const i = Number(b.dataset.i);
+      list[i].on = list[i].on === false;
+      await save(); draw();
+      $("mst-msg").textContent = list[i].on
+        ? `${list[i].name} — 사용으로 바꿨습니다.`
+        : `${list[i].name} — 사용 중지로 표시했습니다. ※ 아직 기록만 남습니다 — 실제 로그인 차단은 공용 명단 연결이 필요합니다.`;
+    });
     /* ★ '복사' 는 승인번호만 복사한다.
        안내 문구까지 같이 복사하면 그대로 붙여넣었을 때 로그인이 안 된다 (실제로 그랬다). */
     box.querySelectorAll(".mstcopy").forEach(b => b.onclick = () => {
       const i = Number(b.dataset.i);
       copyText(codes[i], `승인번호 ${codes[i]} 복사했어요. 그대로 붙여넣으면 로그인됩니다.`);
     });
-    box.querySelectorAll(".mstmsg").forEach(b => b.onclick = () => {
+    box.querySelectorAll(".mstmsg").forEach(b => b.onclick = async () => {
       const i = Number(b.dataset.i);
-      copyText(`[퀵오더] ${list[i]} 로그인 안내
-업체명: ${list[i]}
-승인번호: ${codes[i]}`, "안내문을 복사했어요. 업체에 그대로 보내세요.");
+      const c = list[i];
+      /* 메일 주소를 알고 있으면 바로 보낸다 — 복사해서 옮겨 붙이는 단계를 없앤다 */
+      if (c.email) { await sendGuide(c, codes[i]); return; }
+      copyText(guideText(c.name, codes[i]), "안내문을 복사했어요. 업체에 그대로 보내세요.");
     });
     box.querySelectorAll(".mstdel").forEach(b => b.onclick = async () => {
       const i = Number(b.dataset.i);
-      if (!confirm(`'${list[i]}' 를 목록에서 지울까요?
+      if (!confirm(`'${list[i].name}' 를 목록에서 지울까요?
 (이미 전달한 승인번호는 계속 쓸 수 있습니다)`)) return;
       list.splice(i, 1); await save(); draw();
     });
@@ -2634,6 +2658,88 @@ const MST = (() => {
   async function isMasterNow() {
     if (authedNow) return true;
     try { return await LOCK.isMasterSession(); } catch (e) { return false; }
+  }
+  const APP_URL = location.origin + location.pathname;
+  function guideText(name, code) {
+    return `[퀵오더] ${name} 로그인 안내
+
+주소: ${APP_URL}
+업체명: ${name}
+승인번호: ${code}
+
+로그인 화면에서 업체명과 승인번호를 넣으시면 됩니다.
+승인번호가 곧 비밀번호입니다. 다른 곳에 공유하지 마세요.`;
+  }
+  /* 안내문을 그 업체 메일로 바로 보낸다. 마스터는 구글에 로그인돼 있으므로 그 계정으로 나간다. */
+  async function sendGuide(c, code) {
+    const say = m => { const el = $("mst-msg"); if (el) el.textContent = m; };
+    if (!c.email) { say("이 업체는 메일 주소가 없어요. 신청서로 들어온 업체만 바로 보낼 수 있습니다."); return; }
+    if (!confirm(`${c.email} 로 승인 안내문을 보낼까요?`)) return;
+    say("보내는 중…");
+    try {
+      await ensureGmail();
+      await GMAIL.send({ to: c.email, subject: `[퀵오더] ${c.name} 로그인 안내`, body: guideText(c.name, code) });
+      c.sentAt = Date.now(); await save(); draw();
+      say(`✔ ${c.email} 로 보냈습니다.`);
+    } catch (e) { say("⚠ 보내지 못했어요 — " + (e.message || e)); }
+  }
+  /* ── 가입 신청함 ─────────────────────────────────────────────
+     서버가 없으니 신청은 메일로 온다. 마스터 지메일에서 신청 메일을 읽어 목록으로 보여준다.
+     제목에 표식(SIGNUP_TAG)을 넣어 두고 그걸로 찾는다. */
+  const SIGNUP_TAG = "[퀵오더 가입신청]";
+  function parseReq(text) {
+    const g = k => {
+      const m = String(text || "").match(new RegExp("^\s*" + k + "\s*[:：]\s*(.+)$", "m"));
+      return m ? m[1].trim() : "";
+    };
+    return { name: g("업체명"), email: g("이메일"), tel: g("연락처") };
+  }
+  async function loadReqs() {
+    const box = $("mst-reqs"); if (!box) return;
+    box.innerHTML = '<div class="empty">신청함을 확인하는 중…</div>';
+    try {
+      await ensureGmail();
+      const items = await GMAIL.listTextMails({ days: 90, keywords: [SIGNUP_TAG], senders: [], max: 30 });
+      const reqs = [];
+      for (const m of items) {
+        const r = parseReq(m.text || m.snippet || "");
+        if (!r.name) continue;
+        if (reqs.some(x => x.name === r.name)) continue;      // 같은 업체가 여러 번 보내면 하나만
+        r.at = m.date || ""; reqs.push(r);
+      }
+      drawReqs(reqs);
+    } catch (e) {
+      box.innerHTML = `<div class="empty">신청함을 읽지 못했어요 — ${esc(e.message || String(e))}</div>`;
+    }
+  }
+  function drawReqs(reqs) {
+    const box = $("mst-reqs"); if (!box) return;
+    const fresh = reqs.filter(r => !list.some(c => c.name === r.name));
+    if (!fresh.length) { box.innerHTML = '<div class="empty">새 가입 신청이 없습니다</div>'; return; }
+    box.innerHTML = fresh.map((r, i) => `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;
+        border:1.5px solid var(--brand);border-radius:10px;margin-bottom:6px;background:var(--brand-soft)">
+        <div style="flex:1;min-width:0">
+          <b style="font-size:13.5px">${esc(r.name)}</b>
+          <div style="font-size:11.5px;color:var(--muted);margin-top:2px">${esc(r.email || "메일 없음")}${r.tel ? " · " + esc(r.tel) : ""}</div>
+        </div>
+        <button class="minibtn reqok" data-i="${i}" style="flex:none;color:var(--brand);border-color:var(--brand);font-weight:800">승인</button>
+        <button class="minibtn reqsend" data-i="${i}" style="flex:none">승인 + 안내문 발송</button></div>`).join("");
+    const add = async r => {
+      if (list.some(c => c.name === r.name)) return;
+      list.push({ name: r.name, on: true, email: r.email || "", tel: r.tel || "", at: Date.now() });
+      await save(); await draw();
+    };
+    box.querySelectorAll(".reqok").forEach(b => b.onclick = async () => {
+      const r = fresh[Number(b.dataset.i)];
+      await add(r); drawReqs(reqs);
+      $("mst-msg").textContent = `${r.name} 승인했습니다. 안내문은 목록의 [안내문] 으로 보낼 수 있어요.`;
+    });
+    box.querySelectorAll(".reqsend").forEach(b => b.onclick = async () => {
+      const r = fresh[Number(b.dataset.i)];
+      await add(r); drawReqs(reqs);
+      const c = list.find(x => x.name === r.name);
+      if (c) await sendGuide(c, await LOCK.approvalCode(c.name));
+    });
   }
   async function open() {
     wire();                                    // ★ 열 때마다 다시 연결한다 (아래 wire 주석 참고)
@@ -2714,10 +2820,12 @@ const MST = (() => {
     on("mst-add", "onclick", async () => {
       const n = $("mst-name").value.trim().replace(/\s+/g, "");
       if (!n) { $("mst-name").focus(); return; }
-      if (list.indexOf(n) >= 0) { $("mst-msg").textContent = "이미 목록에 있어요."; return; }
-      list.push(n); await save(); $("mst-name").value = ""; $("mst-msg").textContent = ""; draw();
+      if (list.some(c => c.name === n)) { $("mst-msg").textContent = "이미 목록에 있어요."; return; }
+      list.push({ name: n, on: true, at: Date.now() });
+      await save(); $("mst-name").value = ""; $("mst-msg").textContent = ""; draw();
     });
     on("mst-name", "onkeydown", e => { if (e.key === "Enter") $("mst-add").onclick(); });
+    on("mst-req-refresh", "onclick", loadReqs);
   }
   return { bind: wire, open, show };
 })();
