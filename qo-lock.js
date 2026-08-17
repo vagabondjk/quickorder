@@ -192,7 +192,29 @@ const LOCK = (() => {
       return !!(hit && hit.on === false);
     } catch (e) { return false; }
   }
-  const BLOCK_MSG = "관리자가 이 업체의 사용을 중지했습니다.\n관리자에게 문의하세요.";
+  const BLOCK_MSG = "승인받지 않은 아이디입니다.\n관리자에게 문의하세요.";
+  /* ★ 승인명단(구글 시트) 확인을 로그인 화면에서 한다.
+     예전엔 앱에 들어간 뒤 확인해서 화면이 잠깐 보였다가 팝업이 떴다 — 들어가기 전에 막는다.
+     · 그 업체가 쓰던 구글 계정의 토큰으로 읽는다. 토큰이 없으면 통과시킨다
+       (여기서 로그인 창을 띄우면 안 된다 — 사용자가 누른 적이 없다).
+     · 못 읽어도 통과. 인터넷이 흔들린다고 멀쩡한 업체를 잠그면 안 된다. */
+  async function blockedBySheet(company) {
+    try {
+      const id = (CONFIG && CONFIG.rosterSheetId) || "";
+      if (!id || typeof GMAIL === "undefined") return false;
+      CONFIG.useCompany(company);
+      let last = "";
+      try { last = localStorage.getItem(CONFIG.lsCompany("qo_last_account")) || ""; } catch (e) {}
+      CONFIG.useAccount(last);
+      GMAIL.reloadToken();
+      if (!GMAIL.signedIn()) return false;
+      const tabs = await GMAIL.sheetTabs(id);
+      const rows = await GMAIL.sheetRead(id, tabs[0] || "시트1");
+      if (!rows || rows.length < 2) return false;
+      const hit = rows.slice(1).find(r => normId(r[0]) === normId(company));
+      return !!(hit && /중지|off|false/i.test(String(hit[1] || "")));
+    } catch (e) { return false; }
+  }
 
   async function verify(pw) {
     const h = await hashPw(pw);
@@ -304,7 +326,7 @@ const LOCK = (() => {
 
       isUnlocked().then(async ok => {
         const approved = await savedApproval();
-        if (ok && approved && await blocked(approved)) {
+        if (ok && approved && (await blocked(approved) || await blockedBySheet(approved))) {
           signOut(); ok = false;                       // 중지된 업체는 기억된 로그인도 풀어버린다
           msg.style.color = "#e5484d"; msg.textContent = BLOCK_MSG;
         }
@@ -341,6 +363,11 @@ const LOCK = (() => {
              (번호를 모르면 여전히 못 들어온다 — 관대할 뿐 느슨하지 않다) */
           const typed = normId(pw).toUpperCase(), want = await approvalCode(id);
           if (typed === want || typed.indexOf(want) >= 0) {
+            if (await blockedBySheet(id)) {
+              msg.style.color = "#e5484d"; msg.textContent = BLOCK_MSG;
+              try { alert(BLOCK_MSG); } catch (e) {}
+              input.value = ""; busy = false; btn.disabled = false; return;
+            }
             await saveApproval(id); await saveUnlock();
             root.remove(); return resolve(true);
           }

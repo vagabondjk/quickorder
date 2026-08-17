@@ -3072,7 +3072,7 @@ async function checkBlockedBySheet() {
     const hit = rows.slice(1).find(r => norm(r[0]) === norm(co));
     S.blockCheck = hit ? `명단: ${hit[0]} = ${hit[1]}` : `명단에 '${co}' 없음 → 통과`;
     if (hit && /중지|off|false|사용안함/i.test(String(hit[1] || ""))) {
-      alert("관리자가 이 업체의 사용을 중지했습니다.\n관리자에게 문의하세요.");
+      alert("승인받지 않은 아이디입니다.\n관리자에게 문의하세요.");
       try { LOCK.signOut(); } catch (e) {}
       location.reload();
     }
