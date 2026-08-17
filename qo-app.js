@@ -1952,7 +1952,7 @@ async function drawSettings() {
   gbox.innerHTML = `<div style="font-weight:700;font-size:13px">📧 구글 메일·드라이브 연결</div>
     <div style="font-size:11px;color:var(--muted);margin:4px 0 8px">메일·드라이브에서 파일을 가져오고, 결과를 메일로 보냅니다.</div>
     <div style="display:flex;gap:7px;align-items:center">
-      <button class="minibtn" id="gmail-connect" style="padding:0 12px;color:var(--brand)">구글 로그인</button>
+      <button class="minibtn" id="gmail-connect" style="padding:0 12px;color:var(--brand)">${GMAIL.signedIn() ? "계정 변경" : "구글 로그인"}</button>
       <span id="gmail-status" style="flex:1;font-size:11px;color:var(--muted)"></span>
     </div>
     <details style="margin-top:8px">
@@ -1967,7 +1967,8 @@ async function drawSettings() {
       <button class="minibtn" id="gmail-save" style="padding:0 12px">저장</button>
     </details>`;
   box.appendChild(gbox);
-  $("gmail-status").textContent = !gmailReady ? "미연결" : (GMAIL.signedIn() ? "로그인됨 ✓" : "준비됨");
+  $("gmail-status").textContent = !gmailReady ? "미연결"
+    : (GMAIL.signedIn() ? "✓ " + (CONFIG.account || "로그인됨") : "준비됨");
   $("gmail-save").onclick = async () => {
     const cid = $("gmail-cid").value.trim();
     const before = await clientId();
@@ -1981,7 +1982,12 @@ async function drawSettings() {
     updateGmailWho();
     $("gmail-status").textContent = gmailReady ? "✓ 준비됨 · 이제 [구글 로그인]" : "✕ 라이브러리 로드 실패 (새로고침/광고차단 확인)";
   };
+  /* ★ 이미 연결돼 있으면 '계정 변경' 으로 동작해야 한다.
+     예전에는 ensureGmail() 을 불렀는데, 토큰이 살아 있으면 그대로 통과해서
+     브라우저에서 다른 구글 계정으로 바꿔도 앱은 앞 계정을 계속 썼다.
+     "새 계정으로 들어갔는데 옛 자료가 그대로" 의 원인이었다. */
   $("gmail-connect").onclick = async () => {
+    if (GMAIL.signedIn()) { await switchGoogleAccount($("gmail-connect")); drawSettings(); return; }
     $("gmail-status").textContent = "로그인 창 여는 중…";
     try { await ensureGmail(); const p = await GMAIL.profile();
       $("gmail-status").textContent = "✓ " + (p.emailAddress || "로그인됨"); updateGmailWho();
