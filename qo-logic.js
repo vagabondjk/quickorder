@@ -332,6 +332,68 @@ function normKey(v) {
 /* ===================================================================
    발주서 변환 : 주문 → 업체 양식
    =================================================================== */
+/* ---------------- 여러 쇼핑몰 주문 파일 합치기 ----------------
+   쇼핑몰마다 열 이름·순서가 다르다. 그래서 통째로 이어붙이면 안 되고,
+   각 파일을 '표준 항목' 으로 먼저 맞춘 뒤 그 결과를 합친다.
+   합친 결과는 표준 이름(FIELD_KR)을 헤더로 쓴 워크북이라, convert() 가
+   지금까지와 똑같이 읽는다 — 변환 로직은 손대지 않는다.
+
+   · 값은 원래 형(날짜는 Date, 수량은 숫자)을 그대로 옮긴다. 문자열로 바꾸면
+     날짜 서식·수량 계산이 깨진다.
+   · 브랜드 열과 쇼핑몰명은 따로 챙긴다. 브랜드는 업체 선택에, 쇼핑몰명은
+     어느 파일에서 왔는지 남기는 데 쓴다.
+   · 표준 항목으로 잡히지 않은 열은 버린다. 파일마다 제각각이라 합칠 수 없다. */
+function mergeOrders(sources) {
+  const rows = [], fields = new Set();
+  let brandSeen = false;
+  (sources || []).forEach(src => {
+    const wb = src.wb, mall = src.name || "";
+    const ws = pickOrderSheet(wb);
+    if (!ws) return;
+    const hr = findHeaderRow(ws);
+    const map = buildOrderFieldMap(ws, hr, "source");
+    const brandCol = findBrandColumn(ws, hr);
+    if (brandCol) brandSeen = true;
+    const maxRow = dims(ws).rows;
+    for (let r = hr + 1; r <= maxRow; r++) {
+      const rec = { __mall: mall };
+      let any = false;
+      Object.keys(map).forEach(canon => {
+        const v = cv(ws.getRow(r).getCell(map[canon]));
+        if (!isBlank(v)) { rec[canon] = v; fields.add(canon); any = true; }
+      });
+      if (brandCol) {
+        const b = cv(ws.getRow(r).getCell(brandCol));
+        if (!isBlank(b)) { rec.__brand = b; any = true; }
+      }
+      if (any) rows.push(rec);
+    }
+  });
+  /* 열 순서는 표준 항목 정의 순서를 따른다 — 사람이 열어봤을 때 늘 같은 자리에 있게 */
+  const cols = ORDER_FIELDS.map(f => f[0]).filter(c => fields.has(c));
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("합친주문");
+  const head = cols.map(c => FIELD_KR[c] || c);
+  if (brandSeen) head.push(BRAND_HEADER);
+  head.push("쇼핑몰명");
+  ws.addRow(head);
+  rows.forEach(rec => {
+    const line = cols.map(c => (rec[c] === undefined ? null : rec[c]));
+    if (brandSeen) line.push(rec.__brand === undefined ? null : rec.__brand);
+    line.push(rec.__mall);
+    const row = ws.addRow(line);
+    /* 날짜는 셀 단위로 서식을 준다. 열 전체에 주면 수량·금액까지 날짜로 보인다
+       (예전에 실제로 그런 사고가 있었다 — 상위 CLAUDE.md 참고) */
+    cols.forEach((c, i) => {
+      if (rec[c] instanceof Date) {
+        const cell = row.getCell(i + 1);
+        cell.style = Object.assign({}, cell.style, { numFmt: "yyyy-mm-dd" });
+      }
+    });
+  });
+  return { wb, rows: rows.length, fields: cols, malls: [...new Set(rows.map(r => r.__mall).filter(Boolean))] };
+}
+
 function convert(orderWb, tplWb, opts) {
   opts = opts || {};
   const brandFilter = opts.brands && opts.brands.length ? new Set(opts.brands.map(b => String(b).trim())) : null;
@@ -1309,7 +1371,7 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   toDateValue, isDateHeader, hasDateFormat, hasTimeFormat,
   findDateColumns, defaultDateColumn, orderDateInfo, formatPhone, stripHyphen,
   valueTransformForHeader, nameFromFilename, normKey,
-  convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, carrierKey, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, todayStr, fmtDate,
+  mergeOrders, convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, carrierKey, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, todayStr, fmtDate,
   normPriceText, toPriceNumber, priceKeyParts, priceRowKey, buildPriceBook, matchPrice,
   rankPriceCandidates, settle, settleCheck,
   settleSheetHead, settleSheetRow, isPriceHeader, isInternalHeader, vendorSheetColumns, carryNote };

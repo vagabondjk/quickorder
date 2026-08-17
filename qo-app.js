@@ -141,12 +141,12 @@ const DB = (() => {
 
 /* ---------------- 공통 상태 ---------------- */
 const S = {
-  orderWb: null, orderBuf: null, orderName: "",
+  orderWb: null, orderBuf: null, orderName: "", orderSrcs: null,
   brands: [], dateAll: [], dateSel: [], dateHeader: null,
   pv: null, pvAll: false,
   forms: [], brandVendor: {}, vendorEmails: {}, vendorSent: {}, vendorDomains: {}, sel: {},
   invEmails: "", invSent: [],
-  sabBuf: null, sabName: "", sabDrive: null, reps: [],
+  sabBuf: null, sabName: "", sabDrive: null, sabList: [], sabIdx: 0, reps: [],
 };
 
 function msg(el, kind, text) { const m = $(el); m.className = "msg" + (kind ? " show " + kind : ""); m.textContent = text; }
@@ -177,13 +177,47 @@ async function shareFile(buf, filename) {
   alert("이 브라우저는 파일 바로 공유를 지원하지 않아 다운로드했어요.\n저장된 파일을 카카오톡 대화창에 첨부해 보내주세요.\n(휴대폰에서는 '공유' 버튼으로 카카오톡에 바로 보낼 수 있습니다)");
   return false;
 }
+const isXls = f => /\.xls[xm]$/i.test(f && f.name || "");
+
+/* 끌어온 것에서 엑셀만 모은다. 폴더를 통째로 끌어와도 안을 뒤져서 다 꺼낸다.
+   ※ dataTransfer.files 는 폴더를 '이름만 있는 빈 파일'로 주기 때문에 그것만 보면
+     폴더를 끌어와도 아무 일도 일어나지 않는다. 그래서 entry 로 걷는다.
+   ※ webkitGetAsEntry() 는 이벤트 핸들러가 끝나기 전에(=await 전에) 불러야 한다 —
+     드롭이 끝나면 항목 목록이 비워진다. 그래서 entries 를 먼저 다 뽑아 둔다. */
+async function filesFromDrop(dt) {
+  const entries = [...(dt.items || [])]
+    .map(i => (i.webkitGetAsEntry ? i.webkitGetAsEntry() : null)).filter(Boolean);
+  const plain = [...(dt.files || [])];
+  if (!entries.length) return plain.filter(isXls);
+
+  const readDir = dir => new Promise(res => {
+    const rd = dir.createReader(), all = [];
+    // readEntries 는 한 번에 100개까지만 준다 — 빈 배열이 올 때까지 반복해야 한다
+    const step = () => rd.readEntries(es => { if (!es.length) return res(all); all.push(...es); step(); }, () => res(all));
+    step();
+  });
+  const out = [];
+  const walk = async e => {
+    if (e.isFile) {
+      const f = await new Promise(res => e.file(res, () => res(null)));
+      if (f && isXls(f)) out.push(f);
+    } else if (e.isDirectory) {
+      for (const c of await readDir(e)) await walk(c);
+    }
+  };
+  for (const e of entries) await walk(e);
+  out.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  return out;
+}
 function bindDrop(id, cb) {
   const el = $(id);
   ["dragover", "dragenter"].forEach(e => el.addEventListener(e, ev => { ev.preventDefault(); el.classList.add("hi"); }));
   ["dragleave", "drop"].forEach(e => el.addEventListener(e, ev => { ev.preventDefault(); el.classList.remove("hi"); }));
-  el.addEventListener("drop", ev => {
-    const f = [...ev.dataTransfer.files].filter(x => /\.xls[xm]$/i.test(x.name));
+  el.addEventListener("drop", async ev => {
+    const had = (ev.dataTransfer.items || ev.dataTransfer.files || []).length;
+    const f = await filesFromDrop(ev.dataTransfer);
     if (f.length) cb(f);
+    else if (had) alert("엑셀 파일(.xlsx / .xlsm)이 없습니다.\n폴더를 끌어오면 안에 있는 엑셀을 모두 가져옵니다.");
   });
 }
 let readFile = f => new Promise((res, rej) => {
@@ -462,24 +496,50 @@ function switchTab(t) {
 /* =================================================================
    ① 발주서 변환
    ================================================================= */
-$("f-order").addEventListener("change", function () { if (this.files[0]) setOrder(this.files[0]); });
-bindDrop("drop-order", f => setOrder(f[0]));
+$("f-order").addEventListener("change", function () {
+  const fs = [...this.files]; this.value = "";
+  if (fs.length) setOrder(fs);
+});
+bindDrop("drop-order", f => setOrder(f));
 
-async function setOrder(file) {
+/* 파일 이름에서 쇼핑몰 이름을 뽑는다 — 합친 표의 '쇼핑몰명' 열에 들어간다.
+   확장자와 날짜 앞머리 정도만 떼고 나머지는 그대로 둔다 (넘겨짚지 않는다). */
+function mallFromFilename(name) {
+  return String(name || "").replace(/\.[^.]+$/, "").replace(/^\d{6,8}[_\-\s]*/, "").trim() || name;
+}
+
+/* 쇼핑몰 발주서 세팅. 여러 개면 표준 항목으로 맞춰 한 장으로 합친다.
+   한 개면 합치지 않고 원본 그대로 쓴다 — 손대지 않은 파일이 제일 안전하다. */
+async function setOrder(files) {
+  const list = [...files].filter(isXls);
+  if (!list.length) return;
   msg("msg-o", "", "");
+  const many = list.length > 1;
+  if (many) BUSY.start("파일 읽는 중");
   try {
-    S.orderBuf = await readFile(file);
-    S.orderName = file.name;
-    $("order-name").textContent = "📄 " + file.name;
-    $("drop-order").classList.add("on");
-    const wb = await QO.loadWorkbook(S.orderBuf.slice(0));
-    S.brands = QO.listBrands(wb);
-    S.dateSel = [];
-    await loadDates();
-    await drawPreview();
-    buildVendorBrands();
-    refreshO();
+    const srcs = [];
+    if (many) BUSY.progress(0, list.length);
+    for (const f of list) { srcs.push({ name: f.name, buf: await readFile(f) }); if (many) BUSY.progress(srcs.length, list.length); }
+    await setOrderFiles(srcs, "📄");
   } catch (e) { msg("msg-o", "err", "파일을 읽지 못했어요: " + e.message); }
+  finally { if (many) BUSY.end(); }
+}
+
+/* srcs: [{name, buf}] — 업로드·드라이브·메일 모두 여기로 모인다 */
+async function setOrderFiles(srcs, icon) {
+  if (!srcs || !srcs.length) return;
+  S.orderSrcs = srcs.length > 1 ? srcs.map(s => s.name) : null;
+  if (srcs.length === 1) return setOrderFromBuf(srcs[0].buf, srcs[0].name, icon);
+
+  const parts = [];
+  for (const s of srcs) parts.push({ wb: await QO.loadWorkbook(s.buf.slice(0)), name: mallFromFilename(s.name) });
+  const m = QO.mergeOrders(parts);
+  if (!m.rows) throw new Error("고른 파일에서 주문 줄을 찾지 못했습니다.");
+  const buf = await QO.saveWorkbook(m.wb);
+  await setOrderFromBuf(buf, `${srcs.length}개 파일 합침 · ${m.rows}건`, "🧩");
+  $("order-name").innerHTML = `🧩 <b>${srcs.length}개 파일 합침 · ${m.rows}건</b>`
+    + `<span style="display:block;font-weight:600;color:var(--muted);font-size:11.5px;margin-top:2px">${esc(srcs.map(s => s.name).join(" · "))}</span>`;
+  msg("msg-o", "ok", `✔ 쇼핑몰 ${m.malls.length || srcs.length}곳의 주문 ${m.rows}건을 한 장으로 합쳤어요 — 아래에서 날짜 고르고 변환하세요`);
 }
 
 /* =================================================================
@@ -713,16 +773,31 @@ async function drvRememberFolder() {
 //    설정 등 다른 데서 부를 수 있게 함수는 남겨 둔다.
 function pickOrderFromDrive() {
   return openDrivePicker({
-    key: "order", title: "드라이브에서 발주서 가져오기", multiple: false,
+    key: "order", title: "드라이브에서 발주서 가져오기", multiple: true,
     onPick: async files => {
-      const f = files[0];
-      const r = await GMAIL.driveFetchExcel(f.id);
-      await DB.set("driveOrderFile", { id: f.id, name: r.name });
-      await setOrderFromBuf(r.buf, r.name);
+      const srcs = await fetchDriveExcels(files);
+      await DB.set("driveOrderFile", { acct: acctNow(), files: files.map(f => ({ id: f.id, name: f.name })) });
+      await setOrderFiles(srcs, "📁");
       drawDriveRecent();
-      msg("msg-o", "ok", `✔ 드라이브에서 가져왔어요: ${r.name}`);
+      if (srcs.length === 1) msg("msg-o", "ok", `✔ 드라이브에서 가져왔어요: ${srcs[0].name}`);
     },
   });
+}
+const acctNow = () => String(CONFIG.account || "").toLowerCase();
+/* 드라이브 파일 목록을 순서대로 받아온다 (몇 개든 진행 상황을 보여준다) */
+async function fetchDriveExcels(files) {
+  const out = [], many = files.length > 1;
+  // 여러 개면 한 번 띄운 로딩창을 끝까지 유지한다 (파일마다 깜빡이지 않게)
+  if (many) BUSY.start("드라이브에서 가져오는 중");
+  try {
+    if (many) BUSY.progress(0, files.length);
+    for (const f of files) {
+      const r = await GMAIL.driveFetchExcel(f.id);
+      out.push({ name: r.name, buf: r.buf });
+      if (many) BUSY.progress(out.length, files.length);
+    }
+  } finally { if (many) BUSY.end(); }
+  return out;
 }
 if ($("drive-order")) $("drive-order").onclick = pickOrderFromDrive;
 /* '바로 가져올 파일' 지정/변경.
@@ -730,18 +805,18 @@ if ($("drive-order")) $("drive-order").onclick = pickOrderFromDrive;
      상태가 되어 헷갈린다. 바꿨으면 그 파일을 바로 불러온다. */
 function pickOrderPin(alsoFetch) {
   openDrivePicker({
-    key: "order", title: alsoFetch ? "다른 발주서 파일로 변경" : "바로 가져올 발주서 파일 지정", multiple: false,
+    key: "order", title: alsoFetch ? "다른 발주서 파일로 변경" : "바로 가져올 발주서 파일 지정", multiple: true,
     onPick: async files => {
-      const f = files[0];
-      await DB.set("driveOrderFile", { id: f.id, name: f.name, acct: String(CONFIG.account || "").toLowerCase() });
+      const names = files.map(f => f.name).join(" · ");
+      await DB.set("driveOrderFile", { acct: acctNow(), files: files.map(f => ({ id: f.id, name: f.name })) });
       drawDriveRecent();
-      if (!alsoFetch) { msg("msg-o", "ok", `✔ 바로 가져올 발주서로 지정했어요: ${f.name}`); return; }
+      if (!alsoFetch) { msg("msg-o", "ok", `✔ 바로 가져올 발주서로 지정했어요: ${names}`); return; }
       msg("msg-o", "", "");
       try {
         await ensureGmail();
-        const r = await GMAIL.driveFetchExcel(f.id);
-        await setOrderFromBuf(r.buf, r.name);
-        msg("msg-o", "ok", `✔ ${r.name} (으)로 바꿔서 가져왔어요 · 아래에서 날짜 고르고 변환하세요`);
+        const srcs = await fetchDriveExcels(files);
+        await setOrderFiles(srcs, "📁");
+        if (srcs.length === 1) msg("msg-o", "ok", `✔ ${srcs[0].name} (으)로 바꿔서 가져왔어요 · 아래에서 날짜 고르고 변환하세요`);
       } catch (e) { msg("msg-o", "err", "가져오기 실패: " + e.message); }
     },
   });
@@ -756,22 +831,28 @@ $("order-pin-clear").onclick = async () => {
 // 지정한 발주서를 한 번에(폴더 탐색 없이) 최신본으로 가져와 바로 변환 프로세스로
 $("drive-again").onclick = async function () {
   const f = await pinOf("driveOrderFile");
-  if (!f || !f.id) { pickOrderPin(true); return; }   // 지정된 게 없으면 드라이브에서 고르게
+  if (!f) { pickOrderPin(true); return; }             // 지정된 게 없으면 드라이브에서 고르게
   this.disabled = true; const orig = this.innerHTML; this.textContent = "가져오는 중…";
   msg("msg-o", "", "");
   try {
     await ensureGmail();
-    const r = await GMAIL.driveFetchExcel(f.id);
-    await setOrderFromBuf(r.buf, r.name);          // ← 이후는 업로드와 동일한 변환 프로세스
-    msg("msg-o", "ok", `✔ 최신본을 가져왔어요: ${r.name} · 아래에서 날짜 고르고 변환하세요`);
+    const srcs = await fetchDriveExcels(f.files);
+    await setOrderFiles(srcs, "📁");                  // ← 이후는 업로드와 동일한 변환 프로세스
+    if (srcs.length === 1) msg("msg-o", "ok", `✔ 최신본을 가져왔어요: ${srcs[0].name} · 아래에서 날짜 고르고 변환하세요`);
   } catch (e) { msg("msg-o", "err", "가져오기 실패: " + e.message); }
   finally { this.disabled = false; this.innerHTML = orig; }
 };
-/* 지정 파일 읽기 — 지금 계정 것이 아니면 null */
+/* 지정 파일 읽기 — 지금 계정 것이 아니면 null.
+   예전엔 파일 하나({id,name})만 기억했다. 지금은 여러 개({files:[...]})도 되고,
+   예전에 저장해 둔 것도 그대로 읽힌다 — 항상 목록으로 돌려준다. */
 async function pinOf(key) {
-  const f = await DB.get(key, null);
-  if (!f || !f.id) return null;
-  return f.acct === String(CONFIG.account || "").toLowerCase() ? f : null;
+  const v = await DB.get(key, null);
+  if (!v) return null;
+  if (v.acct !== acctNow()) return null;
+  const files = v.files && v.files.length ? v.files.filter(f => f && f.id)
+              : (v.id ? [{ id: v.id, name: v.name }] : []);
+  if (!files.length) return null;
+  return { files, name: files.map(f => f.name).join(" · "), id: files[0].id };
 }
 async function drawDriveRecent() {
   /* 지정 파일도 그 계정의 드라이브 안에 있는 것이다. 계정이 다르면 없는 것으로 본다. */
@@ -805,25 +886,32 @@ $("drive-tpl").onclick = () => openDrivePicker({
 
 /* --- ③ 송장취합양식 (하나) --- */
 // 드라이브에서 송장취합양식을 받아 화면에 세팅 (되쓰기 위해 출처 기억)
-async function loadSabFromDrive(fileId) {
-  const r = await GMAIL.driveFetchExcel(fileId);
-  S.sabBuf = r.buf; S.sabName = r.name;
-  S.sabDrive = { id: fileId, name: r.name };   // 드라이브 출처 기억 → 결과를 이 파일에 되쓰기
-  $("sab-name").textContent = "📁 " + r.name + " (드라이브)";
-  $("drop-sab").classList.add("on"); $("sab-preview").style.display = "block";
-  refreshI();
-  return r;
+/* 여러 개(폴더째)를 한 번에 받아 목록으로 쌓는다.
+   드라이브 출처를 양식마다 따로 기억한다 → 고른 양식 바로 그 파일에 되쓰기 */
+async function loadSabsFromDrive(files) {
+  const items = [], many = files.length > 1;
+  if (many) BUSY.start("드라이브에서 가져오는 중");
+  try {
+    if (many) BUSY.progress(0, files.length);
+    for (const f of files) {
+      const r = await GMAIL.driveFetchExcel(f.id);
+      items.push({ name: r.name, buf: r.buf, icon: "📁", drive: { id: f.id, name: r.name } });
+      if (many) BUSY.progress(items.length, files.length);
+    }
+  } finally { if (many) BUSY.end(); }
+  await addSabFiles(items);
+  return items;
 }
 // 폴더 탐색으로 골라 가져오기 (고른 파일은 '바로 가져오기' 대상으로도 자동 지정)
 // ※ 별도 버튼은 없앴다 — '지정 파일 · 다른 파일로 변경' 으로 같은 일을 한다.
 function pickSabFromDrive() {
   return openDrivePicker({
-    key: "sab", title: "드라이브에서 송장취합양식 가져오기", multiple: false,
+    key: "sab", title: "드라이브에서 송장취합양식 가져오기", multiple: true,
     onPick: async files => {
-      const r = await loadSabFromDrive(files[0].id);
-      await DB.set("driveSabFile", { id: files[0].id, name: r.name, acct: String(CONFIG.account || "").toLowerCase() });
+      const items = await loadSabsFromDrive(files);
+      await DB.set("driveSabFile", { acct: acctNow(), files: files.map(f => ({ id: f.id, name: f.name })) });
       drawSabRecent();
-      msg("msg-i", "ok", `✔ 드라이브에서 송장취합양식을 가져왔어요: ${r.name}`);
+      if (items.length === 1) msg("msg-i", "ok", `✔ 드라이브에서 송장취합양식을 가져왔어요: ${items[0].name}`);
     },
   });
 }
@@ -831,18 +919,18 @@ if ($("drive-sab")) $("drive-sab").onclick = pickSabFromDrive;
 // '바로 가져올 파일' 지정/변경 — 가져오지 않고 대상만 지정
 function pickSabPin(alsoFetch) {
   openDrivePicker({
-    key: "sab", title: alsoFetch ? "다른 송장취합양식으로 변경" : "바로 가져올 송장취합양식 파일 지정", multiple: false,
+    key: "sab", title: alsoFetch ? "다른 송장취합양식으로 변경" : "바로 가져올 송장취합양식 파일 지정", multiple: true,
     onPick: async files => {
-      const f = files[0];
-      await DB.set("driveSabFile", { id: f.id, name: f.name, acct: String(CONFIG.account || "").toLowerCase() });
+      const names = files.map(f => f.name).join(" · ");
+      await DB.set("driveSabFile", { acct: acctNow(), files: files.map(f => ({ id: f.id, name: f.name })) });
       drawSabRecent();
-      if (!alsoFetch) { msg("msg-i", "ok", `✔ 바로 가져올 송장취합양식으로 지정했어요: ${f.name}`); return; }
+      if (!alsoFetch) { msg("msg-i", "ok", `✔ 바로 가져올 송장취합양식으로 지정했어요: ${names}`); return; }
       // 바꿨으면 바로 불러온다 (지정만 바뀌고 화면은 이전 파일인 상태를 막는다)
       msg("msg-i", "", "");
       try {
         await ensureGmail();
-        const r = await loadSabFromDrive(f.id);
-        msg("msg-i", "ok", `✔ ${r.name} (으)로 바꿔서 가져왔어요`);
+        const items = await loadSabsFromDrive(files);
+        if (items.length === 1) msg("msg-i", "ok", `✔ ${items[0].name} (으)로 바꿔서 가져왔어요`);
       } catch (e) { msg("msg-i", "err", "가져오기 실패: " + e.message); }
     },
   });
@@ -857,13 +945,14 @@ $("sab-pin-clear").onclick = async () => {
 // 지정한 송장취합양식을 한 번에 최신본으로 가져오기
 $("sab-again").onclick = async function () {
   const f = await pinOf("driveSabFile");
-  if (!f || !f.id) { pickSabPin(true); return; }      // 지정된 게 없으면 드라이브에서 고르게
+  if (!f) { pickSabPin(true); return; }               // 지정된 게 없으면 드라이브에서 고르게
   this.disabled = true; const orig = this.innerHTML; this.textContent = "가져오는 중…";
   msg("msg-i", "", "");
   try {
     await ensureGmail();
-    const r = await loadSabFromDrive(f.id);
-    msg("msg-i", "ok", `✔ 최신본을 가져왔어요: ${r.name}`);
+    const items = await loadSabsFromDrive(f.files);
+    if (items.length === 1) msg("msg-i", "ok", `✔ 최신본을 가져왔어요: ${items[0].name}`);
+    else msg("msg-i", "ok", `✔ 송장취합양식 ${items.length}개의 최신본을 가져왔어요`);
   } catch (e) { msg("msg-i", "err", "가져오기 실패: " + e.message); }
   finally { this.disabled = false; this.innerHTML = orig; }
 };
@@ -1353,7 +1442,7 @@ function updateClearRows() {
   const b = $("sab-clear-row"); if (b) b.style.display = S.sabBuf ? "flex" : "none";
 }
 async function clearOrderFile() {
-  S.orderWb = null; S.orderBuf = null; S.orderName = "";
+  S.orderWb = null; S.orderBuf = null; S.orderName = ""; S.orderSrcs = null;
   S.brands = []; S.dateSel = [];
   $("order-name").textContent = "";
   $("drop-order").classList.remove("on");
@@ -1365,6 +1454,8 @@ async function clearOrderFile() {
 }
 function clearSabFile() {
   S.sabBuf = null; S.sabName = ""; S.sabDrive = null;
+  S.sabList = []; S.sabIdx = 0;
+  const sf = $("sab-files"); if (sf) sf.innerHTML = "";
   $("sab-name").textContent = "";
   $("drop-sab").classList.remove("on");
   const fi = $("f-sab"); if (fi) fi.value = "";
@@ -1705,13 +1796,57 @@ async function fillRecipients(container, inp, opts) {
    ② 송장 취합
    ================================================================= */
 $("f-sab").addEventListener("change", async function () {
-  if (this.files[0]) { S.sabBuf = await readFile(this.files[0]); S.sabName = this.files[0].name; S.sabDrive = null;
-    $("sab-name").textContent = "📄 " + this.files[0].name; $("drop-sab").classList.add("on"); $("sab-preview").style.display="block"; refreshI(); }
+  const fs = [...this.files]; this.value = "";
+  if (fs.length) await addSabFiles(await Promise.all(fs.filter(isXls).map(async f => ({ name: f.name, buf: await readFile(f), icon: "📄" }))));
 });
 bindDrop("drop-sab", async f => {
-  S.sabBuf = await readFile(f[0]); S.sabName = f[0].name; S.sabDrive = null;
-  $("sab-name").textContent = "📄 " + f[0].name; $("drop-sab").classList.add("on"); $("sab-preview").style.display="block"; refreshI();
+  await addSabFiles(await Promise.all(f.map(async x => ({ name: x.name, buf: await readFile(x), icon: "📄" }))));
 });
+
+/* 송장취합양식은 여러 개일 수 있다 (몰마다 양식이 다르거나 업체별로 나뉘어서).
+   받아 두고 그중 하나를 골라 취합한다 — 고른 것이 S.sabBuf 다.
+   여러 개를 한 파일로 합치지는 않는다. 양식은 데이터가 아니라 '틀'이라 합치면 틀이 깨진다. */
+async function addSabFiles(items) {
+  if (!items || !items.length) return;
+  for (const it of items) {
+    const i = S.sabList.findIndex(x => x.name === it.name);
+    if (i >= 0) S.sabList[i] = it; else S.sabList.push(it);
+  }
+  const last = items[items.length - 1].name;
+  useSab(S.sabList.findIndex(x => x.name === last));
+  if (items.length > 1) msg("msg-i", "ok", `✔ 송장취합양식 ${items.length}개를 받았어요 — 아래에서 쓸 양식을 고르세요`);
+}
+function useSab(idx) {
+  if (idx < 0 || idx >= S.sabList.length) return;
+  const it = S.sabList[idx];
+  S.sabIdx = idx;
+  S.sabBuf = it.buf; S.sabName = it.name; S.sabDrive = it.drive || null;
+  $("sab-name").textContent = (it.icon || "📄") + " " + it.name;
+  $("drop-sab").classList.add("on");
+  $("sab-preview").style.display = "block";
+  drawSabFiles();
+  refreshI();
+}
+function drawSabFiles() {
+  const box = $("sab-files"); if (!box) return;
+  box.innerHTML = "";
+  box.onclick = e => e.stopPropagation();        // 목록을 눌러도 파일 선택창이 열리지 않게
+  if (S.sabList.length < 2) return;              // 하나뿐이면 목록이 군더더기다
+  S.sabList.forEach((it, i) => {
+    const el = document.createElement("div");
+    el.className = "fchip" + (i === S.sabIdx ? " on" : "");
+    el.innerHTML = `<span>${esc(it.name)}</span><button title="빼기">✕</button>`;
+    el.onclick = ev => { ev.preventDefault(); ev.stopPropagation(); useSab(i); };
+    el.querySelector("button").onclick = ev => {
+      ev.preventDefault(); ev.stopPropagation();
+      S.sabList.splice(i, 1);
+      if (!S.sabList.length) { clearSabFile(); return; }
+      let next = S.sabIdx > i ? S.sabIdx - 1 : S.sabIdx;      // 지운 게 앞이면 한 칸 당긴다
+      useSab(Math.max(0, Math.min(next, S.sabList.length - 1)));
+    };
+    box.appendChild(el);
+  });
+}
 $("f-rep").addEventListener("change", function () { const fs = [...this.files]; this.value = ""; addReps(fs); });
 bindDrop("drop-rep", f => addReps(f));
 
@@ -2305,7 +2440,8 @@ document.querySelectorAll("#mail-period button").forEach(b => {
 });
 async function openMail(target) {
   mailTarget = target;                       // 'order' | 'sab' | 'rep' | 'st' | 'pb' | 'pay'
-  mailMulti = (target === "rep" || target === "st" || target === "pay");
+  // 첨부를 하나만 고르게 할 이유가 없다 — 어느 메뉴든 여러 개를 골라 올 수 있다
+  mailMulti = true;
   mailSel = [];
   try { await ensureGmail(); } catch (e) { return; }
   mailModal.classList.add("on");
@@ -2424,12 +2560,10 @@ $("mail-ok").onclick = async function () {
     }
     mailModal.classList.remove("on");
     if (mailTarget === "order") {
-      await setOrderFromBuf(got[0].data, got[0].name);
-      msg("msg-o", "ok", "✔ 메일에서 가져왔어요: " + got[0].name);
+      await setOrderFiles(got.map(g => ({ name: g.name, buf: g.data })), "📧");
+      if (got.length === 1) msg("msg-o", "ok", "✔ 메일에서 가져왔어요: " + got[0].name);
     } else if (mailTarget === "sab") {
-      S.sabBuf = got[0].data; S.sabName = got[0].name;
-      S.sabDrive = null;
-      $("sab-name").textContent = "📧 " + got[0].name; $("drop-sab").classList.add("on"); $("sab-preview").style.display="block"; refreshI();
+      await addSabFiles(got.map(g => ({ name: g.name, buf: g.data, icon: "📧" })));
     } else if (mailTarget === "st" || mailTarget === "pb" || mailTarget === "pay") {
       /* 정산 탭으로 넘긴다 — 실제 적재는 qo-settle 이 한다 */
       await ST.takeMail(mailTarget, got);
@@ -2448,10 +2582,10 @@ if ($("sab-filter-btn")) $("sab-filter-btn").onclick = () => openFilter("order")
 $("mail-rep").onclick = () => openMail("rep");
 
 // setOrder 를 버퍼 기반으로도 쓰도록 분리
-async function setOrderFromBuf(buf, name) {
+async function setOrderFromBuf(buf, name, icon) {
   msg("msg-o", "", "");
   S.orderBuf = buf; S.orderName = name;
-  $("order-name").textContent = "📧 " + name;
+  $("order-name").textContent = (icon || "📧") + " " + name;
   $("drop-order").classList.add("on");
   const wb = await QO.loadWorkbook(S.orderBuf.slice(0));
   S.brands = QO.listBrands(wb);

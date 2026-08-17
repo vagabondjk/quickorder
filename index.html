@@ -92,6 +92,18 @@
   .drop::before{content:"⬆ ";font-weight:800;color:var(--brand)}
   .drop:hover,.drop.hi{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
   .drop b{display:block;color:var(--ink);font-size:13.5px;margin-top:5px;word-break:break-all}
+  /* 폴더째 끌어올 수 있다는 건 보이지 않으면 아무도 모른다 — 한 줄로만 알려준다 */
+  .drophint{display:block;font-size:11px;font-weight:600;color:var(--faint);margin-top:3px}
+  .drop:hover .drophint,.drop.hi .drophint{color:inherit;opacity:.75}
+  /* 드롭 영역 안의 파일 목록 — 목록을 눌러도 파일 선택창이 열리지 않게 한다 */
+  .dropfiles{display:flex;flex-wrap:wrap;gap:5px;justify-content:center;margin-top:8px}
+  .dropfiles .fchip{display:inline-flex;align-items:center;gap:5px;max-width:100%;
+    background:var(--card2);border:1px solid var(--line);border-radius:8px;
+    padding:5px 8px;font-size:11.5px;font-weight:700;color:var(--muted);cursor:pointer}
+  .dropfiles .fchip.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
+  .dropfiles .fchip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+  .dropfiles .fchip button{background:none;border:0;color:var(--faint);font-family:inherit;
+    font-size:12px;font-weight:800;cursor:pointer;padding:0 2px;flex:none}
   .drop.on{border-style:solid;border-color:color-mix(in srgb,var(--brand) 45%,var(--line));
     background:color-mix(in srgb,var(--brand) 7%,var(--card))}
   input[type=file]{display:none}
@@ -432,8 +444,9 @@
         <button class="minibtn" id="order-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-order" style="margin-top:8px">
         디바이스 파일 선택 또는 끌어오기
+        <span class="drophint">여러 쇼핑몰 · 폴더째 끌어오면 한 장으로 합칩니다</span>
         <b id="order-name"></b>
-        <input type="file" id="f-order" accept=".xlsx,.xlsm">
+        <input type="file" id="f-order" accept=".xlsx,.xlsm" multiple>
       </label>
       <div class="setrow" id="order-clear-row" style="display:none;margin-top:4px">
         <span style="flex:1;font-size:11px;color:var(--faint)"></span>
@@ -465,6 +478,7 @@
       <button class="go" id="drive-tpl" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <label class="drop" id="drop-tpl" style="margin-top:8px;padding:14px">
         디바이스 파일 선택 또는 끌어오기
+        <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
         <input type="file" id="f-tpl" accept=".xlsx,.xlsm" multiple>
       </label>
     </div>
@@ -502,8 +516,10 @@
         <button class="minibtn" id="sab-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-sab">
         디바이스 파일 선택 또는 끌어오기
+        <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
         <b id="sab-name"></b>
-        <input type="file" id="f-sab" accept=".xlsx,.xlsm">
+        <div class="dropfiles" id="sab-files"></div>
+        <input type="file" id="f-sab" accept=".xlsx,.xlsm" multiple>
       </label>
       <div class="setrow" id="sab-clear-row" style="display:none;margin-top:4px">
         <span style="flex:1;font-size:11px;color:var(--faint)"></span>
@@ -518,6 +534,7 @@
       <div class="setrow"><span id="reply-filter">회신 검색조건: 송장, 운송장, 회신</span><button class="minibtn" id="reply-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-rep" style="padding:14px;margin-top:8px">
         디바이스 파일 선택 또는 끌어오기
+        <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
         <input type="file" id="f-rep" accept=".xlsx,.xlsm" multiple>
       </label>
       <div class="vlist" id="replist" style="margin-top:8px"></div>
@@ -543,6 +560,7 @@
       <div class="setrow"><span id="cs-filter">CS 검색: 문의, 교환, 반품, 취소</span><button class="minibtn" id="cs-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-cs" style="margin-top:8px;padding:16px">
         디바이스 파일 선택 또는 끌어오기
+        <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
         <b id="cs-fname"></b>
         <input type="file" id="f-cs" accept=".xlsx,.xlsm" multiple>
       </label>
@@ -587,6 +605,7 @@
         <button class="minibtn" id="st-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-st" style="margin-top:8px;padding:16px">
         디바이스 파일 선택 또는 끌어오기
+        <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
         <b id="st-fname"></b>
         <input type="file" id="f-st" accept=".xlsx,.xlsm" multiple>
         <!-- 불러온 파일을 이 안에 보여준다 (발주·송장 탭과 같은 모양).
@@ -618,7 +637,8 @@
         <button class="minibtn" id="pb-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-pb" style="margin:0 0 8px;padding:16px">
         디바이스 파일 선택 또는 끌어오기
-        <input type="file" id="f-pb" accept=".xlsx,.xlsm">
+        <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
+        <input type="file" id="f-pb" accept=".xlsx,.xlsm" multiple>
       </label>
       <div class="setrow" style="margin:0 0 8px"><span style="flex:1"></span>
         <button class="minibtn" id="st-alias">🔗 상품명 매칭관리</button>
@@ -649,6 +669,7 @@
         <button class="minibtn" id="pay-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-pay" style="margin:0 0 8px;padding:16px">
         디바이스 파일 선택 또는 끌어오기
+        <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
         <input type="file" id="f-pay" accept=".xlsx,.xlsm" multiple>
       </label>
       <label class="minibtn" id="pay-dir-btn" style="display:none;margin:0 0 8px;text-align:center">

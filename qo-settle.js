@@ -2177,7 +2177,7 @@ const ST = (() => {
     });
     bindDrop("drop-pb", async fs => { for (const f of fs) await takePb(f); });
     $("pb-drive").onclick = () => openDrivePicker({
-      key: "pricebook", multiple: false, title: "드라이브에서 공급가표 가져오기",
+      key: "pricebook", multiple: true, title: "드라이브에서 공급가표 가져오기",
       onPick: async fs => {
         for (const f of fs) {
           try {
