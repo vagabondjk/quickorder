@@ -465,6 +465,25 @@ const GMAIL = (() => {
       method: "PUT", body: JSON.stringify({ values: rows }),
     });
   }
+  /* 새 스프레드시트를 만든다 (승인명단 전용) */
+  async function sheetCreate(title) {
+    const d = await sheetApi("", { method: "POST", body: JSON.stringify({ properties: { title } }) });
+    return d.spreadsheetId;
+  }
+  /* 링크가 있는 사람은 볼 수 있게 — 업체 앱이 자기 계정으로 이 파일을 읽을 수 있어야 한다.
+     ★ 그래서 이 파일에는 업체명과 사용여부만 넣는다. 연락처가 들어가면 안 된다. */
+  async function driveShareAnyone(fileId) {
+    const t = await token();
+    const r = await fetch(`${DRIVE}/files/${encodeURIComponent(fileId)}/permissions`, {
+      method: "POST",
+      headers: { Authorization: "Bearer " + t, "Content-Type": "application/json" },
+      body: JSON.stringify({ role: "reader", type: "anyone" }),
+    });
+    if (!r.ok && r.status !== 400) {          // 이미 공개면 400 이 올 수 있다
+      let d = {}; try { d = await r.json(); } catch (e) {}
+      throw new Error((d.error && d.error.message) || ("공개 설정 실패 HTTP " + r.status));
+    }
+  }
   async function driveExportCsv(fileId) {
     const t = await token();
     const r = await fetch(`${DRIVE}/files/${encodeURIComponent(fileId)}/export?mimeType=text%2Fcsv`,
@@ -585,7 +604,7 @@ const GMAIL = (() => {
     return (await r.json()).id;
   }
 
-  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, switchAccount, persistToken, dropStored, reloadToken, projectNo, driveExportCsv, sheetRead, sheetWrite, sheetTabs, sheetEnsureTab, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
+  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, switchAccount, persistToken, dropStored, reloadToken, projectNo, driveExportCsv, sheetRead, sheetWrite, sheetTabs, sheetEnsureTab, sheetCreate, driveShareAnyone, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
            searchAddresses, driveFind, driveDownload, driveUpload, granted,
            driveIdFromLink, driveFileInfo, driveSearch, driveFetchExcel, driveListFolder, driveListShared, driveAncestors, driveUpdateFile, needLogin };
 })();

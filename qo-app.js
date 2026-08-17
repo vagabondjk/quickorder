@@ -2629,19 +2629,36 @@ const MST = (() => {
   const BLOCK_TAB = "승인명단";
   /* 승인 명단을 구글 시트에 그대로 적는다. 마스터가 스위치만 누르면 되고,
      시트를 직접 열어 손볼 필요가 없다. 업체 앱은 이 탭을 읽어 로그인을 판정한다. */
+  /* ★ 승인명단은 '응답 시트' 와 반드시 따로 둔다.
+     업체 앱이 읽으려면 링크 공개가 필요한데, 응답 시트에는 신청 업체들의
+     이메일·연락처가 들어 있다. 그걸 공개하면 안 된다.
+     그래서 업체명과 사용여부만 담은 전용 시트를 앱이 따로 만든다. */
+  async function ensureRosterSheet(say) {
+    let id = await DB.get("rosterSheetId", "");
+    if (id) return id;
+    say("승인명단 시트를 만드는 중…");
+    id = await GMAIL.sheetCreate("퀵오더 승인명단 (자동)");
+    await GMAIL.driveShareAnyone(id);        // 업체가 자기 계정으로 읽을 수 있게
+    await DB.set("rosterSheetId", id);
+    return id;
+  }
   async function pushRoster() {
     const say = m => { const el = $("mst-msg"); if (el) el.textContent = m; };
-    const id = (await DB.get("signupSheetId", "")) || (CONFIG && CONFIG.signupSheetId) || "";
-    if (!id) { say("연결된 시트가 없습니다. [응답 시트 연결] 을 먼저 눌러주세요."); return; }
-    say("시트에 적용하는 중…");
+    say("적용하는 중…");
     try {
       await ensureGmail();
-      await GMAIL.sheetEnsureTab(id, BLOCK_TAB);
+      const id = await ensureRosterSheet(say);
       const rows = [["업체명", "사용", "수정시각"]];
       const stamp = QO.fmtDate(QO.todayStr());
       roster().companies.forEach(c => rows.push([c.name, c.on ? "사용" : "중지", stamp]));
-      await GMAIL.sheetWrite(id, BLOCK_TAB, rows);
-      say(`✔ 시트 '${BLOCK_TAB}' 에 ${rows.length - 1}개 업체를 적용했습니다. 업체 앱에 바로 반영됩니다.`);
+      await GMAIL.sheetWrite(id, "시트1", rows);
+      const known = (CONFIG && CONFIG.rosterSheetId) === id;
+      say(`✔ ${rows.length - 1}개 업체를 적용했습니다.` +
+          (known ? " 업체 앱에 바로 반영됩니다."
+                 : `
+
+※ 이 명단 시트를 앱에 한 번만 등록해야 합니다. 아래 값을 개발자에게 전달하세요:
+${id}`));
     } catch (e) { say("⚠ 적용하지 못했어요 — " + (e.message || e)); }
   }
   function roster() {
@@ -3036,9 +3053,9 @@ async function checkBlockedBySheet() {
     S.blockCheck = "";
     if (!co) { S.blockCheck = "업체명 없음"; return; }
     if (!GMAIL.signedIn()) { S.blockCheck = "구글 연결 전 — 확인 못 함"; return; }
-    const id = (await DB.get("signupSheetId", "")) || (CONFIG && CONFIG.signupSheetId) || "";
-    if (!id) { S.blockCheck = "연결된 시트 없음"; return; }
-    const rows = await GMAIL.sheetRead(id, "승인명단");
+    const id = (CONFIG && CONFIG.rosterSheetId) || (await DB.get("rosterSheetId", "")) || "";
+    if (!id) { S.blockCheck = "승인명단 시트 없음 (마스터가 [시트에 적용] 을 눌러야 만들어집니다)"; return; }
+    const rows = await GMAIL.sheetRead(id, "시트1");
     if (!rows || rows.length < 2) { S.blockCheck = "명단이 비어 있음"; return; }
     const norm = v => String(v == null ? "" : v).trim().replace(/\s+/g, "");
     const hit = rows.slice(1).find(r => norm(r[0]) === norm(co));

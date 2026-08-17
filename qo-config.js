@@ -48,6 +48,12 @@ const CONFIG = (() => {
     signupFormUrl: "https://docs.google.com/forms/d/e/1FAIpQLScKdt1Ni67r3Ur4t1Ck8fViR1Yz1WmsvzFrhi6MwGY9Vh3QSw/viewform",
     signupSheetId: "17vmzsm0w5T2w2T9DhX3XKREB7-raVgXulJKXIC30ie8",
 
+    /* 승인명단 시트 — 마스터가 [시트에 적용] 을 누르면 앱이 만들어 준다.
+       그때 나오는 ID 를 여기에 한 번만 넣으면, 업체 앱이 그 명단을 읽어 차단한다.
+       ※ 응답 시트와 따로 두는 이유: 이 파일은 링크 공개라야 업체가 읽을 수 있는데,
+         응답 시트에는 신청 업체의 이메일·연락처가 들어 있어 공개하면 안 된다. */
+    rosterSheetId: "",
+
     /* ── ② 구글 연동 ─────────────────────────────────────────────── */
     // 이 회사 구글 클라우드 프로젝트의 OAuth 클라이언트 ID (웹 애플리케이션).
     // 만드는 방법은 같이 드린 "구글 연동 설정 안내.txt" 참고.
