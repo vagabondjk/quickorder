@@ -713,10 +713,9 @@
       <button class="minibtn" id="mst-add" style="flex:none;padding:0 14px">승인 추가</button>
     </div>
         <div style="font-size:12px;font-weight:800;color:var(--brand);margin:12px 0 6px">
-      가입 신청 <button class="minibtn" id="mst-req-refresh" style="margin-left:6px">신청함 확인</button>
-      <button class="minibtn" id="mst-req-all" style="margin-left:4px">전체 보기</button>
+      가입 신청 <button class="minibtn" id="mst-req-all" style="margin-left:6px">전체 보기</button>
       <button class="minibtn" id="mst-sheet" style="margin-left:4px">응답 시트 연결</button></div>
-    <div id="mst-reqs"><div class="empty">[신청함 확인] 을 누르면 메일에서 신청서를 찾아옵니다</div></div>
+    <div id="mst-reqs"><div class="empty">신청서를 불러오는 중…</div></div>
     <div style="font-size:12px;font-weight:800;color:var(--muted);margin:14px 0 6px">승인된 업체</div>
     <div id="mst-list" style="flex:1;min-height:0;overflow-y:auto;margin-top:10px"></div>
     <div class="setrow" style="margin-top:8px"><span style="flex:1"></span>
@@ -849,9 +848,13 @@
 <div class="modal" id="setmodal">
   <div class="sheet">
     <div class="grip"></div>
-    <h3>설정</h3>
-    <p class="sub2">이 기기에 저장된 정보입니다.</p>
+    <div style="display:flex;align-items:center;gap:8px">
+      <h3 style="flex:1;margin:0">설정</h3>
+      <button class="minibtn" id="set-logout" style="flex:none">로그아웃</button>
+    </div>
+    <p class="sub2"><b id="set-company">-</b> · 이 기기에 저장된 정보입니다.</p>
     <div class="sheetbody">
+    <div class="mlist" id="setlist"></div>
     <div class="syncbox">
       <div class="syncrow">
         <b>☁ 기기 간 동기화</b>
@@ -875,14 +878,6 @@
       </div>
       <div class="synchint">승인 업체를 관리합니다. 마스터 아이디와 비밀번호가 필요합니다.</div>
     </div>
-    <div class="syncbox">
-      <div class="syncrow">
-        <b>👤 <span id="set-company">-</span></b>
-        <button class="minibtn" id="set-logout">로그아웃</button>
-      </div>
-      <div class="synchint">로그아웃하면 다음에 열 때 업체명과 승인번호를 다시 넣습니다. <b>저장된 자료는 지워지지 않습니다.</b></div>
-    </div>
-    <div class="mlist" id="setlist"></div>
     </div>
     <div class="row">
       <button class="btn-cancel" id="set-close">닫기</button>

@@ -1898,7 +1898,7 @@ async function drawLogin() {
   const el = $("set-company");
   if (el) {
     let who = ""; try { who = (LOCK.company && LOCK.company()) || ""; } catch (e) {}
-    el.textContent = who ? who + " 로 로그인됨" : "로그인 정보";
+    el.textContent = who ? who + " 로 로그인됨" : "-";
   }
   /* 마스터 메뉴는 마스터로 들어왔을 때만 보인다.
      업체 담당자에게 관리자 메뉴가 보일 이유가 없다 — 마스터는 로그인 화면으로 들어온다. */
@@ -2694,7 +2694,8 @@ ${id}`));
         </div>
         <button class="minibtn mstonoff" data-i="${i}" style="flex:none;${on ? "" : "color:var(--danger);border-color:var(--danger)"}">${on ? "사용 중" : "중지됨"}</button>
         <button class="minibtn mstcopy" data-i="${i}" style="flex:none">번호 복사</button>
-        <button class="minibtn mstmsg" data-i="${i}" style="flex:none">안내문</button></div>`;
+        <button class="minibtn mstmsg" data-i="${i}" style="flex:none">안내문</button>
+        <button class="minibtn mstdel" data-i="${i}" style="flex:none;color:var(--danger)">삭제</button></div>`;
     }).join("");
     box.querySelectorAll(".mstonoff").forEach(b => b.onclick = async () => {
       const i = Number(b.dataset.i);
@@ -2715,10 +2716,19 @@ ${id}`));
       if (c.email) { await sendGuide(c, codes[i]); return; }
       copyText(guideText(c.name, codes[i]), "안내문을 복사했어요. 업체에 그대로 보내세요.");
     });
-    /* ★ 삭제 버튼은 없앴다.
-       지워도 로그인은 계속 됐고(승인번호는 업체명+달로 계산된다), 정작 마스터가
-       그 업체의 승인번호를 볼 수 없게 돼서 손해만 있었다.
-       쓰지 않는 업체는 [중지됨] 으로 표시해 둔다 — 기록도 남고 번호도 보인다. */
+    /* 삭제 — 목록에서 치우되, 명단에는 '중지' 로 남겨 실제로 로그인을 막는다.
+       (승인번호는 업체명+달로 계산돼서 목록에서 지우는 것만으로는 안 막힌다.
+        예전에 이걸 안 해서 '지웠는데 로그인이 된다' 는 문제가 있었다.) */
+    box.querySelectorAll(".mstdel").forEach(b => b.onclick = async () => {
+      const i = Number(b.dataset.i);
+      const name = list[i].name;
+      if (!confirm(`'${name}' 를 삭제할까요?
+앞으로 로그인할 수 없습니다.`)) return;
+      list.splice(i, 1);
+      if (!revoked.includes(name)) revoked.push(name);
+      await save(); await draw();
+      await pushRoster();                       // 시트에 바로 반영 — 눌렀는데 안 막히면 소용없다
+    });
   }
   /* 마스터인지 저장된 표시로 판단하면, 기기를 바꾸거나 표시가 지워졌을 때 들어갈 길이 막힌다.
      그래서 표시가 없으면 모달 안에서 아이디·비밀번호를 받아 그 자리에서 확인한다. */
@@ -2809,7 +2819,7 @@ ${id}`));
       const sheet = (await DB.get("signupSheetId", "")) || (CONFIG && CONFIG.signupSheetId) || "";
       if (sheet) { drawReqs(await reqsFromSheet(sheet)); return; }   // 구글폼 응답 시트
       if (!sheet && (CONFIG && CONFIG.signupFormUrl)) {
-        box.innerHTML = '<div class="empty">응답 시트가 아직 연결되지 않았습니다 — 위 [응답 시트 연결] 을 눌러 고르세요.</div>';
+        box.innerHTML = '<div class="empty">응답 시트가 아직 연결되지 않았습니다 — [응답 시트 연결] 을 눌러 주소를 넣어주세요.</div>';
         return;
       }
       // 폼을 안 쓰면 예전처럼 메일함에서 찾는다
@@ -2855,6 +2865,7 @@ ${id}`));
       revoked = revoked.filter(x => x !== r.name);
       list.push({ name: r.name, on: true, email: r.email || "", tel: r.tel || "", at: Date.now() });
       await save(); await draw();
+      await pushRoster();                               // 승인하자마자 시트에 반영
     };
     box.querySelectorAll(".reqok").forEach(b => b.onclick = async () => {
       const r = fresh[Number(b.dataset.i)];
@@ -2879,7 +2890,7 @@ ${id}`));
        사용자가 누르지 않은 팝업은 브라우저가 막는다 — 그때는 버튼을 누르도록 안내만 한다. */
     try {
       if (GMAIL.signedIn()) loadReqs();
-      else $("mst-reqs").innerHTML = '<div class="empty">[신청함 확인] 을 누르면 구글폼 신청서를 불러옵니다</div>';
+      else $("mst-reqs").innerHTML = '<div class="empty">구글 로그인 후 [전체 보기] 를 누르면 신청서를 불러옵니다</div>';
     } catch (e) {}
   }
   function authMode() {
@@ -2969,14 +2980,15 @@ ${id}`));
       if (list.some(c => c.name === n)) { $("mst-msg").textContent = "이미 목록에 있어요."; return; }
       revoked = revoked.filter(x => x !== n);          // 지웠다가 다시 승인하면 차단을 푼다
       list.push({ name: n, on: true, at: Date.now() });
-      await save(); $("mst-name").value = ""; $("mst-msg").textContent = ""; draw();
+      await save(); $("mst-name").value = ""; await draw();
+      await pushRoster();                               // 추가하자마자 시트에 반영
     });
     on("mst-name", "onkeydown", e => { if (e.key === "Enter") $("mst-add").onclick(); });
-    on("mst-req-refresh", "onclick", loadReqs);
+    /* [신청함 확인] 은 없앴다 — 아래 버튼이 누를 때마다 다시 불러오므로 따로 둘 이유가 없다 */
     on("mst-req-all", "onclick", () => {
       reqsAll = !reqsAll;
       $("mst-req-all").textContent = reqsAll ? "새 신청만" : "전체 보기";
-      drawReqs(null);
+      loadReqs();
     });
     /* 시트 주소를 붙여넣게 한다. 드라이브를 다시 열어 찾아 들어가는 것보다,
        이미 열어둔 시트의 주소창을 복사해 오는 편이 빠르다. */
