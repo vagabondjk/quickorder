@@ -768,22 +768,23 @@ async function drvRememberFolder() {
 }
 
 /* --- ① 쇼핑몰 주문 파일 --- */
-// 폴더 탐색으로 골라서 바로 변환 (고른 파일은 '바로 가져오기' 대상으로도 자동 지정)
-// ※ 별도 버튼은 없앴다 — '지정 파일 · 다른 파일로 변경' 으로 같은 일을 한다.
-//    설정 등 다른 데서 부를 수 있게 함수는 남겨 둔다.
+/* ★ '지정 파일(📌)' 기능은 없앴다 (2026-08-17).
+   발주서가 사방넷에서 온 한 파일이던 시절엔 한 번 지정해 두고 버튼만 누르는 게 편했다.
+   이제는 쇼핑몰마다 파일이 따로 오고 매달 이름·개수가 달라서, 지정을 붙잡고 있으면
+   오히려 지난달 파일을 가져오는 사고가 난다. 그래서 매번 고르게 한다.
+   대신 드라이브 창은 '지난번에 고른 폴더' 에서 열리므로(drvRememberFolder)
+   실제로 누르는 횟수는 거의 그대로다. */
 function pickOrderFromDrive() {
   return openDrivePicker({
-    key: "order", title: "드라이브에서 발주서 가져오기", multiple: true,
+    key: "order", title: "드라이브에서 발주서 고르기",
+    sub: "여러 쇼핑몰 발주서를 골라도 됩니다 — 한 장으로 합쳐 드려요", multiple: true,
     onPick: async files => {
       const srcs = await fetchDriveExcels(files);
-      await DB.set("driveOrderFile", { acct: acctNow(), files: files.map(f => ({ id: f.id, name: f.name })) });
       await setOrderFiles(srcs, "📁");
-      drawDriveRecent();
       if (srcs.length === 1) msg("msg-o", "ok", `✔ 드라이브에서 가져왔어요: ${srcs[0].name}`);
     },
   });
 }
-const acctNow = () => String(CONFIG.account || "").toLowerCase();
 /* 드라이브 파일 목록을 순서대로 받아온다 (몇 개든 진행 상황을 보여준다) */
 async function fetchDriveExcels(files) {
   const out = [], many = files.length > 1;
@@ -800,71 +801,7 @@ async function fetchDriveExcels(files) {
   return out;
 }
 if ($("drive-order")) $("drive-order").onclick = pickOrderFromDrive;
-/* '바로 가져올 파일' 지정/변경.
-   ※ '변경'은 지정만 바꾸고 끝내면 안 된다 — 지정은 8월인데 아래 불러온 파일은 7월인
-     상태가 되어 헷갈린다. 바꿨으면 그 파일을 바로 불러온다. */
-function pickOrderPin(alsoFetch) {
-  openDrivePicker({
-    key: "order", title: alsoFetch ? "다른 발주서 파일로 변경" : "바로 가져올 발주서 파일 지정", multiple: true,
-    onPick: async files => {
-      const names = files.map(f => f.name).join(" · ");
-      await DB.set("driveOrderFile", { acct: acctNow(), files: files.map(f => ({ id: f.id, name: f.name })) });
-      drawDriveRecent();
-      if (!alsoFetch) { msg("msg-o", "ok", `✔ 바로 가져올 발주서로 지정했어요: ${names}`); return; }
-      msg("msg-o", "", "");
-      try {
-        await ensureGmail();
-        const srcs = await fetchDriveExcels(files);
-        await setOrderFiles(srcs, "📁");
-        if (srcs.length === 1) msg("msg-o", "ok", `✔ ${srcs[0].name} (으)로 바꿔서 가져왔어요 · 아래에서 날짜 고르고 변환하세요`);
-      } catch (e) { msg("msg-o", "err", "가져오기 실패: " + e.message); }
-    },
-  });
-}
-$("order-pin-set").onclick = () => pickOrderPin(false);
-$("order-pin-change").onclick = () => pickOrderPin(true);
-$("order-pin-clear").onclick = async () => {
-  await DB.set("driveOrderFile", null);
-  drawDriveRecent();
-  msg("msg-o", "ok", "지정을 해제했어요.");
-};
-// 지정한 발주서를 한 번에(폴더 탐색 없이) 최신본으로 가져와 바로 변환 프로세스로
-$("drive-again").onclick = async function () {
-  const f = await pinOf("driveOrderFile");
-  if (!f) { pickOrderPin(true); return; }             // 지정된 게 없으면 드라이브에서 고르게
-  this.disabled = true; const orig = this.innerHTML; this.textContent = "가져오는 중…";
-  msg("msg-o", "", "");
-  try {
-    await ensureGmail();
-    const srcs = await fetchDriveExcels(f.files);
-    await setOrderFiles(srcs, "📁");                  // ← 이후는 업로드와 동일한 변환 프로세스
-    if (srcs.length === 1) msg("msg-o", "ok", `✔ 최신본을 가져왔어요: ${srcs[0].name} · 아래에서 날짜 고르고 변환하세요`);
-  } catch (e) { msg("msg-o", "err", "가져오기 실패: " + e.message); }
-  finally { this.disabled = false; this.innerHTML = orig; }
-};
-/* 지정 파일 읽기 — 지금 계정 것이 아니면 null.
-   예전엔 파일 하나({id,name})만 기억했다. 지금은 여러 개({files:[...]})도 되고,
-   예전에 저장해 둔 것도 그대로 읽힌다 — 항상 목록으로 돌려준다. */
-async function pinOf(key) {
-  const v = await DB.get(key, null);
-  if (!v) return null;
-  if (v.acct !== acctNow()) return null;
-  const files = v.files && v.files.length ? v.files.filter(f => f && f.id)
-              : (v.id ? [{ id: v.id, name: v.name }] : []);
-  if (!files.length) return null;
-  return { files, name: files.map(f => f.name).join(" · "), id: files[0].id };
-}
-async function drawDriveRecent() {
-  /* 지정 파일도 그 계정의 드라이브 안에 있는 것이다. 계정이 다르면 없는 것으로 본다. */
-  const f = await pinOf("driveOrderFile");
-  const has = !!(f && f.id);
-  // 퀵로딩 버튼은 항상 보인다. 지정 파일이 없으면 누를 때 드라이브에서 고르게 한다
-  // (지정 전에는 숨겨져 있어서 드라이브로 갈 길이 아예 없었다)
-  $("drive-again").style.display = "block";
-  $("order-pinrow").style.display = has ? "flex" : "none";
-  $("order-pin-set").style.display = "none";
-  if (has) { $("order-pinname").textContent = f.name; }
-}
+$("drive-again").onclick = () => pickOrderFromDrive();
 
 /* --- ② 업체 양식 (여러 개 선택 가능) --- */
 $("drive-tpl").onclick = () => openDrivePicker({
@@ -902,68 +839,19 @@ async function loadSabsFromDrive(files) {
   await addSabFiles(items);
   return items;
 }
-// 폴더 탐색으로 골라 가져오기 (고른 파일은 '바로 가져오기' 대상으로도 자동 지정)
-// ※ 별도 버튼은 없앴다 — '지정 파일 · 다른 파일로 변경' 으로 같은 일을 한다.
+/* 발주서와 같은 이유로 지정 파일(📌) 기능을 없앴다 — 누르면 바로 고른다 */
 function pickSabFromDrive() {
   return openDrivePicker({
-    key: "sab", title: "드라이브에서 송장취합양식 가져오기", multiple: true,
+    key: "sab", title: "드라이브에서 송장취합양식 고르기",
+    sub: "양식이 여러 개면 다 골라도 됩니다 — 아래에서 쓸 것을 고릅니다", multiple: true,
     onPick: async files => {
       const items = await loadSabsFromDrive(files);
-      await DB.set("driveSabFile", { acct: acctNow(), files: files.map(f => ({ id: f.id, name: f.name })) });
-      drawSabRecent();
       if (items.length === 1) msg("msg-i", "ok", `✔ 드라이브에서 송장취합양식을 가져왔어요: ${items[0].name}`);
     },
   });
 }
 if ($("drive-sab")) $("drive-sab").onclick = pickSabFromDrive;
-// '바로 가져올 파일' 지정/변경 — 가져오지 않고 대상만 지정
-function pickSabPin(alsoFetch) {
-  openDrivePicker({
-    key: "sab", title: alsoFetch ? "다른 송장취합양식으로 변경" : "바로 가져올 송장취합양식 파일 지정", multiple: true,
-    onPick: async files => {
-      const names = files.map(f => f.name).join(" · ");
-      await DB.set("driveSabFile", { acct: acctNow(), files: files.map(f => ({ id: f.id, name: f.name })) });
-      drawSabRecent();
-      if (!alsoFetch) { msg("msg-i", "ok", `✔ 바로 가져올 송장취합양식으로 지정했어요: ${names}`); return; }
-      // 바꿨으면 바로 불러온다 (지정만 바뀌고 화면은 이전 파일인 상태를 막는다)
-      msg("msg-i", "", "");
-      try {
-        await ensureGmail();
-        const items = await loadSabsFromDrive(files);
-        if (items.length === 1) msg("msg-i", "ok", `✔ ${items[0].name} (으)로 바꿔서 가져왔어요`);
-      } catch (e) { msg("msg-i", "err", "가져오기 실패: " + e.message); }
-    },
-  });
-}
-$("sab-pin-set").onclick = () => pickSabPin(false);
-$("sab-pin-change").onclick = () => pickSabPin(true);
-$("sab-pin-clear").onclick = async () => {
-  await DB.set("driveSabFile", null);
-  drawSabRecent();
-  msg("msg-i", "ok", "지정을 해제했어요.");
-};
-// 지정한 송장취합양식을 한 번에 최신본으로 가져오기
-$("sab-again").onclick = async function () {
-  const f = await pinOf("driveSabFile");
-  if (!f) { pickSabPin(true); return; }               // 지정된 게 없으면 드라이브에서 고르게
-  this.disabled = true; const orig = this.innerHTML; this.textContent = "가져오는 중…";
-  msg("msg-i", "", "");
-  try {
-    await ensureGmail();
-    const items = await loadSabsFromDrive(f.files);
-    if (items.length === 1) msg("msg-i", "ok", `✔ 최신본을 가져왔어요: ${items[0].name}`);
-    else msg("msg-i", "ok", `✔ 송장취합양식 ${items.length}개의 최신본을 가져왔어요`);
-  } catch (e) { msg("msg-i", "err", "가져오기 실패: " + e.message); }
-  finally { this.disabled = false; this.innerHTML = orig; }
-};
-async function drawSabRecent() {
-  const f = await pinOf("driveSabFile");
-  const has = !!(f && f.id);
-  $("sab-again").style.display = "block";      // 항상 보인다 (위 drawDriveRecent 주석 참고)
-  $("sab-pinrow").style.display = has ? "flex" : "none";
-  $("sab-pin-set").style.display = "none";
-  if (has) { $("sab-pinname").textContent = f.name; }
-}
+$("sab-again").onclick = () => pickSabFromDrive();
 
 /* --- ④ 업체 회신 송장 (여러 개 선택 가능) --- */
 $("drive-rep").onclick = () => openDrivePicker({
@@ -2649,20 +2537,9 @@ async function notifyTick(manual) {
   if (!notifyEnabled()) return;
   if (!GMAIL.signedIn()) return;      // 로그인돼 있을 때만
   const hits = [];
-  // ① 지정한 드라이브 발주 파일이 바뀌었나 (수정시각 비교)
-  try {
-    const df = await pinOf("driveOrderFile");
-    if (df && df.id) {
-      const info = await GMAIL.driveFileInfo(df.id);
-      const last = await DB.get("notifyDriveMTime", "");
-      if (info.modifiedTime) {
-        if (last && info.modifiedTime !== last)
-          hits.push({ title: "발주 내역 업데이트", body: `${df.name} 파일이 변경됐어요`, tab: "o", tag: "발주 내역 업데이트" });
-        await DB.set("notifyDriveMTime", info.modifiedTime);
-      }
-    }
-  } catch (e) {}
-  // ② 지정 업체에서 송장 회신 메일이 새로 왔나
+  /* ※ 예전에는 '지정한 드라이브 발주 파일이 바뀌었나' 도 함께 봤다.
+     지정 파일 기능을 없애면서 지켜볼 대상이 사라져 뺐다. 메일 알림은 그대로다. */
+  // 지정 업체에서 송장 회신 메일이 새로 왔나
   try {
     const f = await getReplyFilter();
     const items = await GMAIL.listMails({ days: 2, senders: f.senders, keywords: f.keywords, exclude: f.exclude || [], union: true, scanText: true, max: 20 });
@@ -2728,7 +2605,7 @@ async function reopenStore(note) {
   await loadForms();
   try { if (window.CS) await CS.reload(); } catch (e) {}
   try { if (window.ST) await ST.reload(); } catch (e) {}
-  drawOrderFilter(); drawReplyFilter(); drawDriveRecent(); drawSabRecent();
+  drawOrderFilter(); drawReplyFilter();
   if (note) msg("msg-o", "ok", note);
 }
 async function useAccountStore(email, opts) {
@@ -3248,8 +3125,6 @@ function applyLockCompany() {
   checkBlockedBySheet();
   drawReplyFilter();
   drawOrderFilter();
-  drawDriveRecent();
-  drawSabRecent();
   drawCoName();                             // 화면에 박힌 회사 이름을 로그인한 업체로
   /* 마스터면 퀵오더 화면을 아예 안 보여준다 */
   try {
