@@ -5,7 +5,13 @@
    =================================================================== */
 "use strict";
 const SYNC = (() => {
-  const FILE = CONFIG.backupFile;   // 회사별 백업 파일명 (qo-config.js)
+  /* ★★ 백업 파일명은 '부를 때' 읽어야 한다. 절대 여기서 값으로 받아두지 말 것.
+     이 파일은 로그인 화면이 뜨기도 전에 로드된다. 그때 CONFIG.backupFile 은 아직
+     이 배포본의 원래 회사(랩노마드) 것이다. 값으로 받아두면 나중에 베타브릭스로
+     로그인해도 이름이 그대로라, 랩노마드 백업을 내려받아 베타브릭스 저장소에
+     써 넣고( = 남의 업체 양식이 보인다), 반대로 베타브릭스 내용을 랩노마드
+     백업 파일에 덮어썼다. 실제로 그런 일이 있었다 (2026-08-17, 모바일에서 발견). */
+  const FILE = () => CONFIG.backupFile;   // 회사별 백업 파일명 (qo-config.js)
   const KV_KEYS = ["brandVendor", "vendorEmails", "vendorSent", "vendorDomains",
     "invEmails", "invSent", "driveOrderFile", "driveSabFile", "driveFolders",
     "orderSenders", "orderKeywords", "orderExclude",
@@ -25,9 +31,16 @@ const SYNC = (() => {
   const STAMP_KEY = () => CONFIG.ls("qo_sync_stamp");   // 이 기기가 마지막으로 반영/업로드한 시각
   const TIME_KEY = () => CONFIG.ls("qo_sync_time");     // 마지막 동기화 시각(표시용)
 
+  /* 드라이브 파일 ID 를 기억해 두면 매번 찾지 않아도 된다. 다만 이건 '지금 저장소' 것이라
+     업체나 계정이 바뀌면 반드시 버려야 한다 — 안 버리면 이름은 새 회사 것인데
+     실제로 쓰는 파일은 앞 회사 것이 된다. reset() 이 그 일을 한다. */
   let fileId = null;
+  let fileFor = "";        // 그 ID 가 어느 백업 파일 것인지
   let pushTimer = null;
   let onStatus = () => {};
+  function reset() { fileId = null; fileFor = ""; clearTimeout(pushTimer); pushTimer = null; }
+  /* 파일명이 달라졌으면(= 업체가 바뀌었으면) 캐시를 버린다 */
+  function guard() { const f = FILE(); if (f !== fileFor) { fileId = null; fileFor = f; } return f; }
 
   const getStamp = () => { try { return Number(localStorage.getItem(STAMP_KEY())) || 0; } catch (e) { return 0; } };
   const setStamp = t => { try { localStorage.setItem(STAMP_KEY(), String(t)); } catch (e) {} };
@@ -141,7 +154,8 @@ const SYNC = (() => {
     if (!GMAIL.signedIn()) { status("offline"); return { changed: false, skipped: true }; }
     status("syncing", "내려받는 중…");
     try {
-      if (!fileId) fileId = await GMAIL.driveFind(FILE);
+      const name = guard();
+      if (!fileId) fileId = await GMAIL.driveFind(name);
       if (!fileId) { status("ok"); return { changed: false, hadRemote: false }; }   // 아직 백업 없음
       const txt = await GMAIL.driveDownload(fileId);
       const obj = JSON.parse(txt);
@@ -162,9 +176,10 @@ const SYNC = (() => {
     if (!GMAIL.signedIn()) { status("offline"); return; }
     status("syncing", "올리는 중…");
     try {
+      const name = guard();
       const bundle = await buildBundle();
       const txt = JSON.stringify(bundle);
-      fileId = await GMAIL.driveUpload(FILE, txt, fileId);
+      fileId = await GMAIL.driveUpload(name, txt, fileId);
       setStamp(bundle.updatedAt); markTime();
       status("ok");
     } catch (e) { status("error", e.message); }
@@ -178,7 +193,8 @@ const SYNC = (() => {
   }
 
   return {
-    syncDown, syncUpNow, pushSoon,
+    syncDown, syncUpNow, pushSoon, reset,
+    backupName: () => FILE(),   // 설정 화면에서 '지금 어느 백업을 쓰는지' 보여준다
     _apply: applyBundle,        // 검증용 — 드라이브 없이 백업 병합을 돌려볼 수 있게
     onStatus(fn) { onStatus = fn; },
     lastTime, enabled: () => GMAIL.signedIn(),

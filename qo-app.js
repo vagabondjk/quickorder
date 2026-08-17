@@ -2719,6 +2719,9 @@ function drawSyncStatus() {
 const ACCT_KEY = () => CONFIG.lsCompany("qo_last_account");
 /* 저장소 이름이 바뀌었을 때 화면까지 다시 그린다 (업체가 바뀌거나 계정이 바뀔 때) */
 async function reopenStore(note) {
+  /* ★ 동기화가 기억해 둔 백업 파일 ID 도 같이 버린다.
+     저장소만 갈아타고 이걸 놔두면, 새 회사 데이터를 앞 회사 백업 파일에 올린다. */
+  try { SYNC.reset(); } catch (e) {}
   await DB.reopen();
   await loadForms();
   try { if (window.CS) await CS.reload(); } catch (e) {}
@@ -3204,7 +3207,15 @@ function drawCoName() {
 function applyLockCompany() {
   try {
     const c = (typeof LOCK !== "undefined" && LOCK.company && LOCK.company()) || "";
-    if (c) { CONFIG.company = c; if (!CONFIG.orderTag) CONFIG.orderTag = c; }
+    if (c) {
+      CONFIG.company = c;
+      /* ★ 파일명 가운데 이름(orderTag)은 업체에게 그대로 나가는 이름이다.
+         이 배포본의 원래 회사(랩노마드) 값이 박혀 있어서, 다른 업체로 로그인해도
+         '20260817_랩노마드_디에스피_발주양식.xlsx' 로 나갔다. 로그인한 업체가
+         원래 회사가 아니면 그 업체 이름을 쓴다. */
+      const home = String(CONFIG.homeCompany || "").trim();
+      if (!CONFIG.orderTag || c.replace(/\s+/g, "") !== home) CONFIG.orderTag = c;
+    }
     return CONFIG.useCompany(c);
   } catch (e) { return false; }
 }
@@ -3221,6 +3232,7 @@ function applyLockCompany() {
   applyLockCompany();                       // 방금 로그인했다면 여기서 확정된다
   try { const last = localStorage.getItem(ACCT_KEY()); if (last) CONFIG.useAccount(last); } catch (e) {}
   try { GMAIL.reloadToken(); } catch (e) {}   // 앞사람 토큰이 메모리에 남아 있지 않게
+  try { SYNC.reset(); } catch (e) {}          // 앞사람 백업 파일 ID 도 버린다
   /* ★ 저장소 연결도 다시 연다.
      qo-cs.js 같은 모듈이 로드되면서 이미 DB 를 열어 둔다. 그 연결은 로그인 전 이름으로
      열린 것이라, 이름만 바꿔서는 소용이 없다 — 읽고 쓰는 곳은 여전히 앞 회사 저장소다. */
