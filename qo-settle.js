@@ -483,6 +483,10 @@ const ST = (() => {
   }
   function drawFiles() {
     const box = $("st-files");
+    /* 파일 영역 안에 들어 있어서, 여기서 난 클릭이 라벨까지 올라가면 파일 선택창이 뜬다 */
+    box.onclick = e => e.stopPropagation();
+    const drop = $("drop-st");
+    if (drop) drop.classList.toggle("on", files.length > 0);
     if (!files.length) { box.innerHTML = ""; return; }
     // 한 줄에 하나씩, 폭을 다 써서 파일명이 잘리지 않게 (칩으로 나열하면 이름이 잘렸다)
     box.innerHTML = files.map((f, i) => `<div style="display:flex;align-items:center;gap:8px;
@@ -2108,14 +2112,12 @@ const ST = (() => {
     $("f-st").addEventListener("change", async function () {
       const fs = [...this.files]; this.value = "";
       for (const f of fs) {
-        $("st-fname").textContent = "📄 " + f.name;
         try { await addFile(await readFile(f), f.name); }
         catch (e) { msg("msg-s", "err", "⚠ " + f.name + " — " + e.message); }
       }
     });
     bindDrop("drop-st", async fs => {
       for (const f of fs) {
-        $("st-fname").textContent = "📄 " + f.name;
         try { await addFile(await readFile(f), f.name); }
         catch (e) { msg("msg-s", "err", "⚠ " + f.name + " — " + e.message); }
       }

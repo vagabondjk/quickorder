@@ -577,8 +577,10 @@
         디바이스 파일 선택 또는 끌어오기
         <b id="st-fname"></b>
         <input type="file" id="f-st" accept=".xlsx,.xlsm" multiple>
+        <!-- 불러온 파일을 이 안에 보여준다 (발주·송장 탭과 같은 모양).
+             여기 있는 버튼을 눌렀을 때 파일 선택창이 같이 열리지 않게 클릭을 막는다 -->
+        <div id="st-files" style="margin-top:10px;text-align:left"></div>
       </label>
-      <div class="vlist" id="st-files" style="margin-top:8px"></div>
       <div class="msg" id="msg-s"></div>
     </div>
 
