@@ -154,6 +154,38 @@ const LOCK = (() => {
     } catch (e) {}
   }
 
+  /* ── 사용 중지 명단 ──────────────────────────────────────────────
+     서버가 없으므로 앱과 같은 주소에 놓인 roster.json 을 읽어 판정한다.
+     같은 출처라 로그인도 CORS 도 필요 없다.
+     ★ 규칙: 명단에 '사용 중지' 로 적힌 업체만 막는다.
+       파일이 없거나·못 읽거나·명단에 없으면 통과시킨다. 새로 승인한 업체가
+       배포를 기다리느라 못 들어오는 일이 없어야 하고, 인터넷이 흔들린다고
+       멀쩡한 업체를 잠그면 안 되기 때문이다. */
+  let rosterCache = null;
+  async function roster() {
+    if (rosterCache) return rosterCache;
+    try {
+      const url = "roster.json?ts=" + Math.floor(Date.now() / 60000);   // 1분 단위로만 새로 받는다
+      const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+      const t = setTimeout(() => { try { ctl && ctl.abort(); } catch (e) {} }, 4000);
+      const r = await fetch(url, { cache: "no-cache", signal: ctl ? ctl.signal : undefined });
+      clearTimeout(t);
+      if (!r.ok) throw new Error("no roster");
+      rosterCache = await r.json();
+    } catch (e) { rosterCache = { companies: [] }; }
+    return rosterCache;
+  }
+  /* 막힌 업체면 true. 판단이 안 서면 false(통과) */
+  async function blocked(company) {
+    try {
+      const n = normId(company); if (!n) return false;
+      const r = await roster();
+      const hit = (r.companies || []).find(c => normId(c.name) === n);
+      return !!(hit && hit.on === false);
+    } catch (e) { return false; }
+  }
+  const BLOCK_MSG = "관리자가 이 업체의 사용을 중지했습니다.\n관리자에게 문의하세요.";
+
   async function verify(pw) {
     const h = await hashPw(pw);
     if (MASTER && h === MASTER) return "master";
@@ -263,6 +295,10 @@ const LOCK = (() => {
 
       isUnlocked().then(async ok => {
         const approved = await savedApproval();
+        if (ok && approved && await blocked(approved)) {
+          signOut(); ok = false;                       // 중지된 업체는 기억된 로그인도 풀어버린다
+          msg.style.color = "#e5484d"; msg.textContent = BLOCK_MSG;
+        }
         if (ok && approved) { root.remove(); return resolve(true); }
         if (approved) idIn.value = approved;
         setTimeout(() => { try { (approved ? input : idIn).focus(); } catch (e) {} }, 100);
@@ -286,6 +322,10 @@ const LOCK = (() => {
             root.remove(); return resolve(true);
           }
           clearMaster();
+
+          if (await blocked(id)) { msg.style.color = "#e5484d"; msg.textContent = BLOCK_MSG;
+            try { alert(BLOCK_MSG); } catch (e) {}
+            input.value = ""; busy = false; btn.disabled = false; return; }
 
           /* ② 업체명 + 승인번호 — 이게 곧 비밀번호다. 두 단계로 나누지 않는다.
              안내문을 통째로 붙여넣는 일이 잦아, 그 안에 번호가 들어 있으면 받아준다.
@@ -359,7 +399,7 @@ const LOCK = (() => {
   }
 
   return { ready, ensureUnlocked, isUnlocked, verify, signOut, configured, currentYm, signInMaster,
-           approvalCode, savedApproval, clearApproval, isMaster,
+           approvalCode, savedApproval, clearApproval, isMaster, blocked,
            isMasterSession, clearMaster,
            company: () => {
              for (const raw of [readAt(sstore(), APPROVED_KEY()), readAt(localStorage, APPROVED_KEY())]) {

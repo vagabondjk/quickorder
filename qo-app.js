@@ -2826,6 +2826,12 @@ const MST = (() => {
     });
     on("mst-name", "onkeydown", e => { if (e.key === "Enter") $("mst-add").onclick(); });
     on("mst-req-refresh", "onclick", loadReqs);
+    on("mst-roster", "onclick", () => {
+      const txt = JSON.stringify(roster(), null, 2);
+      download(new TextEncoder().encode(txt).buffer, "roster.json", "application/json");
+      $("mst-msg").textContent =
+        "roster.json 을 내려받았습니다.\n이 파일을 앱과 같은 폴더(배포)에 올리면 '중지됨' 업체의 로그인이 실제로 막힙니다.";
+    });
   }
   return { bind: wire, open, show };
 })();
