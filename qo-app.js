@@ -2935,6 +2935,19 @@ ${id}`));
     if (!who) { b.style.display = "none"; return; }
     b.textContent = who; b.style.display = "inline-block";
   }
+  /* 마스터는 퀵오더를 쓰러 온 게 아니다 — 업체 승인만 하는 화면으로 바꾼다.
+     모달 안에 있던 내용을 그대로 본문으로 옮긴다(아이디가 같아 연결이 유지된다). */
+  function adminOnly() {
+    if (document.body.classList.contains("adminonly")) return;
+    const sheet = document.querySelector("#mstmodal .sheet");
+    const root = $("admin-root");
+    if (!sheet || !root) return;
+    const closeRow = sheet.querySelector("#mst-close");
+    if (closeRow && closeRow.parentElement) closeRow.parentElement.remove();   // 닫을 곳이 없다
+    root.appendChild(sheet);
+    root.style.display = "";
+    document.body.classList.add("adminonly");
+  }
   const show = drawWho;
 
   /* ★ 버튼 연결은 '한 번만' 하면 안 된다.
@@ -2988,7 +3001,7 @@ ${id}`));
         "roster.json 을 내려받았습니다.\n이 파일을 앱과 같은 폴더(배포)에 올리면 '중지됨' 업체의 로그인이 실제로 막힙니다.";
     });
   }
-  return { bind: wire, open, show };
+  return { bind: wire, open, show, adminOnly };
 })();
 /* ★ 로그인 화면이 끝난 다음에 확인해야 한다.
    페이지가 뜨는 순간 확인하면, 그 자리에서 마스터로 로그인해도 이미 확인이 끝나 있어서
@@ -3047,6 +3060,10 @@ function applyLockCompany() {
   drawDriveRecent();
   drawSabRecent();
   drawCoName();                             // 화면에 박힌 회사 이름을 로그인한 업체로
+  /* 마스터면 퀵오더 화면을 아예 안 보여준다 */
+  try {
+    if (await LOCK.isMasterSession()) { MST.adminOnly(); await MST.open(); }
+  } catch (e) {}
   bindAccountButtons();                     // 탭마다 [계정 변경]
   try { await MST.show(); } catch (e) {}    // 헤더 배지 (👑 마스터 / 업체명)
   syncOnStart();                            // 저장소가 확정된 뒤에 동기화

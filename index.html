@@ -59,6 +59,13 @@
     #btn-sync{font-size:0;padding:4px 7px}      /* 좁으면 구름 아이콘만 */
     #btn-sync::before{content:"☁";font-size:12px}
   }
+  /* 마스터로 들어오면 퀵오더 기능은 감추고 관리 화면만 남긴다 (백오피스) */
+  body.adminonly .tabs, body.adminonly .pane, body.adminonly .foot,
+  body.adminonly #btn-sync, body.adminonly #btn-settings,
+  body.adminonly #mstmodal, body.adminonly #busy { display:none !important }
+  body.adminonly #admin-root .sheet{max-height:none;border-radius:16px;padding:18px 16px;
+    border:1px solid var(--line);box-shadow:0 2px 10px rgba(20,30,60,.05)}
+  body.adminonly #admin-root .grip{display:none}
   .tabs{display:flex;gap:6px;background:var(--card2);border:1px solid var(--line);
     border-radius:13px;padding:5px;margin-bottom:16px}
   .tabs button{flex:1;border:none;background:none;font-family:inherit;font-size:13.5px;font-weight:800;
@@ -389,6 +396,7 @@
     <button class="chip" id="btn-logout" style="margin-left:6px">로그아웃</button>
   </header>
 
+  <div id="admin-root" style="display:none"></div>
   <div class="tabs">
     <button id="tab-o" class="on">① 발주서</button>
     <button id="tab-i">② 송장</button>
