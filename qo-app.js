@@ -1328,7 +1328,9 @@ function addDupFixer(box, groups) {
 }
 function drawForms() {
   const box = $("vlist");
-  if (!S.forms.length) { box.innerHTML = '<div class="empty">저장된 발주서 양식이 없습니다</div>'; return; }
+  /* 아무것도 없으면 아무 말도 안 한다 — 바로 아래 업로드 영역이 할 일을 이미 말하고 있고,
+     '없습니다' 한 줄이 자리만 차지하며 어중간하게 줄바꿈됐다. */
+  if (!S.forms.length) { box.innerHTML = ""; return; }   // :empty 규칙이 여백까지 없애준다
   box.innerHTML = "";
   const dups = dupNameGroups(S.forms, f => f.name);
   addDupWarning(box, dups, f => f.name,

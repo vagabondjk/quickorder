@@ -238,6 +238,9 @@
     font-size:11px;font-weight:700;cursor:pointer;flex:none;padding:5px 10px;border-radius:7px}
   /* 빈 상태는 '없다'는 사실만 알리면 된다 — 두 줄로 늘려 카드를 밀어내지 않게 한 줄·낮은 여백 */
   .empty{text-align:center;color:var(--faint);font-size:12.5px;padding:9px 8px;line-height:1.5}
+  /* ★ .vlist 는 158px 격자다. 안내문이 한 칸에 갇혀 '…없습니/다' 로 접혔다 —
+     안내문은 격자를 가로질러 한 줄로 읽히게 한다 */
+  .vlist>.empty,#replist>.empty{grid-column:1/-1}
 
   .vendorbox{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:10px}
   .vendorbox .vh{background:var(--card2);padding:10px 12px;font-size:13px;font-weight:800;display:flex;align-items:center;gap:8px}
