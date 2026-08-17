@@ -1957,6 +1957,7 @@ async function drawSettings() {
     </div>
     <details style="margin-top:8px">
       <summary style="font-size:11px;color:var(--muted);cursor:pointer">고급 설정</summary>
+      <div style="font-size:11px;color:var(--muted);margin:8px 0 0">사용 승인 확인: ${esc(S.blockCheck || "아직 확인 안 함")}</div>
       <div style="font-size:11px;color:var(--muted);margin:8px 0 6px;line-height:1.55">
         연결이 <b>403</b> 으로 막히면 구글 프로젝트가 '테스트' 상태입니다 —
         관리자에게 프로젝트 번호 <b style="color:var(--ink)">${esc(GMAIL.projectNo(cid))}</b> 를 알려주세요.<br>
@@ -2798,18 +2799,30 @@ const MST = (() => {
       box.innerHTML = `<div class="empty">신청함을 읽지 못했어요 — ${esc(e.message || String(e))}</div>`;
     }
   }
+  let reqsAll = false, lastReqs = [];
   function drawReqs(reqs) {
     const box = $("mst-reqs"); if (!box) return;
-    const fresh = reqs.filter(r => !list.some(c => c.name === r.name));
-    if (!fresh.length) { box.innerHTML = '<div class="empty">새 가입 신청이 없습니다</div>'; return; }
-    box.innerHTML = fresh.map((r, i) => `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;
-        border:1.5px solid var(--brand);border-radius:10px;margin-bottom:6px;background:var(--brand-soft)">
+    lastReqs = reqs || lastReqs;
+    /* 기본은 '아직 승인 안 한 것' 만 — 처리할 일이 눈에 띄어야 한다.
+       [전체 보기] 를 켜면 이미 승인한 업체의 신청서도 함께 보여준다. */
+    const fresh = reqsAll ? lastReqs : lastReqs.filter(r => !list.some(c => c.name === r.name));
+    if (!fresh.length) {
+      box.innerHTML = `<div class="empty">${reqsAll ? "들어온 신청이 없습니다" : "새 가입 신청이 없습니다"}</div>`;
+      return;
+    }
+    box.innerHTML = fresh.map((r, i) => {
+      const done = list.some(c => c.name === r.name);
+      return `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;
+        border:1.5px solid ${done ? "var(--line)" : "var(--brand)"};border-radius:10px;margin-bottom:6px;
+        background:${done ? "var(--card2)" : "var(--brand-soft)"}">
         <div style="flex:1;min-width:0">
           <b style="font-size:13.5px">${esc(r.name)}</b>
-          <div style="font-size:11.5px;color:var(--muted);margin-top:2px">${esc(r.email || "메일 없음")}${r.tel ? " · " + esc(r.tel) : ""}</div>
+          ${done ? '<span style="font-size:10.5px;font-weight:800;color:var(--ok);margin-left:6px">승인됨</span>' : ""}
+          <div style="font-size:11.5px;color:var(--muted);margin-top:2px">${esc(r.email || "메일 없음")}${r.tel ? " · " + esc(r.tel) : ""}${r.at ? " · " + esc(String(r.at).slice(0, 16)) : ""}</div>
         </div>
-        <button class="minibtn reqok" data-i="${i}" style="flex:none;color:var(--brand);border-color:var(--brand);font-weight:800">승인</button>
-        <button class="minibtn reqsend" data-i="${i}" style="flex:none">승인 + 안내문 발송</button></div>`).join("");
+        ${done ? "" : `<button class="minibtn reqok" data-i="${i}" style="flex:none;color:var(--brand);border-color:var(--brand);font-weight:800">승인</button>`}
+        <button class="minibtn reqsend" data-i="${i}" style="flex:none">${done ? "안내문 발송" : "승인 + 안내문 발송"}</button></div>`;
+    }).join("");
     const add = async r => {
       if (list.some(c => c.name === r.name)) return;
       revoked = revoked.filter(x => x !== r.name);
@@ -2920,6 +2933,11 @@ const MST = (() => {
     });
     on("mst-name", "onkeydown", e => { if (e.key === "Enter") $("mst-add").onclick(); });
     on("mst-req-refresh", "onclick", loadReqs);
+    on("mst-req-all", "onclick", () => {
+      reqsAll = !reqsAll;
+      $("mst-req-all").textContent = reqsAll ? "새 신청만" : "전체 보기";
+      drawReqs(null);
+    });
     /* 시트 주소를 붙여넣게 한다. 드라이브를 다시 열어 찾아 들어가는 것보다,
        이미 열어둔 시트의 주소창을 복사해 오는 편이 빠르다. */
     on("mst-sheet", "onclick", async () => {
@@ -2995,7 +3013,8 @@ function applyLockCompany() {
   try { if (window.ST && ST.reload) await ST.reload(); } catch (e) {}
   try { await loadForms(); }
   catch (e) { $("vlist").innerHTML = '<div class="empty">저장소를 열지 못했어요</div>'; }
-  initGmail();
+  await initGmail();                        // 구글이 준비된 뒤에 차단 확인을 해야 한다
+  checkBlockedBySheet();
   drawReplyFilter();
   drawOrderFilter();
   drawDriveRecent();
@@ -3004,7 +3023,6 @@ function applyLockCompany() {
   bindAccountButtons();                     // 탭마다 [계정 변경]
   try { await MST.show(); } catch (e) {}    // 헤더 배지 (👑 마스터 / 업체명)
   syncOnStart();                            // 저장소가 확정된 뒤에 동기화
-  checkBlockedBySheet();                    // 마스터가 시트에서 중지한 업체면 잠근다
 })();
 
 /* ── 사용 중지 확인 (구글 시트) ──────────────────────────────────────
@@ -3014,20 +3032,27 @@ function applyLockCompany() {
      뒤에 확인하고, 걸리면 그 자리에서 로그인 화면으로 돌려보낸다. */
 async function checkBlockedBySheet() {
   try {
-    const co = String(CONFIG.company || "").trim(); if (!co) return;
-    if (!GMAIL.signedIn()) return;                       // 구글 연결 전이면 확인할 방법이 없다
+    const co = String(CONFIG.company || "").trim();
+    S.blockCheck = "";
+    if (!co) { S.blockCheck = "업체명 없음"; return; }
+    if (!GMAIL.signedIn()) { S.blockCheck = "구글 연결 전 — 확인 못 함"; return; }
     const id = (await DB.get("signupSheetId", "")) || (CONFIG && CONFIG.signupSheetId) || "";
-    if (!id) return;
+    if (!id) { S.blockCheck = "연결된 시트 없음"; return; }
     const rows = await GMAIL.sheetRead(id, "승인명단");
-    if (!rows || rows.length < 2) return;
+    if (!rows || rows.length < 2) { S.blockCheck = "명단이 비어 있음"; return; }
     const norm = v => String(v == null ? "" : v).trim().replace(/\s+/g, "");
     const hit = rows.slice(1).find(r => norm(r[0]) === norm(co));
+    S.blockCheck = hit ? `명단: ${hit[0]} = ${hit[1]}` : `명단에 '${co}' 없음 → 통과`;
     if (hit && /중지|off|false|사용안함/i.test(String(hit[1] || ""))) {
       alert("관리자가 이 업체의 사용을 중지했습니다.\n관리자에게 문의하세요.");
       try { LOCK.signOut(); } catch (e) {}
       location.reload();
     }
-  } catch (e) {}                                          // 못 읽으면 그냥 통과 (멀쩡한 업체를 잠그지 않는다)
+  } catch (e) {
+    /* 못 읽으면 통과시킨다 — 멀쩡한 업체를 잠그면 안 된다.
+       다만 왜 못 읽었는지는 남긴다. 조용히 실패하면 '왜 차단이 안 되지' 를 알 수 없다. */
+    S.blockCheck = "시트를 읽지 못함 — " + (e.message || e);
+  }
 }
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 // 알림: 켜져 있으면 폴링 시작, 앱으로 돌아올 때마다 즉시 한 번 확인
