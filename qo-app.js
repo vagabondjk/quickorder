@@ -580,8 +580,13 @@ function drvTrim(chain) {
 /* 시작 위치: ①마지막에 파일 고른 폴더 → ②최상위 폴더 → ③내 드라이브 */
 async function drvStart() {
   const all = await DB.get("driveFolders", {});
-  DRV.home = all[":home"] || null;
-  const last = DRV.key ? all[DRV.key + ":last"] : null;
+  /* ★ 기억해 둔 폴더는 '그 계정의 드라이브' 안에서만 뜻이 있다.
+     계정이 다르면 남의 폴더를 열게 된다 — 실제로 베타브릭스 화면에 랩노마드
+     폴더가 떴다. 저장할 때 계정을 함께 적고, 지금 계정과 다르면 무시한다. */
+  const mine = o => o && o.id && o.acct === String(CONFIG.account || "").toLowerCase();
+  DRV.home = mine(all[":home"]) ? all[":home"] : null;
+  const lastRaw = DRV.key ? all[DRV.key + ":last"] : null;
+  const last = mine(lastRaw) ? lastRaw : null;
   const go = (last && last.id) ? last : (DRV.home && DRV.home.id ? DRV.home : null);
   if (go) {
     // 실제 드라이브 상위 폴더들을 따라 경로를 만든다 → '상위' 버튼이 제대로 동작
@@ -689,12 +694,13 @@ async function drvRememberFolder() {
   const cur = DRV.path[DRV.path.length - 1];
   if (!cur || cur.id === "root" || cur.id === "shared") return;
   const all = await DB.get("driveFolders", {});
-  if (DRV.key) all[DRV.key + ":last"] = { id: cur.id, name: cur.name };
-  if (!(all[":home"] && all[":home"].id)) {
+  const acct = String(CONFIG.account || "").toLowerCase();
+  if (DRV.key) all[DRV.key + ":last"] = { id: cur.id, name: cur.name, acct };
+  if (!(all[":home"] && all[":home"].id && all[":home"].acct === acct)) {
     // path[0] 이 '내 드라이브'면 그 다음이 작업 폴더. 이미 최상위 안에서 시작했으면 path[0] 이 곧 최상위다.
     const top = DRV.path[0] && DRV.path[0].id === "root" ? DRV.path[1] : DRV.path[0];
     if (top && top.id && top.id !== "root" && top.id !== "shared") {
-      all[":home"] = { id: top.id, name: top.name };
+      all[":home"] = { id: top.id, name: top.name, acct };
       DRV.home = all[":home"];
     }
   }
@@ -727,7 +733,7 @@ function pickOrderPin(alsoFetch) {
     key: "order", title: alsoFetch ? "다른 발주서 파일로 변경" : "바로 가져올 발주서 파일 지정", multiple: false,
     onPick: async files => {
       const f = files[0];
-      await DB.set("driveOrderFile", { id: f.id, name: f.name });
+      await DB.set("driveOrderFile", { id: f.id, name: f.name, acct: String(CONFIG.account || "").toLowerCase() });
       drawDriveRecent();
       if (!alsoFetch) { msg("msg-o", "ok", `✔ 바로 가져올 발주서로 지정했어요: ${f.name}`); return; }
       msg("msg-o", "", "");
@@ -749,7 +755,7 @@ $("order-pin-clear").onclick = async () => {
 };
 // 지정한 발주서를 한 번에(폴더 탐색 없이) 최신본으로 가져와 바로 변환 프로세스로
 $("drive-again").onclick = async function () {
-  const f = await DB.get("driveOrderFile", null);
+  const f = await pinOf("driveOrderFile");
   if (!f || !f.id) { pickOrderPin(true); return; }   // 지정된 게 없으면 드라이브에서 고르게
   this.disabled = true; const orig = this.innerHTML; this.textContent = "가져오는 중…";
   msg("msg-o", "", "");
@@ -761,8 +767,15 @@ $("drive-again").onclick = async function () {
   } catch (e) { msg("msg-o", "err", "가져오기 실패: " + e.message); }
   finally { this.disabled = false; this.innerHTML = orig; }
 };
+/* 지정 파일 읽기 — 지금 계정 것이 아니면 null */
+async function pinOf(key) {
+  const f = await DB.get(key, null);
+  if (!f || !f.id) return null;
+  return f.acct === String(CONFIG.account || "").toLowerCase() ? f : null;
+}
 async function drawDriveRecent() {
-  const f = await DB.get("driveOrderFile", null);
+  /* 지정 파일도 그 계정의 드라이브 안에 있는 것이다. 계정이 다르면 없는 것으로 본다. */
+  const f = await pinOf("driveOrderFile");
   const has = !!(f && f.id);
   // 퀵로딩 버튼은 항상 보인다. 지정 파일이 없으면 누를 때 드라이브에서 고르게 한다
   // (지정 전에는 숨겨져 있어서 드라이브로 갈 길이 아예 없었다)
@@ -808,7 +821,7 @@ function pickSabFromDrive() {
     key: "sab", title: "드라이브에서 송장취합양식 가져오기", multiple: false,
     onPick: async files => {
       const r = await loadSabFromDrive(files[0].id);
-      await DB.set("driveSabFile", { id: files[0].id, name: r.name });
+      await DB.set("driveSabFile", { id: files[0].id, name: r.name, acct: String(CONFIG.account || "").toLowerCase() });
       drawSabRecent();
       msg("msg-i", "ok", `✔ 드라이브에서 송장취합양식을 가져왔어요: ${r.name}`);
     },
@@ -821,7 +834,7 @@ function pickSabPin(alsoFetch) {
     key: "sab", title: alsoFetch ? "다른 송장취합양식으로 변경" : "바로 가져올 송장취합양식 파일 지정", multiple: false,
     onPick: async files => {
       const f = files[0];
-      await DB.set("driveSabFile", { id: f.id, name: f.name });
+      await DB.set("driveSabFile", { id: f.id, name: f.name, acct: String(CONFIG.account || "").toLowerCase() });
       drawSabRecent();
       if (!alsoFetch) { msg("msg-i", "ok", `✔ 바로 가져올 송장취합양식으로 지정했어요: ${f.name}`); return; }
       // 바꿨으면 바로 불러온다 (지정만 바뀌고 화면은 이전 파일인 상태를 막는다)
@@ -843,7 +856,7 @@ $("sab-pin-clear").onclick = async () => {
 };
 // 지정한 송장취합양식을 한 번에 최신본으로 가져오기
 $("sab-again").onclick = async function () {
-  const f = await DB.get("driveSabFile", null);
+  const f = await pinOf("driveSabFile");
   if (!f || !f.id) { pickSabPin(true); return; }      // 지정된 게 없으면 드라이브에서 고르게
   this.disabled = true; const orig = this.innerHTML; this.textContent = "가져오는 중…";
   msg("msg-i", "", "");
@@ -855,7 +868,7 @@ $("sab-again").onclick = async function () {
   finally { this.disabled = false; this.innerHTML = orig; }
 };
 async function drawSabRecent() {
-  const f = await DB.get("driveSabFile", null);
+  const f = await pinOf("driveSabFile");
   const has = !!(f && f.id);
   $("sab-again").style.display = "block";      // 항상 보인다 (위 drawDriveRecent 주석 참고)
   $("sab-pinrow").style.display = has ? "flex" : "none";
@@ -2487,7 +2500,7 @@ async function notifyTick(manual) {
   const hits = [];
   // ① 지정한 드라이브 발주 파일이 바뀌었나 (수정시각 비교)
   try {
-    const df = await DB.get("driveOrderFile", null);
+    const df = await pinOf("driveOrderFile");
     if (df && df.id) {
       const info = await GMAIL.driveFileInfo(df.id);
       const last = await DB.get("notifyDriveMTime", "");
