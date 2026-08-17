@@ -122,8 +122,6 @@
   .setrow{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:6px;
     margin:0 0 8px;font-size:11.5px;color:var(--muted)}
   .setrow .minibtn{flex:none}
-  .pinrow{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:0 0 8px;font-size:11.5px;color:var(--muted)}
-  .pinrow b{color:var(--brand);word-break:break-all}
   .ptr{position:fixed;top:0;left:0;right:0;height:0;overflow:hidden;display:flex;align-items:center;justify-content:center;
        font-size:12.5px;font-weight:700;color:var(--brand);background:var(--card2);z-index:9998;transition:height .12s ease}
   .ptr.spin #ptr-txt::before{content:"⏳ "}
@@ -595,13 +593,8 @@
   <div class="pane" id="pane-s">
     <div class="card">
       <h2><span class="n">1</span>쇼핑몰 정산 파일</h2>
-      <button class="go" id="st-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
-      <!-- 한 번 고른 드라이브 파일을 기억한다. 다음부터 퀵로딩은 그 파일의 최신본을 받아온다 -->
-      <div class="pinrow" id="st-pinrow" style="display:none">
-        <span style="flex:1;min-width:0">지정 파일: <b id="st-pinname">-</b></span>
-        <button class="minibtn" id="st-pin-change" style="padding:9px 16px;font-size:12.5px;font-weight:800;
-          background:var(--brand-soft);color:var(--brand);border-color:var(--brand)">📁 다른 파일로 변경</button>
-        <button class="minibtn" id="st-pin-clear">해제</button></div>
+      <!-- 발주·송장과 같은 이유로 지정 파일(📌) 기능을 없앴다 — 누르면 바로 고른다 -->
+      <button class="go" id="st-drive" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 정산 파일 고르기</button>
       <button class="go" id="st-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
       <div class="setrow"><span style="flex:1"></span>
         <button class="minibtn" id="st-filter-btn">검색조건</button></div>
