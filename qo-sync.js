@@ -15,7 +15,7 @@ const SYNC = (() => {
     "settleRules", "settleMaps", "stSenders", "stKeywords", "stExclude",
     // v6.1 — 업체별 공급가표. 이게 빠지면 기기를 바꿨을 때 단가와 연결표가 통째로 사라진다
     // 지운 업체 양식 표시 — 이게 빠지면 다른 기기의 백업이 지운 양식을 되살린다
-    "formsDeleted",
+    "formsDeleted", "masterRevoked",
     "pbSenders", "pbKeywords", "pbExclude", "paySenders", "payKeywords", "payExclude",
     "priceBook", "priceAliases", "priceAliasInfo", "settleBrandVendor", "settleVendors", "settleCarry",
     "mdRewards", "payMaps", "vendorCarriers",        // 파트너 MD 리워드 조건 — 한 번 정하면 다음 달에도 그대로 쓴다

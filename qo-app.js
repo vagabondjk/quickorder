@@ -2608,11 +2608,23 @@ const MST = (() => {
   /* 예전엔 업체명 문자열만 담았다. 이제 사용여부·연락처까지 담아야 해서 객체로 바꾼다.
      옛 데이터를 읽을 때 그 자리에서 객체로 올려준다 (이미 쓰고 있는 사람이 있다). */
   const norm = x => (typeof x === "string" ? { name: x, on: true } : Object.assign({ on: true }, x));
-  async function load() { list = ((await DB.get("masterCompanies", [])) || []).map(norm); }
-  async function save() { await DB.set("masterCompanies", list); }
-  /* 업체 목록을 공용 명단 형태로 — 나중에 드라이브·배포에 올려 로그인 차단에 쓴다 */
+  let revoked = [];                      // 목록에서 지운 업체 (이름만 남긴다)
+  async function load() {
+    list = ((await DB.get("masterCompanies", [])) || []).map(norm);
+    revoked = (await DB.get("masterRevoked", [])) || [];
+  }
+  async function save() {
+    await DB.set("masterCompanies", list);
+    await DB.set("masterRevoked", revoked);
+  }
+  /* 업체 목록을 공용 명단(roster.json) 형태로 만든다.
+     ★ 지운 업체는 목록에서만 빼고 명단에는 '사용:false' 로 남긴다.
+       명단에서 통째로 빼버리면 '없는 이름' 이 되어 그냥 통과한다 —
+       승인번호는 업체명으로 계산돼서 지워도 계속 유효하기 때문이다. */
   function roster() {
-    return { at: Date.now(), companies: list.map(c => ({ name: c.name, on: c.on !== false })) };
+    const rows = list.map(c => ({ name: c.name, on: c.on !== false }));
+    revoked.forEach(n => { if (!rows.some(r => r.name === n)) rows.push({ name: n, on: false }); });
+    return { at: Date.now(), companies: rows };
   }
   async function draw() {
     const box = $("mst-list"); if (!box) return;
@@ -2657,9 +2669,13 @@ const MST = (() => {
     });
     box.querySelectorAll(".mstdel").forEach(b => b.onclick = async () => {
       const i = Number(b.dataset.i);
-      if (!confirm(`'${list[i].name}' 를 목록에서 지울까요?
-(이미 전달한 승인번호는 계속 쓸 수 있습니다)`)) return;
-      list.splice(i, 1); await save(); draw();
+      const name = list[i].name;
+      if (!confirm(`'${name}' 를 지울까요?\n앞으로 로그인할 수 없게 됩니다.`)) return;
+      list.splice(i, 1);
+      if (!revoked.includes(name)) revoked.push(name);   // 명단에 '사용 안 함' 으로 남긴다
+      await save(); draw();
+      $("mst-msg").textContent =
+        `${name} 를 지웠습니다. [명단 파일 내보내기] 로 받은 roster.json 을 배포에 올리면 로그인이 막힙니다.`;
     });
   }
   /* 마스터인지 저장된 표시로 판단하면, 기기를 바꾸거나 표시가 지워졌을 때 들어갈 길이 막힌다.
@@ -2736,6 +2752,7 @@ const MST = (() => {
         <button class="minibtn reqsend" data-i="${i}" style="flex:none">승인 + 안내문 발송</button></div>`).join("");
     const add = async r => {
       if (list.some(c => c.name === r.name)) return;
+      revoked = revoked.filter(x => x !== r.name);
       list.push({ name: r.name, on: true, email: r.email || "", tel: r.tel || "", at: Date.now() });
       await save(); await draw();
     };
@@ -2831,6 +2848,7 @@ const MST = (() => {
       const n = $("mst-name").value.trim().replace(/\s+/g, "");
       if (!n) { $("mst-name").focus(); return; }
       if (list.some(c => c.name === n)) { $("mst-msg").textContent = "이미 목록에 있어요."; return; }
+      revoked = revoked.filter(x => x !== n);          // 지웠다가 다시 승인하면 차단을 푼다
       list.push({ name: n, on: true, at: Date.now() });
       await save(); $("mst-name").value = ""; $("mst-msg").textContent = ""; draw();
     });
