@@ -2085,10 +2085,14 @@ function updateGmailWho() {
   const who = CONFIG.account ? ` (${CONFIG.account})` : "";
   /* 드라이브와 메일은 같은 구글 계정 하나로 연결된다 — '메일' 이라고만 쓰면
      드라이브는 따로 붙여야 하는 줄 안다. 문구를 '구글 계정' 으로 둔다. */
-  const txt = !gmailReady ? "⚠ 구글 연결 준비 안 됨 (설정에서 연결하세요)"
-    : GMAIL.signedIn() ? "✓ 구글 계정 연결됨 (드라이브·메일)" + who
-    : "구글 계정 연결 필요 (버튼을 누르면 로그인)";
+  /* ★ '연결하기' 는 이 줄에 없어도 된다 — 퀵로딩 버튼을 누르면 알아서 로그인 창이 뜬다.
+     이 줄이 하는 일은 '지금 누구로 붙어 있는가' 를 보여주는 것이다. 그래서 연결되기
+     전에는 줄을 아예 감추고, 연결된 뒤에만 보여준다. (회사 간 자료가 새던 일을
+     눈치채지 못한 게 이 정보가 없어서였다.) */
+  const on = gmailReady && GMAIL.signedIn();
+  const txt = "✓ 구글 계정 연결됨 (드라이브·메일)" + who;
   document.querySelectorAll(".gwho").forEach(el => { el.textContent = txt; });
+  document.querySelectorAll(".acctbar").forEach(el => { el.style.display = on ? "" : "none"; });
 }
 /* 구글 계정 바꾸기 — 탭마다 [계정 변경] 버튼에 걸린다.
    계정을 바꾸면 그 계정 저장소로 갈아타야 한다(useAccountStore). 안 그러면
