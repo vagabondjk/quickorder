@@ -2202,11 +2202,15 @@ const ST = (() => {
                                                  onProgress: (i, n) => BUSY.progress(i, n) });
         const withAtt = items.filter(m => m.atts.length);
         if (!withAtt.length) { msg(box, "warn", `최근 60일 메일에서 ${what} 엑셀 첨부를 찾지 못했어요.`); return; }
+        const picked = withAtt.slice(0, 5);
+        const total = picked.reduce((s2, m) => s2 + m.atts.length, 0);
         let n = 0;
-        for (const m of withAtt.slice(0, 5)) {
+        BUSY.progress(0, total);
+        for (const m of picked) {
           for (const a of m.atts) {
             const buf = await GMAIL.getAttachment(m.id, a.attachmentId);
             await take(buf, a.filename); n++;
+            BUSY.progress(n, total);
           }
         }
         msg(box, "ok", `✔ 메일에서 ${n}개 파일을 불러왔어요.`);
@@ -2251,14 +2255,20 @@ const ST = (() => {
       try {
         const kw = await DB.get("stKeywords", ["정산", "정산내역", "지급"]);
         const sd = await DB.get("stSenders", []);
-        const items = await GMAIL.listTextMails({ days: 30, keywords: kw, senders: sd, max: 30 });
+        const items = await GMAIL.listTextMails({ days: 30, keywords: kw, senders: sd, max: 30,
+          onProgress: (i, t) => BUSY.progress(i, t) });          // 메일 훑는 진행률
         const withAtt = items.filter(m => m.atts.length);
         if (!withAtt.length) { msg("msg-s", "warn", "최근 30일 메일에서 정산 엑셀 첨부를 찾지 못했어요."); return; }
+        /* 첨부를 내려받는 구간도 진행률을 보여준다 — 여기가 제일 오래 걸린다 */
+        const picked = withAtt.slice(0, 5);
+        const total = picked.reduce((s2, m) => s2 + m.atts.length, 0);
         let n = 0;
-        for (const m of withAtt.slice(0, 5)) {
+        BUSY.progress(0, total);
+        for (const m of picked) {
           for (const a of m.atts) {
             const buf = await GMAIL.getAttachment(m.id, a.attachmentId);
             await addFile(buf, a.filename); n++;
+            BUSY.progress(n, total);
           }
         }
         msg("msg-s", "ok", `✔ 메일에서 ${n}개 파일을 불러왔어요.`);
