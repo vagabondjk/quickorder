@@ -2300,14 +2300,16 @@ document.querySelectorAll("#mail-period button").forEach(b => {
   };
 });
 async function openMail(target) {
-  mailTarget = target;                       // 'order' | 'sab' | 'rep'
-  mailMulti = (target === "rep");
+  mailTarget = target;                       // 'order' | 'sab' | 'rep' | 'st' | 'pb' | 'pay'
+  mailMulti = (target === "rep" || target === "st" || target === "pay");
   mailSel = [];
   try { await ensureGmail(); } catch (e) { return; }
   mailModal.classList.add("on");
   $("mail-ok").disabled = true;
   $("mail-ok").textContent = mailMulti ? "선택 항목 가져오기" : "이 파일 가져오기";
-  const titles = { order: "메일에서 발주서 가져오기", sab: "메일에서 송장취합양식 가져오기", rep: "메일에서 회신 송장 가져오기" };
+  const titles = { order: "메일에서 발주서 가져오기", sab: "메일에서 송장취합양식 가져오기",
+                   rep: "메일에서 회신 송장 가져오기", st: "메일에서 정산 파일 가져오기",
+                   pb: "메일에서 공급가표 가져오기", pay: "메일에서 대금지급 내역 가져오기" };
   $("mail-title").textContent = titles[target];
   document.querySelectorAll("#mail-period button")
     .forEach(x => x.classList.toggle("on", Number(x.dataset.d) === mailDays));
@@ -2322,7 +2324,13 @@ async function loadMail() {
   $("mail-sub").textContent = `${dayTxt} 메일 확인 중…`;
   try {
     let opt;
-    if (target === "rep") {
+    if (target === "st" || target === "pb" || target === "pay") {
+      /* 정산 쪽은 각 카드의 검색조건을 쓴다. 예전엔 조건에 맞는 메일의 첨부를 자동으로
+         전부 끌고 왔는데, 엉뚱한 파일이 딸려왔다 — 발주서처럼 목록에서 고르게 바꿨다. */
+      const kind = target === "st" ? "settle" : target;
+      const f = await getFilter(kind);
+      opt = { days: mailDays, senders: f.senders, keywords: f.keywords, exclude: f.exclude || [], union: false, scanText: true };
+    } else if (target === "rep") {
       const f = await getReplyFilter();
       opt = { days: mailDays, senders: f.senders, keywords: f.keywords, exclude: f.exclude || [], union: true, scanText: true };
     } else {
@@ -2418,6 +2426,9 @@ $("mail-ok").onclick = async function () {
       S.sabBuf = got[0].data; S.sabName = got[0].name;
       S.sabDrive = null;
       $("sab-name").textContent = "📧 " + got[0].name; $("drop-sab").classList.add("on"); $("sab-preview").style.display="block"; refreshI();
+    } else if (mailTarget === "st" || mailTarget === "pb" || mailTarget === "pay") {
+      /* 정산 탭으로 넘긴다 — 실제 적재는 qo-settle 이 한다 */
+      await ST.takeMail(mailTarget, got);
     } else {
       for (const g of got) if (!S.reps.some(r => r.name === g.name)) S.reps.push(g);
       drawReps();

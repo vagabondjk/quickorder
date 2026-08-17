@@ -481,6 +481,22 @@ const ST = (() => {
       onOk: m => put(m).catch(e => msg("msg-s", "err", "⚠ " + e.message)),
     });
   }
+  /* 메일 선택창에서 고른 파일을 받는다 (창은 qo-app 이 띄운다).
+     예전에는 조건에 맞는 메일의 첨부를 자동으로 다 끌고 와서 엉뚱한 파일이 섞였다. */
+  async function takeMail(kind, got) {
+    const box = kind === "pb" ? "msg-pb" : kind === "pay" ? "msg-pay" : "msg-s";
+    const put = kind === "pb" ? ((b, n) => addPriceBook(b, n))
+              : kind === "pay" ? ((b, n) => addPayFile(b, n))
+              : ((b, n) => addFile(b, n));
+    let n = 0;
+    BUSY.progress(0, got.length);
+    for (const g of got) {
+      try { await put(g.data, g.name); n++; } catch (e) { msg(box, "err", "⚠ " + g.name + " — " + e.message); }
+      BUSY.progress(n, got.length);
+    }
+    if (n) msg(box, "ok", `✔ 메일에서 ${n}개 파일을 불러왔어요.`);
+  }
+
   function drawFiles() {
     const box = $("st-files");
     /* 파일 영역 안에 들어 있어서, 여기서 난 클릭이 라벨까지 올라가면 파일 선택창이 뜬다 */
@@ -2191,33 +2207,8 @@ const ST = (() => {
     });
     /* 메일에서 첨부 엑셀 가져오기 — 정산 파일(①)과 같은 방식으로 공급가표·보정에도 붙인다.
        각 카드가 찾는 단어만 다르고 나머지는 같아서 한 곳으로 모았다. */
-    async function mailInto(kind, box, take, what) {
-      try { await ensureGmail(); } catch (e) { return; }
-      msg(box, "", "");
-      try {
-        /* 검색어를 코드에 박아두면 회사마다 못 바꾼다 — 검색조건에서 읽어 쓴다 */
-        const f = await getFilter(kind);
-        const items = await GMAIL.listTextMails({ days: 60, keywords: f.keywords, senders: f.senders,
-                                                 exclude: f.exclude, max: 30,
-                                                 onProgress: (i, n) => BUSY.progress(i, n) });
-        const withAtt = items.filter(m => m.atts.length);
-        if (!withAtt.length) { msg(box, "warn", `최근 60일 메일에서 ${what} 엑셀 첨부를 찾지 못했어요.`); return; }
-        const picked = withAtt.slice(0, 5);
-        const total = picked.reduce((s2, m) => s2 + m.atts.length, 0);
-        let n = 0;
-        BUSY.progress(0, total);
-        for (const m of picked) {
-          for (const a of m.atts) {
-            const buf = await GMAIL.getAttachment(m.id, a.attachmentId);
-            await take(buf, a.filename); n++;
-            BUSY.progress(n, total);
-          }
-        }
-        msg(box, "ok", `✔ 메일에서 ${n}개 파일을 불러왔어요.`);
-      } catch (e) { msg(box, "err", "⚠ " + e.message); }
-    }
-    $("pb-mail").onclick = () => mailInto("pb", "msg-pb", (buf, name) => addPriceBook(buf, name), "공급가표");
-    $("pay-mail").onclick = () => mailInto("pay", "msg-pay", (buf, name) => addPayFile(buf, name), "대금지급 내역");
+    $("pb-mail").onclick = () => openMail("pb");
+    $("pay-mail").onclick = () => openMail("pay");
     $("st-filter-btn").onclick = () => openFilter("settle");
     $("pb-filter-btn").onclick = () => openFilter("pb");
     $("pay-filter-btn").onclick = () => openFilter("pay");
@@ -2249,31 +2240,7 @@ const ST = (() => {
         }
       },
     });
-    $("st-mail").onclick = async () => {
-      try { await ensureGmail(); } catch (e) { return; }
-      msg("msg-s", "", "");
-      try {
-        const kw = await DB.get("stKeywords", ["정산", "정산내역", "지급"]);
-        const sd = await DB.get("stSenders", []);
-        const items = await GMAIL.listTextMails({ days: 30, keywords: kw, senders: sd, max: 30,
-          onProgress: (i, t) => BUSY.progress(i, t) });          // 메일 훑는 진행률
-        const withAtt = items.filter(m => m.atts.length);
-        if (!withAtt.length) { msg("msg-s", "warn", "최근 30일 메일에서 정산 엑셀 첨부를 찾지 못했어요."); return; }
-        /* 첨부를 내려받는 구간도 진행률을 보여준다 — 여기가 제일 오래 걸린다 */
-        const picked = withAtt.slice(0, 5);
-        const total = picked.reduce((s2, m) => s2 + m.atts.length, 0);
-        let n = 0;
-        BUSY.progress(0, total);
-        for (const m of picked) {
-          for (const a of m.atts) {
-            const buf = await GMAIL.getAttachment(m.id, a.attachmentId);
-            await addFile(buf, a.filename); n++;
-            BUSY.progress(n, total);
-          }
-        }
-        msg("msg-s", "ok", `✔ 메일에서 ${n}개 파일을 불러왔어요.`);
-      } catch (e) { msg("msg-s", "err", "⚠ " + e.message); }
-    };
+    $("st-mail").onclick = () => openMail("st");
     $("run-s").onclick = async () => {
       const b = $("run-s");
       b.classList.add("loading"); b.disabled = true;
@@ -2324,6 +2291,7 @@ const ST = (() => {
            _money: moneyLines,
            /* 검증용 — 대금지급 내역 보정을 화면 없이 돌려본다 */
            _payfix: (pfs, rows) => { payFiles = pfs; return applyPayFix(rows); },
+           takeMail,
            _tpl: priceBookTemplate,
            _pbx: (raw) => { pbRaw = raw; return priceBookExcel(); } };
 })();
