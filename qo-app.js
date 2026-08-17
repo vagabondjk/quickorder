@@ -2914,16 +2914,21 @@ const MST = (() => {
     });
     on("mst-name", "onkeydown", e => { if (e.key === "Enter") $("mst-add").onclick(); });
     on("mst-req-refresh", "onclick", loadReqs);
-    on("mst-sheet", "onclick", () => openDrivePicker({
-      key: "signup", multiple: false, title: "구글폼 응답 시트 고르기",
-      sub: "구글폼이 만든 '…(응답)' 시트를 고르세요.",
-      onPick: async fs => {
-        const f = fs && fs[0]; if (!f) return;
-        await DB.set("signupSheetId", f.id);
-        $("mst-msg").textContent = `응답 시트를 '${f.name}' 로 연결했습니다. [신청함 확인] 을 눌러보세요.`;
-        loadReqs();
-      },
-    }));
+    /* 시트 주소를 붙여넣게 한다. 드라이브를 다시 열어 찾아 들어가는 것보다,
+       이미 열어둔 시트의 주소창을 복사해 오는 편이 빠르다. */
+    on("mst-sheet", "onclick", async () => {
+      const now = (await DB.get("signupSheetId", "")) || (CONFIG && CONFIG.signupSheetId) || "";
+      const v = prompt("구글폼 응답 시트 주소를 붙여넣으세요.\n(시트를 연 뒤 주소창을 그대로 복사)", now);
+      if (v === null) return;
+      const t = String(v).trim();
+      if (!t) { await DB.set("signupSheetId", ""); $("mst-msg").textContent = "연결을 해제했습니다."; return; }
+      const m = t.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      const id = m ? m[1] : (/^[a-zA-Z0-9-_]{20,}$/.test(t) ? t : "");
+      if (!id) { $("mst-msg").textContent = "시트 주소가 아닌 것 같아요. .../spreadsheets/d/… 형태를 넣어주세요."; return; }
+      await DB.set("signupSheetId", id);
+      $("mst-msg").textContent = "응답 시트를 연결했습니다. 신청서를 불러옵니다…";
+      loadReqs();
+    });
     on("mst-apply", "onclick", pushRoster);
     on("mst-roster", "onclick", () => {
       const txt = JSON.stringify(roster(), null, 2);
