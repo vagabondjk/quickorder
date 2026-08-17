@@ -2642,8 +2642,7 @@ const MST = (() => {
         </div>
         <button class="minibtn mstonoff" data-i="${i}" style="flex:none;${on ? "" : "color:var(--danger);border-color:var(--danger)"}">${on ? "사용 중" : "중지됨"}</button>
         <button class="minibtn mstcopy" data-i="${i}" style="flex:none">번호 복사</button>
-        <button class="minibtn mstmsg" data-i="${i}" style="flex:none">안내문</button>
-        <button class="minibtn mstdel" data-i="${i}" style="flex:none">삭제</button></div>`;
+        <button class="minibtn mstmsg" data-i="${i}" style="flex:none">안내문</button></div>`;
     }).join("");
     box.querySelectorAll(".mstonoff").forEach(b => b.onclick = async () => {
       const i = Number(b.dataset.i);
@@ -2651,7 +2650,7 @@ const MST = (() => {
       await save(); draw();
       $("mst-msg").textContent = list[i].on
         ? `${list[i].name} — 사용으로 바꿨습니다.`
-        : `${list[i].name} — 사용 중지로 표시했습니다. ※ 아직 기록만 남습니다 — 실제 로그인 차단은 공용 명단 연결이 필요합니다.`;
+        : `${list[i].name} — 사용 중지. 다음 달 승인번호를 보내지 않으면 그때부터 못 들어옵니다.`;
     });
     /* ★ '복사' 는 승인번호만 복사한다.
        안내 문구까지 같이 복사하면 그대로 붙여넣었을 때 로그인이 안 된다 (실제로 그랬다). */
@@ -2666,16 +2665,10 @@ const MST = (() => {
       if (c.email) { await sendGuide(c, codes[i]); return; }
       copyText(guideText(c.name, codes[i]), "안내문을 복사했어요. 업체에 그대로 보내세요.");
     });
-    box.querySelectorAll(".mstdel").forEach(b => b.onclick = async () => {
-      const i = Number(b.dataset.i);
-      const name = list[i].name;
-      if (!confirm(`'${name}' 를 지울까요?\n앞으로 로그인할 수 없게 됩니다.`)) return;
-      list.splice(i, 1);
-      if (!revoked.includes(name)) revoked.push(name);   // 명단에 '사용 안 함' 으로 남긴다
-      await save(); draw();
-      $("mst-msg").textContent =
-        `${name} 를 지웠습니다. [명단 파일 내보내기] 로 받은 roster.json 을 배포에 올리면 로그인이 막힙니다.`;
-    });
+    /* ★ 삭제 버튼은 없앴다.
+       지워도 로그인은 계속 됐고(승인번호는 업체명+달로 계산된다), 정작 마스터가
+       그 업체의 승인번호를 볼 수 없게 돼서 손해만 있었다.
+       쓰지 않는 업체는 [중지됨] 으로 표시해 둔다 — 기록도 남고 번호도 보인다. */
   }
   /* 마스터인지 저장된 표시로 판단하면, 기기를 바꾸거나 표시가 지워졌을 때 들어갈 길이 막힌다.
      그래서 표시가 없으면 모달 안에서 아이디·비밀번호를 받아 그 자리에서 확인한다. */
