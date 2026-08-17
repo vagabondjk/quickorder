@@ -422,6 +422,49 @@ const GMAIL = (() => {
   const DRIVE = "https://www.googleapis.com/drive/v3";
   /* 구글 시트를 CSV 로 받아온다 (구글폼 응답 시트를 읽을 때 쓴다).
      시트 API 를 따로 켤 필요 없이, 이미 가진 드라이브 권한으로 내보내기 하면 된다. */
+  /* ── 구글 시트 읽기·쓰기 ─────────────────────────────────────────
+     드라이브 권한(auth/drive)이면 시트 API 도 쓸 수 있다. 별도 권한 승인이 없다.
+     ※ 프로젝트에서 Google Sheets API 를 켜둬야 한다 (2026-08-17 켬). */
+  const SHEETS = "https://sheets.googleapis.com/v4/spreadsheets";
+  async function sheetApi(path, opts) {
+    const t = await token();
+    const r = await fetch(SHEETS + path, {
+      ...(opts || {}),
+      headers: { Authorization: "Bearer " + t, "Content-Type": "application/json", ...((opts || {}).headers || {}) },
+    });
+    if (!r.ok) {
+      let d = {}; try { d = await r.json(); } catch (e) {}
+      throw new Error((d.error && d.error.message) || ("시트 오류 HTTP " + r.status));
+    }
+    return await r.json();
+  }
+  /* 탭 이름 목록 */
+  async function sheetTabs(id) {
+    const d = await sheetApi(`/${encodeURIComponent(id)}?fields=sheets(properties(title))`);
+    return (d.sheets || []).map(s2 => s2.properties.title);
+  }
+  /* 탭이 없으면 만든다 */
+  async function sheetEnsureTab(id, title) {
+    const tabs = await sheetTabs(id);
+    if (tabs.includes(title)) return false;
+    await sheetApi(`/${encodeURIComponent(id)}:batchUpdate`, {
+      method: "POST",
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title } } }] }),
+    });
+    return true;
+  }
+  /* 탭 전체 값 읽기 → [[셀,…],…] */
+  async function sheetRead(id, tab) {
+    const d = await sheetApi(`/${encodeURIComponent(id)}/values/${encodeURIComponent(tab)}`);
+    return d.values || [];
+  }
+  /* 탭을 통째로 갈아끼운다 (지우고 새로 쓴다) */
+  async function sheetWrite(id, tab, rows) {
+    await sheetApi(`/${encodeURIComponent(id)}/values/${encodeURIComponent(tab)}:clear`, { method: "POST", body: "{}" });
+    await sheetApi(`/${encodeURIComponent(id)}/values/${encodeURIComponent(tab)}?valueInputOption=RAW`, {
+      method: "PUT", body: JSON.stringify({ values: rows }),
+    });
+  }
   async function driveExportCsv(fileId) {
     const t = await token();
     const r = await fetch(`${DRIVE}/files/${encodeURIComponent(fileId)}/export?mimeType=text%2Fcsv`,
@@ -542,7 +585,7 @@ const GMAIL = (() => {
     return (await r.json()).id;
   }
 
-  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, switchAccount, persistToken, dropStored, reloadToken, projectNo, driveExportCsv, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
+  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, switchAccount, persistToken, dropStored, reloadToken, projectNo, driveExportCsv, sheetRead, sheetWrite, sheetTabs, sheetEnsureTab, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
            searchAddresses, driveFind, driveDownload, driveUpload, granted,
            driveIdFromLink, driveFileInfo, driveSearch, driveFetchExcel, driveListFolder, driveListShared, driveAncestors, driveUpdateFile, needLogin };
 })();

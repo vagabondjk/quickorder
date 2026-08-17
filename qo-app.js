@@ -2619,6 +2619,24 @@ const MST = (() => {
      ★ 지운 업체는 목록에서만 빼고 명단에는 '사용:false' 로 남긴다.
        명단에서 통째로 빼버리면 '없는 이름' 이 되어 그냥 통과한다 —
        승인번호는 업체명으로 계산돼서 지워도 계속 유효하기 때문이다. */
+  const BLOCK_TAB = "승인명단";
+  /* 승인 명단을 구글 시트에 그대로 적는다. 마스터가 스위치만 누르면 되고,
+     시트를 직접 열어 손볼 필요가 없다. 업체 앱은 이 탭을 읽어 로그인을 판정한다. */
+  async function pushRoster() {
+    const say = m => { const el = $("mst-msg"); if (el) el.textContent = m; };
+    const id = (await DB.get("signupSheetId", "")) || (CONFIG && CONFIG.signupSheetId) || "";
+    if (!id) { say("연결된 시트가 없습니다. [응답 시트 연결] 을 먼저 눌러주세요."); return; }
+    say("시트에 적용하는 중…");
+    try {
+      await ensureGmail();
+      await GMAIL.sheetEnsureTab(id, BLOCK_TAB);
+      const rows = [["업체명", "사용", "수정시각"]];
+      const stamp = QO.fmtDate(QO.todayStr());
+      roster().companies.forEach(c => rows.push([c.name, c.on ? "사용" : "중지", stamp]));
+      await GMAIL.sheetWrite(id, BLOCK_TAB, rows);
+      say(`✔ 시트 '${BLOCK_TAB}' 에 ${rows.length - 1}개 업체를 적용했습니다. 업체 앱에 바로 반영됩니다.`);
+    } catch (e) { say("⚠ 적용하지 못했어요 — " + (e.message || e)); }
+  }
   function roster() {
     const rows = list.map(c => ({ name: c.name, on: c.on !== false }));
     revoked.forEach(n => { if (!rows.some(r => r.name === n)) rows.push({ name: n, on: false }); });
@@ -2648,9 +2666,7 @@ const MST = (() => {
       const i = Number(b.dataset.i);
       list[i].on = list[i].on === false;
       await save(); draw();
-      $("mst-msg").textContent = list[i].on
-        ? `${list[i].name} — 사용으로 바꿨습니다.`
-        : `${list[i].name} — 사용 중지. 다음 달 승인번호를 보내지 않으면 그때부터 못 들어옵니다.`;
+      await pushRoster();          // 누르는 즉시 시트에 반영 — 따로 [적용] 을 안 눌러도 되게
     });
     /* ★ '복사' 는 승인번호만 복사한다.
        안내 문구까지 같이 복사하면 그대로 붙여넣었을 때 로그인이 안 된다 (실제로 그랬다). */
@@ -2908,6 +2924,7 @@ const MST = (() => {
         loadReqs();
       },
     }));
+    on("mst-apply", "onclick", pushRoster);
     on("mst-roster", "onclick", () => {
       const txt = JSON.stringify(roster(), null, 2);
       download(new TextEncoder().encode(txt).buffer, "roster.json", "application/json");
@@ -2976,7 +2993,31 @@ function applyLockCompany() {
   bindAccountButtons();                     // 탭마다 [계정 변경]
   try { await MST.show(); } catch (e) {}    // 헤더 배지 (👑 마스터 / 업체명)
   syncOnStart();                            // 저장소가 확정된 뒤에 동기화
+  checkBlockedBySheet();                    // 마스터가 시트에서 중지한 업체면 잠근다
 })();
+
+/* ── 사용 중지 확인 (구글 시트) ──────────────────────────────────────
+   마스터가 마스터 화면에서 스위치를 누르면 그 결과가 구글 시트에 적힌다.
+   업체 앱은 켤 때 그 시트를 읽어, 자기 업체가 '중지' 면 로그인을 풀어버린다.
+   ※ 로그인 화면에서는 아직 구글 토큰이 없어 확인할 수 없다. 그래서 앱에 들어온
+     뒤에 확인하고, 걸리면 그 자리에서 로그인 화면으로 돌려보낸다. */
+async function checkBlockedBySheet() {
+  try {
+    const co = String(CONFIG.company || "").trim(); if (!co) return;
+    if (!GMAIL.signedIn()) return;                       // 구글 연결 전이면 확인할 방법이 없다
+    const id = (await DB.get("signupSheetId", "")) || (CONFIG && CONFIG.signupSheetId) || "";
+    if (!id) return;
+    const rows = await GMAIL.sheetRead(id, "승인명단");
+    if (!rows || rows.length < 2) return;
+    const norm = v => String(v == null ? "" : v).trim().replace(/\s+/g, "");
+    const hit = rows.slice(1).find(r => norm(r[0]) === norm(co));
+    if (hit && /중지|off|false|사용안함/i.test(String(hit[1] || ""))) {
+      alert("관리자가 이 업체의 사용을 중지했습니다.\n관리자에게 문의하세요.");
+      try { LOCK.signOut(); } catch (e) {}
+      location.reload();
+    }
+  } catch (e) {}                                          // 못 읽으면 그냥 통과 (멀쩡한 업체를 잠그지 않는다)
+}
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 // 알림: 켜져 있으면 폴링 시작, 앱으로 돌아올 때마다 즉시 한 번 확인
 if (notifyEnabled()) { startNotify(); setTimeout(() => notifyTick(false), 4000); }
