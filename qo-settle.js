@@ -481,6 +481,19 @@ const ST = (() => {
       onOk: m => put(m).catch(e => msg("msg-s", "err", "⚠ " + e.message)),
     });
   }
+  /* 한 번 고른 드라이브 파일을 기억해 둔다. 계정이 다르면 없는 것으로 본다. */
+  const stPins = async () => {
+    const v = await DB.get("settlePins", null);
+    if (!v || !v.files || !v.files.length) return null;
+    return v.acct === String(CONFIG.account || "").toLowerCase() ? v.files : null;
+  };
+  async function drawStPin() {
+    const fs = await stPins();
+    const row = $("st-pinrow"); if (!row) return;
+    row.style.display = fs ? "flex" : "none";
+    if (fs) $("st-pinname").textContent = fs.map(f => f.name).join(", ");
+  }
+
   /* 메일 선택창에서 고른 파일을 받는다 (창은 qo-app 이 띄운다).
      예전에는 조건에 맞는 메일의 첨부를 자동으로 다 끌고 와서 엉뚱한 파일이 섞였다. */
   async function takeMail(kind, got) {
@@ -2231,15 +2244,36 @@ const ST = (() => {
       catch (e) { msg("msg-pb", "err", "⚠ " + e.message); }
     };
 
-    $("st-drive").onclick = () => openDrivePicker({
+    /* 발주·송장처럼 '한 번 고른 파일' 을 기억해 두고, 다음 퀵로딩은 그 파일의 최신본을
+       바로 받아온다. 매번 드라이브를 뒤질 이유가 없다. 계정이 다르면 무시한다. */
+    async function loadStFiles(fs, remember) {
+      BUSY.progress(0, fs.length);
+      let n = 0;
+      for (const f of fs) {
+        try { const r = await GMAIL.driveFetchExcel(f.id); await addFile(r.buf, r.name || f.name); }
+        catch (e) { msg("msg-s", "err", "⚠ " + f.name + " — " + e.message); }
+        BUSY.progress(++n, fs.length);
+      }
+      if (remember) {
+        await DB.set("settlePins", { acct: String(CONFIG.account || "").toLowerCase(),
+                                     files: fs.map(f => ({ id: f.id, name: f.name })) });
+        await drawStPin();
+      }
+    }
+    const stPick = () => openDrivePicker({
       key: "settle", multiple: true, title: "드라이브에서 정산 파일 가져오기",
-      onPick: async fs => {
-        for (const f of fs) {
-          try { const r = await GMAIL.driveFetchExcel(f.id); await addFile(r.buf, r.name || f.name); }
-          catch (e) { msg("msg-s", "err", "⚠ " + f.name + " — " + e.message); }
-        }
-      },
+      onPick: fs => loadStFiles(fs, true),
     });
+    $("st-drive").onclick = async () => {
+      const fs = await stPins();
+      if (!fs) return stPick();                       // 지정된 게 없으면 고르게 한다
+      await loadStFiles(fs, false);                   // 있으면 그 파일의 최신본을 받아온다
+      msg("msg-s", "ok", `✔ 드라이브에서 최신본을 받아왔어요 — ${fs.map(f => f.name).join(", ")}`);
+    };
+    $("st-pin-change").onclick = stPick;
+    $("st-pin-clear").onclick = async () => { await DB.set("settlePins", null); await drawStPin();
+      msg("msg-s", "ok", "지정을 해제했어요. 다음 퀵로딩 때 다시 고르시면 됩니다."); };
+    drawStPin();
     $("st-mail").onclick = () => openMail("st");
     $("run-s").onclick = async () => {
       const b = $("run-s");
@@ -2271,6 +2305,7 @@ const ST = (() => {
   async function onShow() {
     if (!drawn) { await load(); drawn = true; }
     drawFiles(); drawPriceBook(); drawPay(); drawBrands(); drawMd(); refresh();
+    drawStPin();                            // 지정해 둔 드라이브 파일 표시
     if (result) drawResult();
     refreshPriceBook().catch(() => {});     // 탭에 들어올 때도 (아직 확인 전이면)
   }
@@ -2281,6 +2316,7 @@ const ST = (() => {
     files = []; payFiles = []; result = null; pbRaw = null;
     await load();
     drawFiles(); drawPriceBook(); drawPay(); drawBrands(); drawMd(); refresh();
+    drawStPin();
     const box = $("result-s"); if (box) box.style.display = "none";
   }
   return { onShow, reload, drawFilter: drawFilterLine, markSettled, calc, result: () => result, periodRange,
