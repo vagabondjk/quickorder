@@ -45,7 +45,7 @@ const CONFIG = (() => {
                          (시트 주소 .../spreadsheets/d/★여기★/edit)
                          마스터가 퀵오더 안에서 신청서를 읽어올 때 쓴다.
        비워두면 구글폼 대신 '신청 코드' 방식으로 동작한다. */
-    signupFormUrl: "",
+    signupFormUrl: "https://docs.google.com/forms/d/e/1FAIpQLScKdt1Ni67r3Ur4t1Ck8fViR1Yz1WmsvzFrhi6MwGY9Vh3QSw/viewform",
     signupSheetId: "",
 
     /* ── ② 구글 연동 ─────────────────────────────────────────────── */

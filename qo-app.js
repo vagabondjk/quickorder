@@ -2762,8 +2762,13 @@ const MST = (() => {
     box.innerHTML = '<div class="empty">신청함을 확인하는 중…</div>';
     try {
       await ensureGmail();
-      const sheet = (CONFIG && CONFIG.signupSheetId) || "";
+      /* 마스터가 화면에서 고른 응답 시트가 먼저다 — 배포를 다시 하지 않아도 바꿀 수 있다 */
+      const sheet = (await DB.get("signupSheetId", "")) || (CONFIG && CONFIG.signupSheetId) || "";
       if (sheet) { drawReqs(await reqsFromSheet(sheet)); return; }   // 구글폼 응답 시트
+      if (!sheet && (CONFIG && CONFIG.signupFormUrl)) {
+        box.innerHTML = '<div class="empty">응답 시트가 아직 연결되지 않았습니다 — 위 [응답 시트 연결] 을 눌러 고르세요.</div>';
+        return;
+      }
       // 폼을 안 쓰면 예전처럼 메일함에서 찾는다
       const items = await GMAIL.listTextMails({ days: 90, keywords: [SIGNUP_TAG], senders: [], max: 30 });
       const reqs = [];
@@ -2894,6 +2899,16 @@ const MST = (() => {
     });
     on("mst-name", "onkeydown", e => { if (e.key === "Enter") $("mst-add").onclick(); });
     on("mst-req-refresh", "onclick", loadReqs);
+    on("mst-sheet", "onclick", () => openDrivePicker({
+      key: "signup", multiple: false, title: "구글폼 응답 시트 고르기",
+      sub: "구글폼이 만든 '…(응답)' 시트를 고르세요.",
+      onPick: async fs => {
+        const f = fs && fs[0]; if (!f) return;
+        await DB.set("signupSheetId", f.id);
+        $("mst-msg").textContent = `응답 시트를 '${f.name}' 로 연결했습니다. [신청함 확인] 을 눌러보세요.`;
+        loadReqs();
+      },
+    }));
     on("mst-roster", "onclick", () => {
       const txt = JSON.stringify(roster(), null, 2);
       download(new TextEncoder().encode(txt).buffer, "roster.json", "application/json");
