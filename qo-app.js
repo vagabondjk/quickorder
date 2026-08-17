@@ -2658,7 +2658,10 @@ const MST = (() => {
       const rows = [["업체명", "사용", "수정시각"]];
       const stamp = QO.fmtDate(QO.todayStr());
       roster().companies.forEach(c => rows.push([c.name, c.on ? "사용" : "중지", stamp]));
-      await GMAIL.sheetWrite(id, "시트1", rows);
+      /* 새 시트의 첫 탭 이름은 한국어면 '시트1', 영어면 'Sheet1' 이다.
+         이름을 박아두면 다른 환경에서 엉뚱한 탭을 만든다 — 실제 첫 탭 이름을 쓴다. */
+      const tab = (await GMAIL.sheetTabs(id))[0] || "시트1";
+      await GMAIL.sheetWrite(id, tab, rows);
       const known = (CONFIG && CONFIG.rosterSheetId) === id;
       say(`✔ ${rows.length - 1}개 업체를 적용했습니다.` +
           (known ? " 업체 앱에 바로 반영됩니다."
@@ -3062,7 +3065,8 @@ async function checkBlockedBySheet() {
     if (!GMAIL.signedIn()) { S.blockCheck = "구글 연결 전 — 확인 못 함"; return; }
     const id = (CONFIG && CONFIG.rosterSheetId) || (await DB.get("rosterSheetId", "")) || "";
     if (!id) { S.blockCheck = "승인명단 시트 없음 (마스터가 [시트에 적용] 을 눌러야 만들어집니다)"; return; }
-    const rows = await GMAIL.sheetRead(id, "시트1");
+    const tab = (await GMAIL.sheetTabs(id))[0] || "시트1";
+    const rows = await GMAIL.sheetRead(id, tab);
     if (!rows || rows.length < 2) { S.blockCheck = "명단이 비어 있음"; return; }
     const norm = v => String(v == null ? "" : v).trim().replace(/\s+/g, "");
     const hit = rows.slice(1).find(r => norm(r[0]) === norm(co));
