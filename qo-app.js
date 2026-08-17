@@ -1894,16 +1894,26 @@ function showResultI(out, buf, filename) {
    설정 (업체 메일 · 저장 데이터)
    ================================================================= */
 $("btn-settings").onclick = () => { drawSettings(); drawSyncStatus(); drawNotifyStatus(); drawLogin(); $("setmodal").classList.add("on"); };
-function drawLogin() {
-  const el = $("set-company"); if (!el) return;
-  let who = ""; try { who = (LOCK.company && LOCK.company()) || ""; } catch (e) {}
-  el.textContent = who ? who + " 로 로그인됨" : "로그인 정보";
+async function drawLogin() {
+  const el = $("set-company");
+  if (el) {
+    let who = ""; try { who = (LOCK.company && LOCK.company()) || ""; } catch (e) {}
+    el.textContent = who ? who + " 로 로그인됨" : "로그인 정보";
+  }
+  /* 마스터 메뉴는 마스터로 들어왔을 때만 보인다.
+     업체 담당자에게 관리자 메뉴가 보일 이유가 없다 — 마스터는 로그인 화면으로 들어온다. */
+  const box = $("set-master-box");
+  if (box) {
+    let m = false; try { m = await LOCK.isMasterSession(); } catch (e) {}
+    box.style.display = m ? "" : "none";
+  }
 }
 $("set-close").onclick = () => $("setmodal").classList.remove("on");
 /* 로그아웃 — 잠금만 풀린 상태를 지운다. 저장된 자료(업체 양식·공급가표)는 그대로 둔다.
    로그인 화면으로 돌아갈 길이 없으면 다른 업체로 바꿔 들어갈 수도, 마스터로 다시 들어갈 수도 없다. */
+/* 확인창 없이 바로 나간다 — 자료가 지워지는 것도 아니고, 다시 들어오면 그만이다.
+   되묻는 창이 오히려 성가시다는 지적을 받았다. */
 function doLogout() {
-  if (!confirm("로그아웃할까요?\n다음에 열 때 업체명과 비밀번호를 다시 넣습니다.\n저장된 자료는 지워지지 않습니다.")) return;
   try { LOCK.signOut(); } catch (e) {}
   location.reload();
 }
