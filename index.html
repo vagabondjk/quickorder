@@ -140,7 +140,7 @@
   .mailperiod button.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
   /* 로딩 표시 — 버튼을 눌렀는데 아무것도 안 나오면 멈춘 줄 안다.
      사람이 달리고 그 아래 '로딩중'. 250ms 안에 끝나는 일에는 뜨지 않는다. */
-  .busy{position:fixed;inset:0;z-index:10000;display:none;align-items:center;justify-content:center;
+  .busy{position:fixed;inset:0;z-index:2147483647;display:none;align-items:center;justify-content:center;
     background:rgba(0,0,0,.35);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
   .busy.on{display:flex}
   .busybox{background:var(--card);border-radius:16px;padding:22px 30px;text-align:center;
@@ -690,7 +690,7 @@
   <div class="sheet">
     <div class="grip"></div>
     <h3>👑 마스터 — 승인 업체 관리</h3>
-    <p class="sub2" id="mst-sub">승인번호는 달마다 바뀝니다. 매달 새 번호를 업체에 보내주세요 — 안 보내면 그 업체는 다음 달에 못 들어옵니다.</p>
+    <p class="sub2" id="mst-sub">업체명을 넣으면 승인번호가 나옵니다. [사용 중]/[중지됨] 으로 언제든 막을 수 있습니다.</p>
     <div id="mst-auth" style="display:none">
       <input id="mst-id" type="text" placeholder="마스터 아이디" autocapitalize="off" spellcheck="false"
         style="width:100%;box-sizing:border-box;padding:12px;border:1.5px solid var(--line);border-radius:10px;

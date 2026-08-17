@@ -75,12 +75,11 @@ const LOCK = (() => {
   const MASTER_PW = "27cbec30fa8a607bceb852c4b41ef7c3c494edb033dcd2b25ef5d3339dd35f4b";
   const normId = v => String(v == null ? "" : v).trim().replace(/\s+/g, "");
   const idHash = v => sha256Hex(SALT + "|id|" + normId(v));
-  /* 업체명 + 그 달 → 승인번호 (마스터가 발급해 업체에 알려준다)
-     ★ 달마다 번호가 바뀐다. 그래서 '막는 방법 = 다음 달 번호를 안 주는 것' 이 된다.
-       서버가 없어 마스터의 중지 스위치가 업체 기기까지 전달될 수 없기 때문에,
-       유효기간으로 통제하는 방식을 택했다. (2026-08 결정) */
-  async function approvalCode(company, ym) {
-    const h = await sha256Hex(SALT + "|approve|" + normId(company) + "|" + (ym || currentYm()));
+  /* 업체명 → 승인번호 (마스터가 발급해 업체에 알려준다)
+     한때 달마다 바뀌게 했는데(만료로 통제), 이제 마스터가 승인명단 시트로 직접
+     끄고 켤 수 있어 기간 제한은 중복이다. 번호는 업체마다 하나로 고정한다. */
+  async function approvalCode(company) {
+    const h = await sha256Hex(SALT + "|approve|" + normId(company));
     return h.slice(0, 10).toUpperCase();
   }
   /* 이 달의 마지막 순간. 로그인 유지도 여기서 끊어야 번호를 다시 받게 된다. */
@@ -223,8 +222,7 @@ const LOCK = (() => {
     if (MONTHS[ym] && h === MONTHS[ym]) return "month";
     return false;
   }
-  /* 예전에는 7일 슬라이딩이었다. 승인번호가 달마다 바뀌므로 로그인 유지도 그 달까지다 —
-     안 그러면 번호가 바뀌어도 계속 들어와 있어서 유효기간이 무의미해진다. */
+  const UNLOCK_MS = 7 * 24 * 60 * 60 * 1000;   // 7일 유지 (열 때마다 연장)
   const signExp = exp => sha256Hex(deviceId() + SALT + "|exp|" + exp);
 
   async function isUnlocked() {
@@ -242,7 +240,7 @@ const LOCK = (() => {
     return false;
   }
   async function saveUnlock(tabOnly) {
-    const exp = monthEnd();
+    const exp = Date.now() + UNLOCK_MS;
     try {
       const v = JSON.stringify({ exp, token: await signExp(exp) });
       (tabOnly ? sstore() : localStorage).setItem(CONFIG.lsBase("qo_lock"), v);
@@ -290,7 +288,7 @@ const LOCK = (() => {
       "<div class=\"card\">" +
       "<div class=\"lk\">🔒</div>" +
       "<h2>퀵오더 사용 승인</h2>" +
-      "<p>업체명과 <b>이번 달</b> 승인번호를 입력하세요.<br>" + (CONFIG.adminLabel || "관리자") + "에게 전달받습니다.</p>" +
+      "<p>업체명과 승인번호를 입력하세요.<br>" + (CONFIG.adminLabel || "관리자") + "에게 전달받습니다.</p>" +
       "<input id=\"qo-lock-id\" type=\"text\" autocomplete=\"username\" autocapitalize=\"off\" " +
         "autocorrect=\"off\" placeholder=\"업체명\" style=\"letter-spacing:0;margin-bottom:8px\">" +
       "<input id=\"qo-lock-pw\" type=\"password\" inputmode=\"text\" autocomplete=\"current-password\" " +
@@ -335,12 +333,17 @@ const LOCK = (() => {
         setTimeout(() => { try { (approved ? input : idIn).focus(); } catch (e) {} }, 100);
 
         let busy = false;
-        const BAD = "업체명 또는 승인번호가 틀렸습니다.\n승인번호는 달마다 바뀝니다 — 이번 달 번호인지 확인해 주세요.";
+        const BAD = "업체명 또는 승인번호가 틀렸습니다.";
+        /* 로그인도 시간이 걸릴 수 있다(승인명단 조회 등). 잠깐 넘어가면 로딩창을 띄운다.
+           BUSY 는 250ms 넘게 걸릴 때만 뜨므로 빠를 땐 깜빡이지 않는다. */
+        const busyOn = t => { try { if (typeof BUSY !== "undefined") BUSY.start(t); } catch (e) {} };
+        const busyOff = () => { try { if (typeof BUSY !== "undefined") BUSY.end(); } catch (e) {} };
         async function go() {
           if (busy) return; busy = true; btn.disabled = true; msg.textContent = "";
+          busyOn("로그인 확인하는 중");
           const id = idIn.value, pw = input.value;
           /* 빨간 글씨만으로는 못 보고 지나친다 — 팝업으로도 알린다 */
-          const fail = () => { msg.style.color = "#e5484d"; msg.textContent = BAD;
+          const fail = () => { busyOff(); msg.style.color = "#e5484d"; msg.textContent = BAD;
             input.value = ""; busy = false; btn.disabled = false;
             try { alert(BAD); } catch (e) {}
             try { input.focus(); } catch (e) {} };
@@ -350,7 +353,7 @@ const LOCK = (() => {
           if (await isMaster(id, pw)) {
             /* 관리자 권한이라 흔적을 기기에 남기지 않는다 — 창을 새로 열면 다시 확인받는다 */
             await saveMaster(); await saveApproval(id, true); await saveUnlock(true);
-            root.remove(); return resolve(true);
+            busyOff(); root.remove(); return resolve(true);
           }
           clearMaster();
 
@@ -364,18 +367,19 @@ const LOCK = (() => {
           const typed = normId(pw).toUpperCase(), want = await approvalCode(id);
           if (typed === want || typed.indexOf(want) >= 0) {
             if (await blockedBySheet(id)) {
+              busyOff();
               msg.style.color = "#e5484d"; msg.textContent = BLOCK_MSG;
               try { alert(BLOCK_MSG); } catch (e) {}
               input.value = ""; busy = false; btn.disabled = false; return;
             }
             await saveApproval(id); await saveUnlock();
-            root.remove(); return resolve(true);
+            busyOff(); root.remove(); return resolve(true);
           }
           /* ③ 예비 경로 — 예전 월별 비밀번호도 그대로 받는다.
              이미 승인된 업체가 승인번호를 아직 못 받았을 때 갑자기 막히지 않게. */
           const okName = await savedApproval();
           if (normId(okName) === normId(id) && await verify(pw)) {
-            await saveUnlock(); root.remove(); return resolve(true);
+            busyOff(); await saveUnlock(); root.remove(); return resolve(true);
           }
           fail();
         }
