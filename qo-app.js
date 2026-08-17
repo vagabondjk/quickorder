@@ -522,6 +522,7 @@ $("drv-done").onclick = async () => {
 /* opts: { key, title, sub, multiple, onPick(files) } — files: [{id,name,mimeType}]
    key: 용도별 기본 폴더 저장용 (order/tpl/sab/rep) → 다음부터 그 폴더가 바로 열림 */
 async function openDrivePicker(opts) {
+  await ensureAccountMatches();               // 남의 드라이브가 열리지 않게 먼저 확인
   DRV.multiple = !!opts.multiple; DRV.onPick = opts.onPick; DRV.sel = new Map();
   DRV.key = opts.key || "";
   $("drv-title").textContent = opts.title || "구글 드라이브에서 가져오기";
@@ -3067,6 +3068,7 @@ function applyLockCompany() {
   try { await loadForms(); }
   catch (e) { $("vlist").innerHTML = '<div class="empty">저장소를 열지 못했어요</div>'; }
   await initGmail();                        // 구글이 준비된 뒤에 차단 확인을 해야 한다
+  await ensureAccountMatches();             // ★ 토큰이 정말 이 계정 것인지 먼저 확인
   checkBlockedBySheet();
   drawReplyFilter();
   drawOrderFilter();
@@ -3087,6 +3089,30 @@ function applyLockCompany() {
    업체 앱은 켤 때 그 시트를 읽어, 자기 업체가 '중지' 면 로그인을 풀어버린다.
    ※ 로그인 화면에서는 아직 구글 토큰이 없어 확인할 수 없다. 그래서 앱에 들어온
      뒤에 확인하고, 걸리면 그 자리에서 로그인 화면으로 돌려보낸다. */
+/* ★★ 저장된 토큰이 '지금 이 저장소의 계정' 것인지 확인한다.
+   화면에는 새 계정이 보이는데 실제 호출은 옛 계정 토큰으로 나가면,
+   다른 회사의 드라이브가 그대로 열린다. 실제로 그런 일이 있었다(2026-08-17).
+   토큰의 주인을 구글에 직접 물어보고, 다르면 그 자리에서 떼어낸다. */
+async function ensureAccountMatches() {
+  try {
+    if (!GMAIL.signedIn()) return;
+    let real = "";
+    try { real = ((await GMAIL.profile()).emailAddress || "").toLowerCase(); } catch (e) { return; }
+    if (!real) return;
+    const want = String(CONFIG.account || "").toLowerCase();
+    if (!want) { await useAccountStore(real, { quiet: true }); return; }   // 아직 안 정해졌으면 이 계정으로
+    if (real === want) return;
+    GMAIL.forget();                          // 남의 계정 토큰 — 절대 그대로 쓰면 안 된다
+    /* 그 토큰으로 기억해 둔 드라이브 폴더·지정 파일도 남의 것이다. 같이 지운다. */
+    try {
+      await DB.set("driveFolders", {});
+      await DB.set("drivePins", {});
+    } catch (e) {}
+    updateGmailWho();
+    msg("msg-o", "warn",
+      `연결된 구글 계정이 ${real} 이라 끊었습니다. 이 저장소는 ${want} 용입니다 — [계정변경] 으로 다시 연결해 주세요.`);
+  } catch (e) {}
+}
 async function checkBlockedBySheet() {
   try {
     const co = String(CONFIG.company || "").trim();

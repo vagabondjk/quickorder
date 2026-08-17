@@ -169,6 +169,10 @@ const GMAIL = (() => {
        앞 계정 칸에 남는다 — 다음에 열 때 남의 드라이브가 보이는 원인이었다. */
   function persistToken() { if (accessToken) saveToken(); }
   function dropStored() { clearToken(); }   // 메모리는 그대로, 저장된 것만 지운다
+  /* 이 기기에서 이 계정을 잊는다 (구글 서버의 승인은 건드리지 않는다).
+     signOut 은 revoke 까지 해서 그 계정 전체를 끊어버린다 — 잘못 물린 토큰을
+     떼어낼 때는 이쪽을 쓴다. */
+  function forget() { accessToken = null; tokenExp = 0; clearToken(); }
 
   async function api(path, opts) {
     const t = await token();
@@ -604,7 +608,7 @@ const GMAIL = (() => {
     return (await r.json()).id;
   }
 
-  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, switchAccount, persistToken, dropStored, reloadToken, projectNo, driveExportCsv, sheetRead, sheetWrite, sheetTabs, sheetEnsureTab, sheetCreate, driveShareAnyone, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
+  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, switchAccount, persistToken, dropStored, forget, reloadToken, projectNo, driveExportCsv, sheetRead, sheetWrite, sheetTabs, sheetEnsureTab, sheetCreate, driveShareAnyone, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
            searchAddresses, driveFind, driveDownload, driveUpload, granted,
            driveIdFromLink, driveFileInfo, driveSearch, driveFetchExcel, driveListFolder, driveListShared, driveAncestors, driveUpdateFile, needLogin };
 })();
