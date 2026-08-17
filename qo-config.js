@@ -46,7 +46,7 @@ const CONFIG = (() => {
                          마스터가 퀵오더 안에서 신청서를 읽어올 때 쓴다.
        비워두면 구글폼 대신 '신청 코드' 방식으로 동작한다. */
     signupFormUrl: "https://docs.google.com/forms/d/e/1FAIpQLScKdt1Ni67r3Ur4t1Ck8fViR1Yz1WmsvzFrhi6MwGY9Vh3QSw/viewform",
-    signupSheetId: "",
+    signupSheetId: "17vmzsm0w5T2w2T9DhX3XKREB7-raVgXulJKXIC30ie8",
 
     /* ── ② 구글 연동 ─────────────────────────────────────────────── */
     // 이 회사 구글 클라우드 프로젝트의 OAuth 클라이언트 ID (웹 애플리케이션).

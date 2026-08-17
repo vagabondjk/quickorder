@@ -2820,6 +2820,12 @@ const MST = (() => {
     $("mst-auth").style.display = "none"; $("mst-body").style.display = "";
     $("mst-sub").textContent = "승인번호는 달마다 바뀝니다. 매달 새 번호를 업체에 보내주세요 — 안 보내면 그 업체는 다음 달에 못 들어옵니다.";
     await load(); $("mst-msg").textContent = ""; await draw();
+    /* 신청서는 알아서 불러온다. 다만 구글 로그인이 안 돼 있으면 팝업을 띄워야 하는데,
+       사용자가 누르지 않은 팝업은 브라우저가 막는다 — 그때는 버튼을 누르도록 안내만 한다. */
+    try {
+      if (GMAIL.signedIn()) loadReqs();
+      else $("mst-reqs").innerHTML = '<div class="empty">[신청함 확인] 을 누르면 구글폼 신청서를 불러옵니다</div>';
+    } catch (e) {}
   }
   function authMode() {
     $("mst-auth").style.display = ""; $("mst-body").style.display = "none";
