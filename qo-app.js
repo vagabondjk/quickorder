@@ -577,18 +577,30 @@ async function setOrder(files) {
 /* srcs: [{name, buf}] — 업로드·드라이브·메일 모두 여기로 모인다 */
 async function setOrderFiles(srcs, icon) {
   if (!srcs || !srcs.length) return;
-  S.orderSrcs = srcs.map(s => s.name);
-  /* ★ 파일이 하나여도 합치기를 거친다 (2026-08-18).
-     합치기가 '표준 항목으로 맞추는' 자리이기 때문이다 — 날짜를 주문일시 하나로 모으고,
-     업체를 정하고, 쇼핑몰명·법인을 붙인다. 한 개라고 건너뛰면 그 파일만
-     날짜 기준이 달라져 건수가 안 맞는다. */
-  const parts = [];
-  for (const s of srcs) parts.push({
-    wb: await QO.loadWorkbook(s.buf.slice(0)),
-    name: mallFromFilename(s.name),
-    corp: corpFromFilename(s.name),
-  });
+  /* ★ '더하기' 다. 갈아치우지 않는다 (2026-08-18).
+     쇼핑몰별로 파일이 따로 오니 삼성 것을 올리고 현대샵 것을 올리는 식으로 쌓게 된다.
+     예전에는 나중에 올린 것이 앞의 것을 통째로 밀어냈다.
+     같은 파일을 다시 올리면 그것만 새것으로 바꾼다 (고쳐서 다시 올리는 경우).
+     전부 지우려면 '해제' 를 누르면 된다.
+
+     ※ 파일이 하나여도 합치기를 거친다. 합치기가 '표준 항목으로 맞추는' 자리여서 —
+       날짜를 주문일시 하나로 모으고, 업체를 정하고, 쇼핑몰명·법인을 붙인다. */
+  const parts = (S.orderParts || []).slice();
+  const before = parts.length;
+  let replaced = 0;
+  for (const s of srcs) {
+    const rec = {
+      wb: await QO.loadWorkbook(s.buf.slice(0)),
+      name: mallFromFilename(s.name),
+      corp: corpFromFilename(s.name),
+      file: s.name,
+    };
+    const i = parts.findIndex(p => p.name === rec.name);
+    if (i >= 0) { parts[i] = rec; replaced++; } else parts.push(rec);
+  }
   S.orderParts = parts;                       // 연결표를 고친 뒤 다시 합칠 때 쓴다
+  S.orderSrcs = parts.map(p => p.file || p.name);
+  S.orderAdded = { added: parts.length - before, replaced, total: parts.length, first: before === 0 };
   await rebuildMerged();
 }
 
@@ -646,7 +658,13 @@ async function rebuildMerged() {
         + filled.map(([k, v]) => `<b>${esc(k)} ${v}건</b>`).join(" · ")
       : "";
   }
-  const head = n > 1 ? `✔ 쇼핑몰 ${m.malls.length || n}곳의 주문 ${m.rows}건을 합쳤어요` : `✔ 주문 ${m.rows}건을 읽었어요`;
+  /* 방금 무엇이 늘었는지 먼저 말한다 — '더하기' 인 걸 알 수 있게 */
+  const a = S.orderAdded;
+  const addTxt = a && !a.first
+    ? `✔ ${a.added ? `${a.added}개 추가` : ""}${a.added && a.replaced ? " · " : ""}${a.replaced ? `${a.replaced}개 갱신` : ""} → 모두 ${a.total}개 파일 · `
+    : "✔ ";
+  const head = n > 1 ? `${addTxt}쇼핑몰 ${m.malls.length || n}곳의 주문 ${m.rows}건을 합쳤어요`
+                     : `✔ 주문 ${m.rows}건을 읽었어요`;
   if (m.unknownRows) {
     msg("msg-o", "warn", `${head}. 다만 ${m.unknownRows}건은 어느 업체 상품인지 알 수 없습니다 — 아래에서 지정해 주세요.`);
   } else {
@@ -1829,7 +1847,7 @@ function updateClearRows() {
 }
 async function clearOrderFile() {
   S.orderWb = null; S.orderBuf = null; S.orderName = ""; S.orderSrcs = null;
-  S.orderParts = null; S.merged = null;
+  S.orderParts = null; S.merged = null; S.orderAdded = null;
   drawUnknownBrands();
   S.brands = []; S.dateSel = [];
   $("order-name").textContent = "";
