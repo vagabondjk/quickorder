@@ -1401,11 +1401,31 @@ function addDupFixer(box, groups) {
   }));
   box.appendChild(w);
 }
+/* 양식 목록 접기 — 업체가 늘면 이 카드만으로 화면이 꽉 찬다.
+   접어둔 상태는 기억한다 (업체별로 따로). */
+const VFOLD = () => CONFIG.ls("qo_fold_forms");
+const foldedForms = () => { try { return localStorage.getItem(VFOLD()) === "1"; } catch (e) { return false; } };
+function applyFormFold() {
+  const box = $("vlist"), btn = $("vfold"), cnt = $("vcount");
+  if (!box || !btn) return;
+  const has = S.forms.length > 0;
+  const off = foldedForms();
+  btn.style.display = has ? "" : "none";
+  btn.textContent = off ? `펴기 (${S.forms.length})` : "접기";
+  box.classList.toggle("folded", off && has);
+  // 제목 줄이 좁은 화면에서 두 줄로 접히지 않게 짧게 (14/14)
+  if (cnt) cnt.textContent = has ? `${S.forms.filter(f => f.checked).length}/${S.forms.length}` : "";
+}
+if ($("vfold")) $("vfold").onclick = () => {
+  try { localStorage.setItem(VFOLD(), foldedForms() ? "0" : "1"); } catch (e) {}
+  applyFormFold();
+};
+
 function drawForms() {
   const box = $("vlist");
   /* 아무것도 없으면 아무 말도 안 한다 — 바로 아래 업로드 영역이 할 일을 이미 말하고 있고,
      '없습니다' 한 줄이 자리만 차지하며 어중간하게 줄바꿈됐다. */
-  if (!S.forms.length) { box.innerHTML = ""; return; }   // :empty 규칙이 여백까지 없애준다
+  if (!S.forms.length) { box.innerHTML = ""; applyFormFold(); return; }   // :empty 규칙이 여백까지 없애준다
   box.innerHTML = "";
   const dups = dupNameGroups(S.forms, f => f.name);
   addDupWarning(box, dups, f => f.name,
@@ -1414,14 +1434,12 @@ function drawForms() {
   S.forms.forEach(f => {
     const el = document.createElement("div");
     el.className = "vrow" + (f.checked ? " on" : "");
+    /* 미리보기 버튼은 뺐다 (2026-08-18) — 양식은 한 번 보면 그만인데 카드마다
+       자리를 먹었다. 내용을 봐야 하면 '엑셀 받기' 로 받아서 열면 된다. */
     el.innerHTML = `<div class="vtop"><span class="box">${CHK}</span><b>${esc(f.name)}</b><button class="vdel">✕</button></div>
-      <span class="vfile">${esc(f.file)}</span>
-      <div class="vbtns"><button class="pv">미리보기</button><button class="rn">이름수정</button><button class="dl">엑셀 받기</button></div>`;
+      <span class="vfile" title="${esc(f.file)}">${esc(f.file)}</span>
+      <div class="vbtns"><button class="rn">이름수정</button><button class="dl">엑셀 받기</button></div>`;
     el.onclick = async ev => {
-      if (ev.target.classList.contains("pv")) {
-        ev.stopPropagation();
-        openPreview(f.data, f.name + " 양식"); return;
-      }
       if (ev.target.classList.contains("rn")) {
         ev.stopPropagation();
         await renameForm(f); return;
@@ -1438,10 +1456,12 @@ function drawForms() {
       f.checked = !f.checked;
       el.classList.toggle("on", f.checked);
       await DB.putForm(f);
+      applyFormFold();                 // 제목 옆 '선택 개수' 도 같이 갱신
       buildVendorBrands(); refreshO();
     };
     box.appendChild(el);
   });
+  applyFormFold();
 }
 
 /* --- 업체별 브랜드 --- */
