@@ -539,6 +539,8 @@ bindDrop("drop-order", f => setOrder(f));
 function mallFromFilename(name) {
   return String(name || "").replace(/\.[^.]+$/, "").replace(/^\d{6,8}[_\-\s]*/, "").trim() || name;
 }
+/* 합친 표의 주문일 열 이름. 날짜는 언제나 이 이름 하나로 모인다. */
+const FIELD_ORDER_DATE = "주문일시";
 /* 파일명에서 법인을 읽는다 — '쇼핑몰)법인-날짜.xlsx' 규칙.
    법인을 여러 개 운영하면 한 폴더에 두 법인 발주서가 섞여 들어온다.
    이 규칙에 안 맞는 이름이면 빈 값 — 그러면 법인 칸은 아예 안 생긴다. */
@@ -556,8 +558,7 @@ const orderAliases = () => DB.get("orderAliases", {});
    상품명 안에 그 이름이 들어 있으면 대조로 찾아낸다 */
 const knownBrandList = () => (S.forms || []).map(f => f.name).filter(Boolean);
 
-/* 쇼핑몰 발주서 세팅. 여러 개면 표준 항목으로 맞춰 한 장으로 합친다.
-   한 개면 합치지 않고 원본 그대로 쓴다 — 손대지 않은 파일이 제일 안전하다. */
+/* 쇼핑몰 발주서 세팅. 몇 개든 표준 항목으로 맞춰 한 장으로 합친다. */
 async function setOrder(files) {
   const list = [...files].filter(isXls);
   if (!list.length) return;
@@ -576,9 +577,11 @@ async function setOrder(files) {
 /* srcs: [{name, buf}] — 업로드·드라이브·메일 모두 여기로 모인다 */
 async function setOrderFiles(srcs, icon) {
   if (!srcs || !srcs.length) return;
-  S.orderSrcs = srcs.length > 1 ? srcs.map(s => s.name) : null;
-  if (srcs.length === 1) return setOrderFromBuf(srcs[0].buf, srcs[0].name, icon);
-
+  S.orderSrcs = srcs.map(s => s.name);
+  /* ★ 파일이 하나여도 합치기를 거친다 (2026-08-18).
+     합치기가 '표준 항목으로 맞추는' 자리이기 때문이다 — 날짜를 주문일시 하나로 모으고,
+     업체를 정하고, 쇼핑몰명·법인을 붙인다. 한 개라고 건너뛰면 그 파일만
+     날짜 기준이 달라져 건수가 안 맞는다. */
   const parts = [];
   for (const s of srcs) parts.push({
     wb: await QO.loadWorkbook(s.buf.slice(0)),
@@ -603,19 +606,20 @@ async function rebuildMerged() {
   S.merged = m;
   const buf = await QO.saveWorkbook(m.wb);
   const n = parts.length;
-  await setOrderFromBuf(buf, `${n}개 파일 합침 · ${m.rows}건`, "🧩");
+  const title = n > 1 ? `${n}개 파일 합침 · ${m.rows}건` : `${m.rows}건`;
+  await setOrderFromBuf(buf, title, n > 1 ? "🧩" : "📄");
   const names = (S.orderSrcs || parts.map(p => p.name)).join(" · ");
-  $("order-name").innerHTML = `🧩 <b>${n}개 파일 합침 · ${m.rows}건</b>`
+  $("order-name").innerHTML = `${n > 1 ? "🧩" : "📄"} <b>${esc(title)}</b>`
     + (m.corps.length ? `<span style="display:block;font-weight:700;color:var(--brand);font-size:11.5px;margin-top:2px">${esc(m.corps.join(" · "))}</span>` : "")
     + `<span style="display:block;font-weight:600;color:var(--muted);font-size:11.5px;margin-top:2px">${esc(names)}</span>`;
   drawUnknownBrands();
   /* 주문일 열이 없는 몰이 있으면 물어본다 — 그냥 두면 그 몰 주문이 통째로 빠진다 */
   if (m.dateless && m.dateless.length) askDateColumns(m.dateless);
+  const head = n > 1 ? `✔ 쇼핑몰 ${m.malls.length || n}곳의 주문 ${m.rows}건을 합쳤어요` : `✔ 주문 ${m.rows}건을 읽었어요`;
   if (m.unknownRows) {
-    msg("msg-o", "warn", `✔ 쇼핑몰 ${m.malls.length || n}곳의 주문 ${m.rows}건을 합쳤어요. `
-      + `다만 ${m.unknownRows}건은 어느 업체 상품인지 알 수 없습니다 — 아래에서 지정해 주세요.`);
+    msg("msg-o", "warn", `${head}. 다만 ${m.unknownRows}건은 어느 업체 상품인지 알 수 없습니다 — 아래에서 지정해 주세요.`);
   } else {
-    msg("msg-o", "ok", `✔ 쇼핑몰 ${m.malls.length || n}곳의 주문 ${m.rows}건을 합쳤어요 · 업체 ${m.brands.length}곳 — 아래에서 날짜 고르고 변환하세요`);
+    msg("msg-o", "ok", `${head} · 업체 ${m.brands.length}곳 — 아래에서 날짜 고르고 변환하세요`);
   }
 }
 
@@ -658,9 +662,11 @@ $("dcol-ok").onclick = async function () {
   });
   await DB.set("orderDateCols", all);
   $("dcolmodal").classList.remove("on");
-  if (!n) return;
-  await rebuildMerged();                     // 정한 대로 다시 합친다
-  await loadDates(); await drawPreview(); buildVendorBrands(); refreshO();
+  if (!n || !S.orderParts || !S.orderParts.length) return;
+  try {
+    await rebuildMerged();                   // 정한 대로 다시 합친다
+    await loadDates(); await drawPreview(); buildVendorBrands(); refreshO();
+  } catch (e) { msg("msg-o", "err", "다시 합치지 못했어요: " + e.message); }
 };
 
 /* 업체를 못 정한 상품을 띄우고, 한 번 고르면 연결표에 기억한다.
@@ -690,8 +696,10 @@ function drawUnknownBrands() {
       const all = await orderAliases();
       all[u.key] = v;
       await DB.set("orderAliases", all);
-      await rebuildMerged();                 // 즉시 다시 합쳐서 결과에 반영
-      await loadDates(); await drawPreview(); buildVendorBrands(); refreshO();
+      try {
+        await rebuildMerged();               // 즉시 다시 합쳐서 결과에 반영
+        await loadDates(); await drawPreview(); buildVendorBrands(); refreshO();
+      } catch (e) { msg("msg-o", "err", "다시 합치지 못했어요: " + e.message); }
     };
     row.appendChild(sel);
     box.appendChild(row);
@@ -1025,18 +1033,16 @@ $("drive-rep").onclick = () => openDrivePicker({
 });
 
 /* --- 날짜 --- */
-$("dt-col").onchange = function () { loadDates(this.value).then(drawPreview); };
+/* ★ '기준: 주문일시' 고르는 칸은 없앴다 (2026-08-18).
+   합칠 때 모든 쇼핑몰의 날짜를 '주문일시' 하나로 맞추기 때문이다 —
+   주문일 열이 없는 몰은 무엇을 쓸지 물어보고 그 답을 기억한다.
+   그러고도 기준을 또 고르게 하면, 몰마다 다른 날짜로 세어 건수가 안 맞는다. */
 async function loadDates(header) {
   $("date-wrap").style.display = "block";
   $("dt-info").textContent = "· 읽는 중…";
   const wb = await QO.loadWorkbook(S.orderBuf.slice(0));
-  const di = QO.orderDateInfo(wb, header);
+  const di = QO.orderDateInfo(wb, header || FIELD_ORDER_DATE);
   S.dateHeader = di.header;
-  const sel = $("dt-col");
-  if (di.candidates.length) {
-    sel.style.display = "";
-    sel.innerHTML = di.candidates.map(c => `<option value="${esc(c)}"${c === di.header ? " selected" : ""}>기준: ${esc(c)}</option>`).join("");
-  } else sel.style.display = "none";
 
   const list = Object.entries(di.counts).sort((a, b) => b[0].localeCompare(a[0]))
     .map(([d, n]) => ({ date: d, label: QO.fmtDate(d), count: n }));
