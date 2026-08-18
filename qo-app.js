@@ -1480,7 +1480,7 @@ const formByName = n => S.forms.find(f => f.name === n) || null;
 async function saveForm(f) { await DB.putForm(f); await loadForms(); }
 
 /* ---------------- ④ 값 변경해서 양식에 넣기 ---------------- */
-const nmCount = f => (f && f.nameMap ? Object.keys(f.nameMap).length : 0);
+const nmCount = f => { const m = f && QO.normNameMap(f.nameMap); return m ? Object.keys(m.exact).length + m.keys.length : 0; };
 
 function drawNameMapCard() {
   const card = $("card4"); if (!card) return;
@@ -1507,7 +1507,7 @@ function drawNameMapCard() {
     </div>
     <label class="drop" id="drop-nm" style="padding:14px">
       매핑표 엑셀 선택 또는 끌어오기
-      <span class="drophint">변경전(쇼핑몰 상품명) · 변경후(업체 요청 상품명) 두 열</span>
+      <span class="drophint">변경전 · 변경후 두 열 (변경전을 비우면 키워드 매핑)</span>
       <input type="file" id="f-nm" accept=".xlsx,.xlsm,.xls">
     </label>
     <div class="setrow" style="margin-top:6px"><span style="flex:1"></span>
@@ -1526,8 +1526,9 @@ function drawNameMapCard() {
   };
   if ($("nm-list")) $("nm-list").onclick = () => {
     const l = f.nameMapList || [];
-    alert(`${f.name} — 상품명 바꾸기 (${l.length}개)\n\n`
-      + l.slice(0, 40).map(x => `${x.from}\n   → ${x.to}`).join("\n\n")
+    alert(`${f.name} — 상품명 바꾸기 (${l.length}개)\n`
+      + `[키워드] 은 상품명에 그 말이 들어 있으면 바꿉니다.\n\n`
+      + l.slice(0, 40).map(x => `${x.kind === "키워드" ? "[키워드] " : ""}${x.from}\n   → ${x.to}`).join("\n\n")
       + (l.length > 40 ? `\n\n… 외 ${l.length - 40}개` : ""));
   };
 }
@@ -1536,6 +1537,9 @@ async function nameMapTemplate() {
   const ws = wb.addWorksheet("상품명매핑");
   ws.addRow(["변경전(쇼핑몰 상품명)", "변경후(업체 요청 상품명)"]);
   ws.addRow(["[헤트라스] 프리미엄 부드러운 이중미세모 칫솔 21개입", "프리미엄 칫솔 21P"]);
+  /* 변경전을 비우면 '키워드' 다 — 상품명에 그 말이 들어 있으면 통째로 바꾼다 */
+  ws.addRow(["", "오브제 2구 앙쥬"]);
+  ws.addRow(["키워드 매핑으로 자동 변환", "오브제 2구 아리아"]);
   ws.getColumn(1).width = 46; ws.getColumn(2).width = 34;
   ws.getRow(1).font = { bold: true };
   download(await QO.saveWorkbook(wb), "상품명매핑_양식.xlsx");
@@ -1543,11 +1547,14 @@ async function nameMapTemplate() {
 async function takeNameMap(f, file) {
   try {
     const wb = await QO.loadWorkbook(await readFile(file));
-    const r = QO.readNameMap(wb);
+    const r = QO.readNameMap(wb, { vendor: f.name });
     f.nameMap = r.map; f.nameMapList = r.list; f.nameMapFile = file.name;
     await saveForm(f);
     drawNameMapCard();
-    msg("msg-o", "ok", `✔ ${f.name} — 상품명 ${r.list.length}개를 바꿔서 보냅니다.`);
+    const kw = (r.map.keys || []).length, ex = Object.keys(r.map.exact || {}).length;
+    msg("msg-o", "ok", `✔ ${f.name} — 규칙 ${r.list.length}개를 읽었습니다`
+      + (kw ? ` (이름에 들어 있으면 바꾸기 ${kw}개` + (ex ? `, 정확히 같으면 ${ex}개)` : ")") : "")
+      + (r.sheets && r.sheets.length ? ` · 시트: ${r.sheets.join(", ")}` : ""));
     if (r.dup.length) alert(`같은 상품명이 두 번 나와 마지막 것만 씁니다 (${r.dup.length}개):\n` + r.dup.slice(0, 8).join("\n"));
   } catch (e) { alert("매핑표를 읽지 못했어요: " + e.message); }
 }
@@ -1697,7 +1704,7 @@ function drawForms() {
        자리를 먹었다. 내용을 봐야 하면 '엑셀 받기' 로 받아서 열면 된다. */
     /* 이 업체에만 걸린 설정이 있으면 이름 옆에 표시한다 — 열어보지 않아도 알게 */
     const tags = [];
-    if (f.nameMap && Object.keys(f.nameMap).length) tags.push(`🏷${Object.keys(f.nameMap).length}`);
+    if (nmCount(f)) tags.push(`🏷${nmCount(f)}`);
     if (exAny(f)) tags.push("💰");
     el.innerHTML = `<div class="vtop"><span class="box">${CHK}</span><b>${esc(f.name)}</b>`
       + (tags.length ? `<span class="vtag" title="상품명 바꾸기 / 공급가 넣기">${esc(tags.join(" "))}</span>` : "")

@@ -1438,14 +1438,22 @@ function priceBookFromRaw(raw) {
 /* ---------------- 업체가 원하는 상품명으로 바꾸기 ----------------
    업체에 따라 '우리 쇼핑몰 상품명' 이 아니라 '자기네 상품명' 으로 받길 원한다.
    변경전 / 변경후 두 열짜리 엑셀을 업체별로 올려두면 그 업체 발주서에만 적용한다. */
-const NAMEMAP_FROM = ["변경전", "변경 전", "쇼핑몰상품명", "기존상품명", "원래상품명", "before"];
-const NAMEMAP_TO = ["변경후", "변경 후", "브랜드요청상품명", "요청상품명", "바꿀상품명", "after"];
+const NAMEMAP_FROM = ["변경전", "변경 전", "쇼핑몰상품명", "기존상품명", "원래상품명",
+  "로우데이터", "원본", "before"];
+const NAMEMAP_TO = ["변경후", "변경 후", "브랜드요청상품명", "요청상품명", "바꿀상품명",
+  "발주서", "약어", "변환후", "after"];
 const nameMapKey = v => String(v === null || v === undefined ? "" : v)
   .replace(/\s+/g, "").replace(/[()（）[\]]/g, "").toLowerCase();
 
-function readNameMap(wb) {
-  const ws = wb.worksheets && wb.worksheets[0];
-  if (!ws) throw new Error("시트를 찾지 못했어요.");
+/* '변경전' 자리에 값 대신 안내문이 적힌 경우 — 그 줄은 '키워드 매핑' 이다.
+   실제 파일이 그랬다: 변경전 칸에 전부 "키워드 매핑으로 자동 변환" 이라고 적혀 있고
+   변경후 칸에만 '오브제 2구 앙쥬' 같은 약어가 줄줄이 있다. */
+const NOTE_WORDS = /매핑|자동|변환|그대로|해당없음|해당 없음|처리|참고|비고/;
+const isNoteText = v => { const s = String(v || "").trim(); return !s || s === "-" || NOTE_WORDS.test(s); };
+/* 시트 이름이 '공급가'·'요약' 이면 상품명 매핑표가 아니다 */
+const SKIP_SHEET = /공급가|요약|summary|price|단가/i;
+
+function readNameMapSheet(ws) {
   const d = dims(ws);
   let hr = 0, cFrom = 0, cTo = 0;
   for (let r = 1; r <= Math.min(d.rows, 10) && !hr; r++) {
@@ -1453,34 +1461,91 @@ function readNameMap(wb) {
     for (let c = 1; c <= d.cols; c++) {
       const h = normHeader(getV(ws, r, c)).toLowerCase();
       if (!h) continue;
-      if (!a && NAMEMAP_FROM.some(k => h.includes(normHeader(k).toLowerCase()))) a = c;
-      else if (!b && NAMEMAP_TO.some(k => h.includes(normHeader(k).toLowerCase()))) b = c;
+      if (!b && NAMEMAP_TO.some(k => h.includes(normHeader(k).toLowerCase()))) b = c;
+      else if (!a && NAMEMAP_FROM.some(k => h.includes(normHeader(k).toLowerCase()))) a = c;
     }
-    if (a && b) { hr = r; cFrom = a; cTo = b; }
+    if (b) { hr = r; cTo = b; cFrom = a; }
   }
-  /* 헤더가 없으면 '두 열짜리 표' 로 본다 — 사람들이 헤더 없이 만들어 오는 일이 흔하다 */
+  /* 헤더를 못 찾으면 '두 열짜리 표' 로 본다 — 헤더 없이 만들어 오는 일이 흔하다 */
   if (!hr) {
-    if (d.cols < 2) throw new Error("'변경전' · '변경후' 두 열이 필요합니다.");
+    if (d.cols < 2) return { exact: {}, keys: [], list: [], dup: [] };
     hr = 0; cFrom = 1; cTo = 2;
   }
-  const map = {}, list = [], dup = [];
+  if (!cTo) return { exact: {}, keys: [], list: [], dup: [] };
+  /* ★ '변경전' 열을 못 찾았으면 옆 칸을 아무거나 끌어다 쓰지 않는다.
+     마이옵티멀 시트는 옆이 '상품코드' 라, 그걸 변경전으로 보면 숫자를 상품명으로
+     바꾸는 엉뚱한 규칙이 된다. 이럴 땐 전부 키워드로 본다. */
+  const keywordOnly = !cFrom;
+
+  const exact = {}, keys = [], list = [], dup = [];
   for (let r = hr + 1; r <= d.rows; r++) {
-    const from = getV(ws, r, cFrom), to = getV(ws, r, cTo);
-    if (isBlank(from) || isBlank(to)) continue;
-    const k = nameMapKey(from);
-    if (!k) continue;
-    if (map[k] !== undefined && map[k] !== String(to).trim()) dup.push(String(from).trim());
-    map[k] = String(to).trim();
-    list.push({ from: String(from).trim(), to: String(to).trim() });
+    const from = keywordOnly ? "" : getV(ws, r, cFrom), to = getV(ws, r, cTo);
+    if (isBlank(to)) continue;
+    const toS = String(to).trim();
+    if (keywordOnly || isNoteText(from)) {
+      /* 키워드 매핑 — 상품명 안에 이 말이 들어 있으면 통째로 이 이름으로 바꾼다 */
+      const k = nameMapKey(toS);
+      if (!k) continue;
+      keys.push({ k, to: toS });
+      list.push({ from: "(포함하면)" + toS, to: toS, kind: "키워드" });
+    } else {
+      const k = nameMapKey(from);
+      if (!k) continue;
+      if (exact[k] !== undefined && exact[k] !== toS) dup.push(String(from).trim());
+      exact[k] = toS;
+      list.push({ from: String(from).trim(), to: toS, kind: "정확히" });
+    }
   }
-  if (!list.length) throw new Error("바꿀 상품명을 한 줄도 찾지 못했습니다. '변경전' · '변경후' 열을 확인해 주세요.");
-  return { map, list, dup };
+  return { exact, keys, list, dup };
 }
-/* 상품명 하나를 바꾼다. 못 찾으면 원래 이름 그대로 (조용히 비우지 않는다) */
+
+/* opts.vendor 를 주면 그 이름과 같은 시트를 먼저 쓴다 —
+   실제 파일이 브랜드마다 시트가 따로였다 (플로랑 / 마이옵티멀 / …). */
+function readNameMap(wb, opts) {
+  opts = opts || {};
+  const sheets = (wb.worksheets || []).filter(ws => !SKIP_SHEET.test(ws.name || ""));
+  if (!sheets.length) throw new Error("상품명 매핑으로 쓸 시트를 찾지 못했어요.");
+  const want = nameMapKey(opts.vendor || "");
+  const hit = want ? sheets.find(ws => nameMapKey(ws.name) === want) : null;
+  const use = hit ? [hit] : sheets;
+
+  const exact = {}, keys = [], list = [], dup = [];
+  const used = [];
+  use.forEach(ws => {
+    const r = readNameMapSheet(ws);
+    if (!r.list.length) return;
+    used.push(ws.name);
+    Object.assign(exact, r.exact);
+    keys.push(...r.keys);
+    list.push(...r.list);
+    dup.push(...r.dup);
+  });
+  if (!list.length) {
+    throw new Error("바꿀 상품명을 한 줄도 찾지 못했습니다. '변경전' · '변경후' 열을 확인해 주세요.");
+  }
+  /* 긴 키워드를 먼저 본다 — '오브제 2구 앙쥬' 가 '오브제 2구' 보다 우선이어야
+     더 정확한 이름으로 바뀐다. */
+  keys.sort((a, b) => b.k.length - a.k.length);
+  return { map: { exact, keys }, list, dup, sheets: used };
+}
+
+/* 옛 형태(평평한 객체)도 그대로 읽는다 — 이미 올려둔 매핑표가 있다 */
+function normNameMap(m) {
+  if (!m) return null;
+  if (m.exact || m.keys) return { exact: m.exact || {}, keys: m.keys || [] };
+  return { exact: m, keys: [] };
+}
+/* 상품명 하나를 바꾼다.
+   ① 정확히 같은 이름  ② 이름 안에 들어 있는 키워드(긴 것 우선)
+   둘 다 아니면 원래 이름 그대로 — 조용히 비우지 않는다. */
 function applyNameMap(map, name) {
-  if (!map) return name;
+  const m = normNameMap(map);
+  if (!m) return name;
   const k = nameMapKey(name);
-  return (k && map[k] !== undefined) ? map[k] : name;
+  if (!k) return name;
+  if (m.exact[k] !== undefined) return m.exact[k];
+  for (const it of m.keys) if (it.k && k.includes(it.k)) return it.to;
+  return name;
 }
 
 /* 주문 한 줄에 맞는 공급단가 찾기
@@ -1924,7 +1989,7 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   valueTransformForHeader, nameFromFilename, normKey,
   mergeOrders, mallKey, dateLikeColumns, brandFromName, brandFromKnown, resolveBrand, aliasKey, convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, carrierKey, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, isOldXlsBuffer, todayStr, fmtDate,
   normPriceText, toPriceNumber, priceKeyParts, priceRowKey, buildPriceBook, matchPrice,
-  priceRowsFromRaw, priceBookFromRaw, readNameMap, applyNameMap, nameMapKey,
+  priceRowsFromRaw, priceBookFromRaw, readNameMap, applyNameMap, nameMapKey, normNameMap,
   rankPriceCandidates, settle, settleCheck,
   settleSheetHead, settleSheetRow, isPriceHeader, isInternalHeader, vendorSheetColumns, carryNote };
 });
