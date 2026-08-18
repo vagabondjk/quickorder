@@ -603,6 +603,16 @@ function convert(orderWb, tplWb, opts) {
   }
 
   const sd = dims(sws);
+  /* 어느 쇼핑몰에서 몇 건인지 세어 둔다 — 결과 화면에 그대로 보여준다.
+     합친 표에만 있는 열이라, 없으면 조용히 건너뛴다. */
+  let mallCol = null;
+  for (let c = 1; c <= sd.cols; c++) {
+    if (normHeader(getV(sws, srcHeaderRow, c)) === "쇼핑몰명") { mallCol = c; break; }
+  }
+  const byMall = {};
+  /* 날짜로 거를 때, 날짜 자체가 비어 있는 주문은 어느 날에도 안 걸린다.
+     그냥 빠지면 그 주문은 어느 발주서에도 안 실린다 — 세어서 알려준다. */
+  let noDate = 0;
   let outRow = tgtHeaderRow + 1, count = 0;
   for (let r = srcHeaderRow + 1; r <= sd.rows; r++) {
     if (brandCol !== null) {
@@ -611,6 +621,7 @@ function convert(orderWb, tplWb, opts) {
     }
     if (dateCol !== null) {
       const dv = extractDate(getV(sws, r, dateCol));
+      if (!dv) { noDate++; continue; }
       if (!dateSet.has(dv)) continue;
     }
     const vals = pairs.map(([scol, tcols]) => [tcols, getV(sws, r, scol)]);
@@ -642,10 +653,14 @@ function convert(orderWb, tplWb, opts) {
         }
       }
     }
+    if (mallCol) {
+      const mv = String(getV(sws, r, mallCol) || "").trim();
+      if (mv) byMall[mv] = (byMall[mv] || 0) + 1;
+    }
     outRow++; count++;
   }
   log(`총 ${count}건 기입`);
-  return { count, sheet: tws.name };
+  return { count, sheet: tws.name, byMall, noDate };
 }
 
 /* 선택한 날짜 기준 '변환되어야 할' 주문 건수 (브랜드별) — 변환 결과 검증용 */

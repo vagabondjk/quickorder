@@ -1504,7 +1504,7 @@ $("run-o").onclick = async function () {
   msg("msg-o", "", "");
   try {
     const picked = S.forms.filter(f => f.checked);
-    const results = [], skipped = [];
+    const results = [], skipped = [], empty = [];
     for (const f of picked) {
       const sel = S.sel[f.name] || [];
       if (S.brands.length && !sel.length) { skipped.push(f.name + "(브랜드 미선택)"); continue; }
@@ -1514,8 +1514,13 @@ $("run-o").onclick = async function () {
       const r = QO.convert(orderWb, tplWb, {
         brands: brandFilter, dates: S.dateSel.length ? S.dateSel : null, dateHeader: S.dateHeader,
       });
+      /* ★ 고른 날짜에 주문이 없으면 발주서를 만들지 않는다 (2026-08-18).
+         예전에는 0건짜리 빈 발주서가 결과에 그대로 나와서, 업체에 보낼 것이
+         있는지 없는지 결과만 봐서는 알 수 없었다. */
+      if (!r.count) { empty.push(f.name); continue; }
       const out = await QO.saveWorkbook(tplWb);
       results.push({ supplier: f.name, count: r.count, buf: out,
+        byMall: r.byMall || {}, noDate: r.noDate || 0,
         // 파일명 고정 형식: 오늘날짜_보내는곳_업체명_발주양식.xlsx
         // ※ 사용자가 별도로 요청하지 않는 한 이 형식을 바꾸지 말 것
         // 가운데 '보내는곳' 은 법인이 여럿이면 그 업체 주문이 속한 법인(더벨로샵/커민사이드),
@@ -1524,7 +1529,11 @@ $("run-o").onclick = async function () {
       // 학습 저장
       if (S.brands.length && sel.length) sel.forEach(b => { S.brandVendor[b] = f.name; });
     }
-    if (!results.length) throw new Error("변환된 업체가 없습니다. " + (skipped.length ? `(${skipped.join(", ")})` : ""));
+    if (!results.length) {
+      throw new Error(empty.length
+        ? `고른 날짜에 주문이 있는 업체가 없습니다.\n0건: ${empty.join(", ")}\n\n위 '발주 날짜 선택'에서 날짜를 다시 골라보세요.`
+        : "변환된 업체가 없습니다. " + (skipped.length ? `(${skipped.join(", ")})` : ""));
+    }
     await DB.set("brandVendor", S.brandVendor);
 
     // --- 건수 검증: 원본 주문 수 == 업체별 변환 합계 (미배정 주문이 조용히 빠지는 것 방지) ---
@@ -1545,10 +1554,14 @@ $("run-o").onclick = async function () {
     unassigned.sort((x, y) => y.count - x.count);
     const verify = { srcTotal: src.total, converted, expected, diff: expected - converted, unassigned, hasBrands };
 
+    verify.empty = empty;
+    /* 날짜 자체가 비어 있어 어느 날에도 안 걸린 주문 — 조용히 빠지면 안 된다 */
+    verify.noDate = results.reduce((a, r) => Math.max(a, r.noDate || 0), 0);
     showResultO(results, skipped, verify);
     msg("msg-o", verify.diff === 0 ? "ok" : "warn",
       (verify.diff === 0 ? "✔ 변환 완료! 건수 일치 " : "⚠ 변환 완료 (건수 불일치 확인) ")
-      + `주문 ${src.total}건 → ` + results.map(r => `${r.supplier}=${r.count}건`).join("; "));
+      + `주문 ${src.total}건 → ` + results.map(r => `${r.supplier}=${r.count}건`).join("; ")
+      + (empty.length ? ` · 고른 날짜에 주문이 없어 뺀 업체: ${empty.join(", ")}` : ""));
   } catch (e) { msg("msg-o", "err", "변환 실패: " + e.message); }
   finally { busy("run-o", "run-o-lbl", false, "발주서 변환하기"); refreshO(); }
 };
@@ -1580,13 +1593,35 @@ function showResultO(results, skipped, verify) {
       d.textContent = `⚠ 발주서 합계(${verify.converted}건)가 주문 수(${verify.srcTotal}건)보다 많습니다. 같은 브랜드가 여러 업체에 중복 배정됐는지 확인하세요.\n${detail}`;
     }
     box.appendChild(d);
+
+    /* 고른 날짜에 주문이 없어 발주서를 안 만든 업체 — 결과에 없는 이유를 밝힌다 */
+    if (verify.empty && verify.empty.length) {
+      const e = document.createElement("div");
+      e.className = "msg show";
+      e.innerHTML = `고른 날짜에 주문이 없어 발주서를 만들지 않았습니다 (${verify.empty.length}곳)<br>`
+        + `<span style="color:var(--muted)">${esc(verify.empty.join(", "))}</span>`;
+      box.appendChild(e);
+    }
+    /* 날짜가 비어 있어 어느 날에도 안 걸린 주문 — 날짜로 거를 때만 생긴다 */
+    if (verify.noDate) {
+      const n = document.createElement("div");
+      n.className = "msg show warn";
+      n.textContent = `⚠ 주문일이 비어 있는 주문 ${verify.noDate}건은 날짜로 고를 수 없어 빠졌습니다. `
+        + `날짜를 '전체'로 두고 다시 변환하면 포함됩니다.`;
+      box.appendChild(n);
+    }
   }
 
   results.forEach(r => {
     const el = document.createElement("div");
     el.className = "rrow";
+    // 어느 쇼핑몰에서 몇 건인지 — 합친 주문일 때만 나온다
+    const mallList = Object.entries(r.byMall || {}).sort((a, b) => b[1] - a[1]);
+    const mallHtml = mallList.length
+      ? `<div class="mallrow">${mallList.map(([m, n]) => `<span>${esc(m)} <b>${n}</b></span>`).join("")}</div>` : "";
     el.innerHTML = `<div class="rtop"><div class="vinfo"><b>${esc(cleanVendor(r.supplier))}</b><span>${esc(r.filename)}</span></div>
       <span class="cnt">${r.count}건</span></div>
+      ${mallHtml}
       <div class="cands"></div>
       <div class="rmail"><input type="text" placeholder="${esc(r.supplier)} 이메일 (여러 개는 쉼표로)"
         value="${esc(S.vendorEmails[r.supplier] || "")}" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">

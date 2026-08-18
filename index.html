@@ -281,6 +281,11 @@
   .msg.err{background:var(--danger-soft);color:color-mix(in srgb,var(--danger) 78%,var(--ink))}
   .msg.warn{background:var(--warn-soft);color:color-mix(in srgb,var(--warn) 80%,var(--ink))}
   /* 업체를 못 정한 주문 — 눈에 띄어야 한다. 이대로 두면 그 주문은 어느 발주서에도 안 실린다 */
+  /* 발주서 한 건이 어느 쇼핑몰에서 몇 건 왔는지 */
+  .mallrow{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0 2px}
+  .mallrow span{font-size:11px;font-weight:700;color:var(--muted);background:var(--card2);
+    border:1px solid var(--line);border-radius:7px;padding:3px 7px;white-space:nowrap}
+  .mallrow span b{color:var(--brand);margin-left:2px}
   .warnbox{background:var(--warn-soft);border:1px solid var(--warn);border-radius:10px;
     padding:10px 12px;margin-bottom:8px}
   .warnbox b{display:block;font-size:13px;color:color-mix(in srgb,var(--warn) 80%,var(--ink))}
