@@ -592,6 +592,26 @@ async function setOrderFiles(srcs, icon) {
   await rebuildMerged();
 }
 
+/* 합친 파일 이름 목록 접기 — 몰이 14곳이면 이름만으로 화면 반쪽을 먹는다.
+   ★ 접어도 '몇 개 파일 · 몇 건' 은 남긴다. 그게 없으면 안 올라간 줄 안다. */
+const OFOLD = () => CONFIG.ls("qo_fold_ordernames");
+const foldedOrder = () => { try { return localStorage.getItem(OFOLD()) === "1"; } catch (e) { return false; } };
+function applyOrderFold() {
+  const btn = $("order-fold"), el = $("order-name");
+  if (!btn || !el) return;
+  const names = el.querySelector(".ordnames");
+  const many = !!names && (S.orderSrcs || []).length > 1;
+  btn.style.display = many ? "" : "none";
+  if (!names) return;
+  const off = many && foldedOrder();
+  names.style.display = off ? "none" : "";
+  btn.textContent = off ? `파일목록 보기 (${(S.orderSrcs || []).length})` : "파일목록 접기";
+}
+if ($("order-fold")) $("order-fold").onclick = () => {
+  try { localStorage.setItem(OFOLD(), foldedOrder() ? "0" : "1"); } catch (e) {}
+  applyOrderFold();
+};
+
 /* '이 몰은 이 열을 주문일로 쓴다' — 한 번 고르면 기억한다 (다음 달 파일에도 적용) */
 const orderDateCols = () => DB.get("orderDateCols", {});
 
@@ -611,7 +631,8 @@ async function rebuildMerged() {
   const names = (S.orderSrcs || parts.map(p => p.name)).join(" · ");
   $("order-name").innerHTML = `${n > 1 ? "🧩" : "📄"} <b>${esc(title)}</b>`
     + (m.corps.length ? `<span style="display:block;font-weight:700;color:var(--brand);font-size:11.5px;margin-top:2px">${esc(m.corps.join(" · "))}</span>` : "")
-    + `<span style="display:block;font-weight:600;color:var(--muted);font-size:11.5px;margin-top:2px">${esc(names)}</span>`;
+    + `<span class="ordnames" style="display:block;font-weight:600;color:var(--muted);font-size:11.5px;margin-top:2px">${esc(names)}</span>`;
+  applyOrderFold();                       // 파일이 여러 개면 목록을 접을 수 있게
   drawUnknownBrands();
   /* 주문일 열이 없는 몰이 있으면 물어본다 — 그냥 두면 그 몰 주문이 통째로 빠진다 */
   if (m.dateless && m.dateless.length) askDateColumns(m.dateless);
@@ -1769,6 +1790,7 @@ function updCnt(wrap, f) {
 function updateClearRows() {
   const a = $("order-clear-row"); if (a) a.style.display = S.orderBuf ? "flex" : "none";
   const b = $("sab-clear-row"); if (b) b.style.display = S.sabBuf ? "flex" : "none";
+  applyOrderFold();
 }
 async function clearOrderFile() {
   S.orderWb = null; S.orderBuf = null; S.orderName = ""; S.orderSrcs = null;
