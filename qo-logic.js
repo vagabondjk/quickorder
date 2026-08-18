@@ -369,7 +369,78 @@ function normKey(v) {
    · 브랜드 열과 쇼핑몰명은 따로 챙긴다. 브랜드는 업체 선택에, 쇼핑몰명은
      어느 파일에서 왔는지 남기는 데 쓴다.
    · 표준 항목으로 잡히지 않은 열은 버린다. 파일마다 제각각이라 합칠 수 없다. */
-function mergeOrders(sources) {
+/* ---------------- 업체(브랜드) 판정 ----------------
+   쇼핑몰 14곳 중 브랜드 열이 있는 곳은 4곳뿐이다. 나머지는 상품명에서 알아내야 한다.
+   상품명 앞에 [헤트라스] 처럼 업체가 붙어 있는 경우가 많지만, 그대로 믿으면 안 된다 —
+   [베네특가]·[품절대란] 같은 행사 문구가 같은 자리에 온다. 그래서 '업체가 아닌 말'을
+   먼저 걸러내고, 그래도 모르면 억지로 고르지 않고 미판정으로 남긴다.
+   (현대샵 70건처럼 상품명에 업체 표시가 아예 없는 것들이 있다 — 사람만 안다) */
+const NOT_BRAND = ["특가", "할인", "쿠폰", "단독", "한정", "품절", "대란", "인기", "베스트", "best",
+  "행사", "이벤트", "무료배송", "당일발송", "신상", "리뉴얼", "세트", "증정", "사은품",
+  "1+1", "2+1", "택1", "모음", "기획"];
+/* 업체 이름이 아닌 대괄호인가.
+   ★ 숫자가 들어간 대괄호는 규격이지 업체가 아니다 — [500mlx3개], [77mlx2개], [1013ml].
+     이걸 안 막았더니 '500mlx3개' 라는 업체가 생겼다 (2026-08-18 실제로 나왔다).
+     지금까지 본 업체 이름(헤트라스·내추럴이믹스·프로퍼마켓…)에는 숫자가 없다. */
+const isPromoWord = b => {
+  const s = String(b || "").trim(), low = s.toLowerCase();
+  return !s || /\d/.test(s) || NOT_BRAND.some(w => low.includes(w));
+};
+/* 상품명 안의 대괄호를 앞에서부터 훑어 '행사 문구가 아닌' 첫 번째를 업체로 본다.
+   [베네특가][헤트라스] … 처럼 행사 문구가 앞에 오거나
+   디퓨져 BEST★[헤트라스]디퓨저… 처럼 중간에 오는 경우가 실제로 많다. */
+function brandFromName(name) {
+  const s = String(name == null ? "" : name);
+  const all = s.match(/\[([^\]]{1,20})\]/g) || [];
+  for (const raw of all) {
+    const b = raw.slice(1, -1).trim();
+    if (!isPromoWord(b)) return b;
+  }
+  return "";
+}
+/* 이름 안에 '아는 업체' 가 글자 그대로 들어 있는지 본다.
+   [베네특가] 헤트라스 프리미엄… 처럼 대괄호 밖에 업체명이 있는 경우를 잡는다.
+   ※ 아는 이름과 정확히 겹칠 때만 쓴다. 짐작이 아니라 대조다.
+     두 글자 미만은 우연히 겹치기 쉬워 제외한다. */
+function brandFromKnown(name, known) {
+  if (!known || !known.length) return "";
+  const s = String(name == null ? "" : name).replace(/\s+/g, "").toLowerCase();
+  if (!s) return "";
+  let best = "";
+  for (const k of known) {
+    const t = String(k || "").replace(/\s+/g, "").toLowerCase();
+    if (t.length < 2 || !s.includes(t)) continue;
+    if (t.length > best.replace(/\s+/g, "").length) best = k;   // 긴 이름이 더 확실하다
+  }
+  return best;
+}
+/* 한 줄의 업체를 정한다. 확실한 것부터 —
+   ① 파일의 브랜드 열  ② 상품명 앞 [업체]  ③ 연결표(사람이 한 번 지정한 것)
+   ※ 셋 다 아니면 "" 를 돌려준다. 찍지 않는다 — 잘못 찍으면 남의 업체로 주문이 나간다. */
+function resolveBrand(rec, aliases) {
+  const direct = String(rec.__brand == null ? "" : rec.__brand).trim();
+  if (direct) return direct;
+  const fromName = brandFromName(rec.PRODUCT);
+  if (fromName) return fromName;
+  if (aliases) {
+    const key = aliasKey(rec.PRODUCT);
+    if (key && aliases[key]) return aliases[key];
+  }
+  return "";
+}
+/* 연결표 열쇠 — 상품명을 느슨하게 다듬는다. 몰마다 앞뒤 문구가 조금씩 달라서
+   완전 일치로 잡으면 몰이 하나 늘 때마다 다시 지정해야 한다. */
+function aliasKey(name) {
+  return String(name == null ? "" : name)
+    .replace(/^\s*(?:★[^★]*★\s*)+/, "")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/[\s()（）,./·]+/g, "")
+    .toLowerCase().slice(0, 40);
+}
+
+function mergeOrders(sources, opts) {
+  opts = opts || {};
+  const aliases = opts.aliases || null;
   const rows = [], fields = new Set();
   let brandSeen = false;
   (sources || []).forEach(src => {
@@ -379,10 +450,9 @@ function mergeOrders(sources) {
     const hr = findHeaderRow(ws);
     const map = buildOrderFieldMap(ws, hr, "source");
     const brandCol = findBrandColumn(ws, hr);
-    if (brandCol) brandSeen = true;
     const maxRow = dims(ws).rows;
     for (let r = hr + 1; r <= maxRow; r++) {
-      const rec = { __mall: mall };
+      const rec = { __mall: mall, __corp: src.corp || "" };
       let any = false;
       Object.keys(map).forEach(canon => {
         const v = cv(ws.getRow(r).getCell(map[canon]));
@@ -390,23 +460,38 @@ function mergeOrders(sources) {
       });
       if (brandCol) {
         const b = cv(ws.getRow(r).getCell(brandCol));
-        if (!isBlank(b)) { rec.__brand = b; any = true; }
+        if (!isBlank(b)) rec.__brand = b;
       }
-      if (any) rows.push(rec);
+      if (!any) continue;
+      /* 브랜드 열이 없는 몰이라도 상품명·연결표로 업체를 정할 수 있다.
+         그래서 '브랜드 열이 있었는가' 가 아니라 '실제로 정해졌는가' 로 판단한다 —
+         예전엔 브랜드 열 있는 파일이 하나도 없으면 브랜드 칸 자체가 안 생겼다. */
+      rec.__brand = resolveBrand(rec, aliases);
+      rows.push(rec);
     }
   });
+  /* 2차 — 이번에 확실히 알아낸 업체 이름들(+ 저장된 업체 양식 이름)을 사전 삼아
+     아직 못 정한 줄의 상품명을 훑는다. 한 몰에서 브랜드 열로 알아낸 이름이
+     다른 몰의 상품명 안에 글자 그대로 들어 있는 경우가 많다. */
+  const known = [...new Set(rows.map(r => r.__brand).filter(Boolean).concat(opts.knownBrands || []))];
+  rows.forEach(r => { if (!r.__brand) r.__brand = brandFromKnown(r.PRODUCT, known); });
+  const brandSeen2 = rows.some(r => r.__brand);
+  brandSeen = brandSeen || brandSeen2;
   /* 열 순서는 표준 항목 정의 순서를 따른다 — 사람이 열어봤을 때 늘 같은 자리에 있게 */
   const cols = ORDER_FIELDS.map(f => f[0]).filter(c => fields.has(c));
+  const corpSeen = rows.some(r => r.__corp);
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("합친주문");
   const head = cols.map(c => FIELD_KR[c] || c);
   if (brandSeen) head.push(BRAND_HEADER);
   head.push("쇼핑몰명");
+  if (corpSeen) head.push("법인");
   ws.addRow(head);
   rows.forEach(rec => {
     const line = cols.map(c => (rec[c] === undefined ? null : rec[c]));
-    if (brandSeen) line.push(rec.__brand === undefined ? null : rec.__brand);
+    if (brandSeen) line.push(rec.__brand || null);
     line.push(rec.__mall);
+    if (corpSeen) line.push(rec.__corp || null);
     const row = ws.addRow(line);
     /* 날짜는 셀 단위로 서식을 준다. 열 전체에 주면 수량·금액까지 날짜로 보인다
        (예전에 실제로 그런 사고가 있었다 — 상위 CLAUDE.md 참고) */
@@ -417,7 +502,25 @@ function mergeOrders(sources) {
       }
     });
   });
-  return { wb, rows: rows.length, fields: cols, malls: [...new Set(rows.map(r => r.__mall).filter(Boolean))] };
+  /* 업체를 못 정한 줄을 상품명별로 묶어 돌려준다 — 화면에서 한 번 지정하면
+     연결표에 저장되고, 다음부터는 자동으로 붙는다. 조용히 빠뜨리지 않는다. */
+  const unknown = new Map();
+  rows.forEach(r => {
+    if (r.__brand) return;
+    const k = aliasKey(r.PRODUCT);
+    if (!k) return;
+    const cur = unknown.get(k);
+    if (cur) { cur.count++; if (!cur.malls.includes(r.__mall)) cur.malls.push(r.__mall); }
+    else unknown.set(k, { key: k, name: String(r.PRODUCT == null ? "" : r.PRODUCT), count: 1, malls: [r.__mall].filter(Boolean) });
+  });
+  return {
+    wb, rows: rows.length, fields: cols,
+    malls: [...new Set(rows.map(r => r.__mall).filter(Boolean))],
+    corps: [...new Set(rows.map(r => r.__corp).filter(Boolean))],
+    brands: [...new Set(rows.map(r => r.__brand).filter(Boolean))],
+    unknown: [...unknown.values()].sort((a, b) => b.count - a.count),
+    unknownRows: rows.filter(r => !r.__brand).length,
+  };
 }
 
 function convert(orderWb, tplWb, opts) {
@@ -1397,7 +1500,7 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   toDateValue, isDateHeader, hasDateFormat, hasTimeFormat,
   findDateColumns, defaultDateColumn, orderDateInfo, formatPhone, stripHyphen,
   valueTransformForHeader, nameFromFilename, normKey,
-  mergeOrders, convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, carrierKey, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, todayStr, fmtDate,
+  mergeOrders, brandFromName, brandFromKnown, resolveBrand, aliasKey, convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, carrierKey, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, todayStr, fmtDate,
   normPriceText, toPriceNumber, priceKeyParts, priceRowKey, buildPriceBook, matchPrice,
   rankPriceCandidates, settle, settleCheck,
   settleSheetHead, settleSheetRow, isPriceHeader, isInternalHeader, vendorSheetColumns, carryNote };

@@ -142,6 +142,7 @@ const DB = (() => {
 /* ---------------- 공통 상태 ---------------- */
 const S = {
   orderWb: null, orderBuf: null, orderName: "", orderSrcs: null,
+  orderParts: null, merged: null,          // 합치기 원본과 결과 (연결표 고치면 다시 합친다)
   brands: [], dateAll: [], dateSel: [], dateHeader: null,
   pv: null, pvAll: false,
   forms: [], brandVendor: {}, vendorEmails: {}, vendorSent: {}, vendorDomains: {}, sel: {},
@@ -514,6 +515,22 @@ bindDrop("drop-order", f => setOrder(f));
 function mallFromFilename(name) {
   return String(name || "").replace(/\.[^.]+$/, "").replace(/^\d{6,8}[_\-\s]*/, "").trim() || name;
 }
+/* 파일명에서 법인을 읽는다 — '쇼핑몰)법인-날짜.xlsx' 규칙.
+   법인을 여러 개 운영하면 한 폴더에 두 법인 발주서가 섞여 들어온다.
+   이 규칙에 안 맞는 이름이면 빈 값 — 그러면 법인 칸은 아예 안 생긴다. */
+const CORP_ALIAS = { "벨로": "더벨로샵", "커민": "커민사이드" };
+function corpFromFilename(name) {
+  const m = String(name || "").replace(/\.[^.]+$/, "").match(/\)\s*([^)\-_]+?)\s*[-_]/);
+  if (!m) return "";
+  const c = m[1].trim();
+  return CORP_ALIAS[c] || c;
+}
+/* 상품명 → 업체 연결표. 못 찾은 상품을 화면에서 한 번 지정하면 여기 남는다.
+   (정산 탭의 priceAliases 와 같은 방식) */
+const orderAliases = () => DB.get("orderAliases", {});
+/* 이미 저장해 둔 업체 양식 이름도 '아는 업체' 로 쳐준다 —
+   상품명 안에 그 이름이 들어 있으면 대조로 찾아낸다 */
+const knownBrandList = () => (S.forms || []).map(f => f.name).filter(Boolean);
 
 /* 쇼핑몰 발주서 세팅. 여러 개면 표준 항목으로 맞춰 한 장으로 합친다.
    한 개면 합치지 않고 원본 그대로 쓴다 — 손대지 않은 파일이 제일 안전하다. */
@@ -539,14 +556,71 @@ async function setOrderFiles(srcs, icon) {
   if (srcs.length === 1) return setOrderFromBuf(srcs[0].buf, srcs[0].name, icon);
 
   const parts = [];
-  for (const s of srcs) parts.push({ wb: await QO.loadWorkbook(s.buf.slice(0)), name: mallFromFilename(s.name) });
-  const m = QO.mergeOrders(parts);
+  for (const s of srcs) parts.push({
+    wb: await QO.loadWorkbook(s.buf.slice(0)),
+    name: mallFromFilename(s.name),
+    corp: corpFromFilename(s.name),
+  });
+  S.orderParts = parts;                       // 연결표를 고친 뒤 다시 합칠 때 쓴다
+  await rebuildMerged();
+}
+
+/* 합치기 — 연결표가 바뀌면 여기만 다시 부르면 된다 */
+async function rebuildMerged() {
+  const parts = S.orderParts;
+  if (!parts || !parts.length) return;
+  const m = QO.mergeOrders(parts, { aliases: await orderAliases(), knownBrands: knownBrandList() });
   if (!m.rows) throw new Error("고른 파일에서 주문 줄을 찾지 못했습니다.");
+  S.merged = m;
   const buf = await QO.saveWorkbook(m.wb);
-  await setOrderFromBuf(buf, `${srcs.length}개 파일 합침 · ${m.rows}건`, "🧩");
-  $("order-name").innerHTML = `🧩 <b>${srcs.length}개 파일 합침 · ${m.rows}건</b>`
-    + `<span style="display:block;font-weight:600;color:var(--muted);font-size:11.5px;margin-top:2px">${esc(srcs.map(s => s.name).join(" · "))}</span>`;
-  msg("msg-o", "ok", `✔ 쇼핑몰 ${m.malls.length || srcs.length}곳의 주문 ${m.rows}건을 한 장으로 합쳤어요 — 아래에서 날짜 고르고 변환하세요`);
+  const n = parts.length;
+  await setOrderFromBuf(buf, `${n}개 파일 합침 · ${m.rows}건`, "🧩");
+  const names = (S.orderSrcs || parts.map(p => p.name)).join(" · ");
+  $("order-name").innerHTML = `🧩 <b>${n}개 파일 합침 · ${m.rows}건</b>`
+    + (m.corps.length ? `<span style="display:block;font-weight:700;color:var(--brand);font-size:11.5px;margin-top:2px">${esc(m.corps.join(" · "))}</span>` : "")
+    + `<span style="display:block;font-weight:600;color:var(--muted);font-size:11.5px;margin-top:2px">${esc(names)}</span>`;
+  drawUnknownBrands();
+  if (m.unknownRows) {
+    msg("msg-o", "warn", `✔ 쇼핑몰 ${m.malls.length || n}곳의 주문 ${m.rows}건을 합쳤어요. `
+      + `다만 ${m.unknownRows}건은 어느 업체 상품인지 알 수 없습니다 — 아래에서 지정해 주세요.`);
+  } else {
+    msg("msg-o", "ok", `✔ 쇼핑몰 ${m.malls.length || n}곳의 주문 ${m.rows}건을 합쳤어요 · 업체 ${m.brands.length}곳 — 아래에서 날짜 고르고 변환하세요`);
+  }
+}
+
+/* 업체를 못 정한 상품을 띄우고, 한 번 고르면 연결표에 기억한다.
+   ★ 조용히 빠뜨리지 않는다 — 업체가 안 정해진 주문은 어느 발주서에도 안 실린다. */
+function drawUnknownBrands() {
+  const box = $("brand-unknown");
+  if (!box) return;
+  const m = S.merged;
+  const list = (m && m.unknown) || [];
+  if (!list.length) { box.innerHTML = ""; box.style.display = "none"; return; }
+  box.style.display = "";
+  const opts = [...new Set(knownBrandList().concat((m && m.brands) || []))].sort((a, b) => a.localeCompare(b, "ko"));
+  box.innerHTML = `<div class="warnbox"><b>⚠ 업체를 알 수 없는 주문 ${m.unknownRows}건 (${list.length}종)</b>
+    <span>상품명에 업체 표시가 없습니다. 한 번만 골라주시면 다음부터는 자동으로 붙습니다.</span></div>`;
+  list.forEach(u => {
+    const row = document.createElement("div");
+    row.className = "unkrow";
+    row.innerHTML = `<span class="unkname" title="${esc(u.name)}">${esc(u.name)}</span>
+      <span class="unkcnt">${u.count}건 · ${esc(u.malls.join(", "))}</span>`;
+    const sel = document.createElement("select");
+    sel.className = "minibtn";
+    sel.innerHTML = `<option value="">업체 선택…</option>`
+      + opts.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join("");
+    sel.onchange = async () => {
+      const v = sel.value;
+      if (!v) return;
+      const all = await orderAliases();
+      all[u.key] = v;
+      await DB.set("orderAliases", all);
+      await rebuildMerged();                 // 즉시 다시 합쳐서 결과에 반영
+      await loadDates(); await drawPreview(); buildVendorBrands(); refreshO();
+    };
+    row.appendChild(sel);
+    box.appendChild(row);
+  });
 }
 
 /* =================================================================
@@ -1340,6 +1414,8 @@ function updateClearRows() {
 }
 async function clearOrderFile() {
   S.orderWb = null; S.orderBuf = null; S.orderName = ""; S.orderSrcs = null;
+  S.orderParts = null; S.merged = null;
+  drawUnknownBrands();
   S.brands = []; S.dateSel = [];
   $("order-name").textContent = "";
   $("drop-order").classList.remove("on");
@@ -1373,6 +1449,28 @@ function refreshO() {
 }
 
 /* --- 변환 실행 --- */
+/* 파일명 가운데에 들어갈 '보내는 곳'.
+   법인을 여러 개 운영하면 한 폴더에 두 법인 발주서가 섞여 들어온다. 그 업체 주문이
+   어느 법인 것인지 합친 표에서 찾아 쓴다 — 업체가 받아 보는 이름이라 틀리면 안 된다.
+   두 법인에 걸쳐 있으면(있어선 안 되지만) 회사 기본 이름으로 되돌린다. */
+function senderTag(brands) {
+  const m = S.merged;
+  if (!m || !m.corps || m.corps.length < 2) return (m && m.corps && m.corps[0]) || CONFIG.orderTag;
+  const want = new Set((brands || []).map(String));
+  const hit = new Set();
+  const ws = m.wb.worksheets[0];
+  const head = ws.getRow(1).values.slice(1).map(String);
+  const iB = head.indexOf("브랜드") + 1, iC = head.indexOf("법인") + 1;
+  if (!iB || !iC) return CONFIG.orderTag;
+  for (let r = 2; r <= ws.rowCount; r++) {
+    const b = String(QO.cv(ws.getRow(r).getCell(iB)) || "");
+    if (!b || (want.size && !want.has(b))) continue;
+    const c = String(QO.cv(ws.getRow(r).getCell(iC)) || "");
+    if (c) hit.add(c);
+  }
+  return hit.size === 1 ? [...hit][0] : CONFIG.orderTag;
+}
+
 $("run-o").onclick = async function () {
   busy("run-o", "run-o-lbl", true, "변환 중…");
   msg("msg-o", "", "");
@@ -1390,11 +1488,11 @@ $("run-o").onclick = async function () {
       });
       const out = await QO.saveWorkbook(tplWb);
       results.push({ supplier: f.name, count: r.count, buf: out,
-        // 파일명 고정: 오늘날짜_랩노마드_업체명_발주서.xlsx
+        // 파일명 고정 형식: 오늘날짜_보내는곳_업체명_발주양식.xlsx
         // ※ 사용자가 별도로 요청하지 않는 한 이 형식을 바꾸지 말 것
-        // 파일명 고정 형식: 오늘날짜_랩노마드_업체명_발주양식.xlsx
-        // 가운데 이름은 CONFIG.orderTag (랩노마드는 "랩노마드" 고정). 비면 그 자리를 뺀다.
-        filename: `${QO.todayStr()}_${CONFIG.orderTag ? CONFIG.orderTag + "_" : ""}${cleanVendor(f.name)}_발주양식.xlsx` });
+        // 가운데 '보내는곳' 은 법인이 여럿이면 그 업체 주문이 속한 법인(더벨로샵/커민사이드),
+        // 아니면 CONFIG.orderTag. 업체가 받아 보는 이름이라 정확해야 한다.
+        filename: `${QO.todayStr()}_${senderTag(sel) ? senderTag(sel) + "_" : ""}${cleanVendor(f.name)}_발주양식.xlsx` });
       // 학습 저장
       if (S.brands.length && sel.length) sel.forEach(b => { S.brandVendor[b] = f.name; });
     }
