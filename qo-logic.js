@@ -46,6 +46,8 @@ const ORDER_FIELDS = [
 const COPY_FIELDS = ORDER_FIELDS.map(f => f[0]).filter(n => n !== "CARRIER" && n !== "INVOICE");
 const KEY_FIELDS = ["RECIPIENT","ADDR","PRODUCT","QTY","ORDERER","ZIP"];
 const BRAND_HEADER = "브랜드";
+/* 날짜로 다뤄야 하는 표준 항목 — 합칠 때 진짜 날짜로 바꿔 넣는다 */
+const DATE_CANONS = new Set(["COLLECT_DATE", "ORDER_DATE", "PAY_DATE"]);
 const DATE_COL_KEYWORDS = ["수집일","주문일","일자","일시"];
 const COLLECT_KEYWORDS = ["주문수집일","수집일자","수집일"];
 const FIELD_KR = {ORDER_NO:"주문번호",PRODUCT:"상품",OPTION:"옵션",QTY:"수량",AMOUNT:"금액",
@@ -239,6 +241,20 @@ function extractDate(v) {
     if (v.getUTCHours() === 0 && v.getUTCMinutes() === 0 && v.getUTCSeconds() === 0 && v.getUTCMilliseconds() === 0)
       return "" + v.getUTCFullYear() + p(v.getUTCMonth() + 1) + p(v.getUTCDate());
     return "" + v.getFullYear() + p(v.getMonth() + 1) + p(v.getDate());
+  }
+  /* ★★ 엑셀 일련번호가 '숫자 그대로' 들어온 경우 (2026-08-18).
+     날짜 서식이 안 걸린 칸은 46237 같은 숫자로 읽힌다. 예전에는 이걸 못 풀어
+     '주문일을 못 읽었다' 며 통째로 빼버렸다 — 랩노마드 8월 통합 파일에서 99건이 그랬다.
+     toDateValue 는 원래 풀 줄 안다. 여기서도 같이 쓴다.
+     ※ 수량 3 같은 작은 숫자가 1900년 날짜로 둔갑하지 않게 연도로 한 번 더 거른다. */
+  if (typeof v === "number" && isFinite(v) && v >= 1 && v < 60000) {
+    const dv = toDateValue(v);
+    if (dv) {
+      const p = n => String(n).padStart(2, "0");
+      const y = dv.getFullYear();
+      if (y >= 1990 && y <= 2200) return "" + y + p(dv.getMonth() + 1) + p(dv.getDate());
+    }
+    return null;
   }
   const d = String(v).replace(/\D/g, "");
   return d.length >= 8 ? d.slice(0, 8) : null;
@@ -593,10 +609,13 @@ function mergeOrders(sources, opts) {
   ws.addRow(head);
   rows.forEach(rec => {
     /* 날짜는 'UTC 자정' 으로 바꿔 넣는다. 원래 Date 를 그대로 두면 새벽 주문
-       (한국 00~09시)이 엑셀에서 전날로 보인다 — ExcelJS 가 UTC 로 환산해서다. */
+       (한국 00~09시)이 엑셀에서 전날로 보인다 — ExcelJS 가 UTC 로 환산해서다.
+       ★ 날짜 칸은 값이 숫자(엑셀 일련번호 46237)나 글자로 와도 진짜 날짜로 바꿔 넣는다.
+         그대로 두면 합친 표에 46237 이 그대로 찍히고, 사람이 열어봐도 뭔지 모른다. */
     const line = cols.map(c => {
       const v = rec[c];
       if (v === undefined) return null;
+      if (DATE_CANONS.has(c)) return dateOnlyCell(v) || v;
       return v instanceof Date ? dateOnlyCell(v) : v;
     });
     if (brandSeen) line.push(rec.__brand || null);
