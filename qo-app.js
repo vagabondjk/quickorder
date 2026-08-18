@@ -1441,17 +1441,22 @@ function addDupFixer(box, groups) {
    ================================================================= */
 let nmPick = "", exPick = "";
 
-/* 업체 고르기 줄 — has 는 '이미 정해둔 게 있는 업체' */
-function drawPick(box, cur, hasFn, onPick) {
+/* 업체 고르기 — 드롭다운.
+   업체가 14곳이 되니 칩을 늘어놓으면 두 줄을 먹었다. 한 칸으로 줄인다.
+   이미 정해둔 업체는 ✔ 와 함께 무엇이 정해져 있는지도 같이 적는다. */
+function drawPick(box, cur, hasFn, onPick, labelFn) {
   box.innerHTML = "";
-  S.forms.forEach(f => {
-    const el = document.createElement("button");
-    el.type = "button";
-    el.className = "vp" + (f.name === cur ? " on" : "") + (hasFn(f) ? " has" : "");
-    el.textContent = (hasFn(f) ? "✔ " : "") + f.name;
-    el.onclick = () => onPick(f.name === cur ? "" : f.name);
-    box.appendChild(el);
-  });
+  const sel = document.createElement("select");
+  sel.className = "minibtn vpsel";
+  const done = S.forms.filter(hasFn).length;
+  sel.innerHTML = `<option value="">업체 선택…${done ? ` (정해둔 곳 ${done})` : ""}</option>`
+    + S.forms.map(f => {
+        const extra = labelFn ? labelFn(f) : "";
+        return `<option value="${esc(f.name)}"${f.name === cur ? " selected" : ""}>`
+          + `${hasFn(f) ? "✔ " : ""}${esc(f.name)}${extra ? " — " + esc(extra) : ""}</option>`;
+      }).join("");
+  sel.onchange = () => onPick(sel.value);
+  box.appendChild(sel);
 }
 const formByName = n => S.forms.find(f => f.name === n) || null;
 async function saveForm(f) { await DB.putForm(f); await loadForms(); }
@@ -1463,7 +1468,8 @@ function drawNameMapCard() {
   const card = $("card4"); if (!card) return;
   if (!S.forms.length) { card.style.display = "none"; return; }
   card.style.display = "block";
-  drawPick($("nm-pick"), nmPick, f => nmCount(f) > 0, n => { nmPick = n; drawNameMapCard(); });
+  drawPick($("nm-pick"), nmPick, f => nmCount(f) > 0, n => { nmPick = n; drawNameMapCard(); },
+    f => (nmCount(f) ? `${nmCount(f)}개` : ""));
 
   const box = $("nm-detail");
   const f = formByName(nmPick);
@@ -1547,7 +1553,8 @@ async function drawExtraCard() {
     ? `공급가표: <b>${book.items.length}개</b> 상품 (④ 정산 탭에서 올린 것)`
     : `<span style="color:var(--warn)">⚠ 공급가표가 아직 없습니다 — ④ 정산 탭의 '업체별 공급가표' 에 먼저 올려주세요.</span>`;
 
-  drawPick($("ex-pick"), exPick, exAny, n => { exPick = n; drawExtraCard(); });
+  drawPick($("ex-pick"), exPick, exAny, n => { exPick = n; drawExtraCard(); },
+    f => EXTRA_FIELDS.filter(e => exOn(f)[e.k]).map(e => e.name).join("·"));
 
   const box = $("ex-detail");
   const f = formByName(exPick);
