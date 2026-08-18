@@ -1043,8 +1043,29 @@ function drawDateChips() {
   // 날짜를 안 고른 경고만 남긴다 (이건 안 보이면 변환이 안 되는 이유를 모른다).
   $("dt-foot").textContent = S.dateSel.length ? "" : "⚠ 날짜를 하나 이상 선택하세요";
   renderPreview();     // 체크한 날짜에 맞춰 '내용 확인'도 즉시 갱신
+  recountBrands();     // 고른 날짜에 주문이 있는 업체만 아래에 남긴다
   refreshO();
 }
+
+/* 고른 날짜에 실제로 주문이 있는 브랜드만 추려 둔다.
+   ★ 이걸 안 하면 그 날짜에 주문이 하나도 없는 업체까지 '업체별 브랜드 선택' 에
+     뜨고, 변환 결과에도 '건너뜀' 으로 이름이 올라간다 — 보낼 게 있는 줄 알게 된다. */
+async function recountBrands() {
+  if (!S.orderBuf) { S.brandCount = null; return; }
+  try {
+    const wb = await QO.loadWorkbook(S.orderBuf.slice(0));
+    const c = QO.countOrders(wb, { dates: S.dateSel.length ? S.dateSel : null, dateHeader: S.dateHeader });
+    S.brandCount = c.byBrand || {};
+    S.noDateInfo = { count: c.noDate || 0, byMall: c.noDateByMall || {}, byBrand: c.noDateByBrand || {} };
+  } catch (e) { S.brandCount = null; S.noDateInfo = null; }
+  buildVendorBrands();
+}
+/* 고른 날짜에 주문이 있는 브랜드 목록. 아직 세기 전이면 전체를 그대로 쓴다. */
+function brandsNow() {
+  if (!S.brandCount) return S.brands;
+  return S.brands.filter(b => (S.brandCount[b] || 0) > 0);
+}
+const brandCountOf = b => (S.brandCount ? (S.brandCount[b] || 0) : null);
 
 /* --- 내용 확인 --- */
 $("pv-more").onclick = function () {
@@ -1385,7 +1406,21 @@ function buildVendorBrands() {
   checked.forEach(f => {
     if (!S.sel[f.name]) S.sel[f.name] = S.brands.filter(b => S.brandVendor[b] === f.name);
   });
-  checked.forEach(f => {
+  /* ★ 고른 날짜에 주문이 있는 업체만 보여준다.
+     · 이미 브랜드가 배정된 업체 → 그 브랜드에 주문이 있어야 뜬다
+     · 아직 아무것도 배정 안 된 업체 → 주인 없는 브랜드가 남아 있을 때만 뜬다
+       (그래야 새 브랜드를 배정할 자리가 사라지지 않는다) */
+  const live = brandsNow();
+  const liveSet = new Set(live);
+  const freeLive = live.filter(b => !checked.some(f => (S.sel[f.name] || []).includes(b)));
+  const shown = checked.filter(f => {
+    const mine = S.sel[f.name] || [];
+    if (mine.length) return mine.some(b => liveSet.has(b));
+    return freeLive.length > 0;
+  });
+  const hidden = checked.filter(f => !shown.includes(f));
+  if (!shown.length) { card.style.display = "none"; box.innerHTML = ""; refreshO(); return; }
+  shown.forEach(f => {
     const wrap = document.createElement("div");
     wrap.className = "vendorbox";
     wrap.dataset.vendor = f.name;
@@ -1396,16 +1431,24 @@ function buildVendorBrands() {
     wrap.querySelector(".all").onclick = () => {
       const mine = S.sel[f.name] || [];
       // 자유롭거나 내 것인 브랜드만 대상 (남의 것은 건드리지 않음)
-      const selectable = S.brands.filter(b => brandOwner(b, f.name) === null || mine.includes(b));
+      const selectable = live.filter(b => brandOwner(b, f.name) === null || mine.includes(b));
       S.sel[f.name] = (mine.length === selectable.length && mine.length > 0) ? [] : selectable;
       buildVendorBrands();                                    // 다른 업체 표시도 갱신
     };
   });
+  /* 왜 안 보이는지 한 줄로 남긴다 — 양식이 사라진 줄 알고 다시 올리는 일이 없게 */
+  const foot = $("card3").querySelector(".pvfoot") || (() => {
+    const d = document.createElement("div"); d.className = "pvfoot"; $("card3").appendChild(d); return d;
+  })();
+  foot.textContent = hidden.length
+    ? `고른 날짜에 주문이 없어 ${hidden.length}곳은 숨겼습니다 — ${hidden.map(f => f.name).join(", ")}`
+    : "";
   refreshO();
 }
 function renderVendorChips(wrap, f) {
   const brandsBox = wrap.querySelector(".brands");
-  brandsBox.innerHTML = S.brands.map(b => {
+  // 고른 날짜에 주문이 있는 브랜드만 (없는 브랜드 칩은 눌러봐야 0건이다)
+  brandsBox.innerHTML = brandsNow().map(b => {
     const mine = (S.sel[f.name] || []).includes(b);
     const owner = brandOwner(b, f.name);
     if (mine) return `<span class="brow on" data-b="${esc(b)}"><span class="box">${CHK}</span>${esc(b)}</span>`;
@@ -1507,7 +1550,20 @@ $("run-o").onclick = async function () {
     const results = [], skipped = [], empty = [];
     for (const f of picked) {
       const sel = S.sel[f.name] || [];
-      if (S.brands.length && !sel.length) { skipped.push(f.name + "(브랜드 미선택)"); continue; }
+      /* ★ 고른 날짜에 주문이 없는 업체는 '브랜드 미선택' 이 아니다 — 그냥 보낼 게 없는 것이다.
+         예전엔 둘을 구별 못 해서 '건너뜀: 나경(브랜드 미선택)' 으로 나왔고,
+         브랜드를 안 골라서 빠진 줄 알고 찾아 헤매게 됐다. */
+      if (S.brands.length) {
+        const live = brandsNow(), liveSet = new Set(live);
+        if (sel.length) {
+          if (!sel.some(b => liveSet.has(b))) { empty.push(f.name); continue; }   // 이 날짜엔 0건
+        } else {
+          // 아직 아무 브랜드도 안 골랐다. 고를 만한 게 남아 있을 때만 '미선택' 이다.
+          const free = live.filter(b => !picked.some(g => (S.sel[g.name] || []).includes(b)));
+          if (!free.length) { empty.push(f.name); continue; }
+          skipped.push(f.name + "(브랜드 미선택)"); continue;
+        }
+      }
       const orderWb = await QO.loadWorkbook(S.orderBuf.slice(0));
       const tplWb = await QO.loadWorkbook(f.data.slice(0));
       const brandFilter = (S.brands.length && sel.length !== S.brands.length) ? sel : null;
@@ -1555,8 +1611,11 @@ $("run-o").onclick = async function () {
     const verify = { srcTotal: src.total, converted, expected, diff: expected - converted, unassigned, hasBrands };
 
     verify.empty = empty;
-    /* 날짜 자체가 비어 있어 어느 날에도 안 걸린 주문 — 조용히 빠지면 안 된다 */
-    verify.noDate = results.reduce((a, r) => Math.max(a, r.noDate || 0), 0);
+    /* 날짜 자체가 비어 있어 어느 날에도 안 걸린 주문 — 조용히 빠지면 안 된다.
+       어느 쇼핑몰 · 어느 업체 것인지까지 알려줘야 원본 파일을 찾아갈 수 있다. */
+    verify.noDate = src.noDate || 0;
+    verify.noDateByMall = src.noDateByMall || {};
+    verify.noDateByBrand = src.noDateByBrand || {};
     showResultO(results, skipped, verify);
     msg("msg-o", verify.diff === 0 ? "ok" : "warn",
       (verify.diff === 0 ? "✔ 변환 완료! 건수 일치 " : "⚠ 변환 완료 (건수 불일치 확인) ")
@@ -1602,12 +1661,18 @@ function showResultO(results, skipped, verify) {
         + `<span style="color:var(--muted)">${esc(verify.empty.join(", "))}</span>`;
       box.appendChild(e);
     }
-    /* 날짜가 비어 있어 어느 날에도 안 걸린 주문 — 날짜로 거를 때만 생긴다 */
+    /* 날짜가 비어 있어 어느 날에도 안 걸린 주문 — 날짜로 거를 때만 생긴다.
+       어느 파일을 열어봐야 하는지 알 수 있게 쇼핑몰·업체까지 적는다. */
     if (verify.noDate) {
       const n = document.createElement("div");
       n.className = "msg show warn";
-      n.textContent = `⚠ 주문일이 비어 있는 주문 ${verify.noDate}건은 날짜로 고를 수 없어 빠졌습니다. `
-        + `날짜를 '전체'로 두고 다시 변환하면 포함됩니다.`;
+      const byMall = Object.entries(verify.noDateByMall || {}).sort((a, b) => b[1] - a[1]);
+      const byBrand = Object.entries(verify.noDateByBrand || {}).sort((a, b) => b[1] - a[1]);
+      let h = `⚠ 주문일이 비어 있는 주문 <b>${verify.noDate}건</b>은 날짜로 고를 수 없어 빠졌습니다.`;
+      if (byMall.length) h += `<br>· 쇼핑몰: ${byMall.map(([m, c]) => `${esc(m)} <b>${c}건</b>`).join(" · ")}`;
+      if (byBrand.length) h += `<br>· 업체: ${byBrand.map(([b, c]) => `${esc(b)} <b>${c}건</b>`).join(" · ")}`;
+      h += `<br>날짜를 '전체'로 두고 다시 변환하면 포함됩니다.`;
+      n.innerHTML = h;
       box.appendChild(n);
     }
   }

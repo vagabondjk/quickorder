@@ -679,18 +679,36 @@ function countOrders(orderWb, opts) {
   }
   const smap = buildOrderFieldMap(ws, hr, "source");
   const cols = Object.values(smap);
-  let total = 0; const byBrand = {};
+  /* 날짜가 비어 있는 주문은 어느 날짜를 골라도 안 걸린다.
+     그냥 빠지면 그 주문은 어느 발주서에도 안 실리므로, 어느 쇼핑몰 · 어느 업체
+     것인지까지 알려준다 — 그래야 사람이 원본 파일을 찾아갈 수 있다. */
+  let mcol = null;
+  for (let c = 1; c <= d.cols; c++) {
+    if (normHeader(getV(ws, hr, c)) === "쇼핑몰명") { mcol = c; break; }
+  }
+  let total = 0, noDate = 0;
+  const byBrand = {}, noDateByMall = {}, noDateByBrand = {};
   for (let r = hr + 1; r <= d.rows; r++) {
-    if (dcol && dateSet) { const dv = extractDate(getV(ws, r, dcol)); if (!dateSet.has(dv)) continue; }
     let any = false;
     for (const c of cols) { if (!isBlank(getV(ws, r, c))) { any = true; break; } }
     if (!any) continue;                       // 빈 행 제외
-    total++;
     const bv = bcol ? getV(ws, r, bcol) : null;
     const b = bv == null ? "" : String(bv).trim();
+    if (dcol && dateSet) {
+      const dv = extractDate(getV(ws, r, dcol));
+      if (!dv) {
+        noDate++;
+        const mv = mcol ? String(getV(ws, r, mcol) || "").trim() : "";
+        if (mv) noDateByMall[mv] = (noDateByMall[mv] || 0) + 1;
+        if (b) noDateByBrand[b] = (noDateByBrand[b] || 0) + 1;
+        continue;
+      }
+      if (!dateSet.has(dv)) continue;
+    }
+    total++;
     byBrand[b] = (byBrand[b] || 0) + 1;
   }
-  return { total, byBrand };
+  return { total, byBrand, noDate, noDateByMall, noDateByBrand };
 }
 
 /* ===================================================================
