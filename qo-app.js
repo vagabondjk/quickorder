@@ -186,6 +186,21 @@ const isXls = f => {
   const n = (f && f.name) || "";
   return /\.xls[xm]$/i.test(n) && !/^~\$/.test(n.replace(/^.*[\\/]/, ""));
 };
+/* ★ 구버전 .xls (엑셀 97-2003) 는 읽을 수 없다.
+   .xlsx 는 XML 을 묶은 zip 이고, .xls 는 그 자체가 바이너리 덩어리(OLE2/BIFF)라
+   아예 다른 형식이다. 지금 쓰는 엑셀 라이브러리는 .xlsx 만 다룬다.
+   ※ 예전엔 이런 파일을 조용히 걸러 버렸다. 그러면 폴더째 올렸을 때 그 업체 양식만
+     쥐도 새도 모르게 빠진 채 발주가 나간다 — 못 읽는 것보다 나쁘다. 반드시 알린다. */
+const isOldXls = f => /\.xls$/i.test((f && f.name) || "");
+function warnOldXls(files, box) {
+  const old = [...(files || [])].filter(isOldXls);
+  if (!old.length) return false;
+  const names = old.map(f => f.name).join("\n · ");
+  const t = `구버전 엑셀(.xls) 파일은 읽을 수 없어요 — ${old.length}개를 빼고 진행합니다.\n · ${names}\n\n`
+    + `엑셀에서 열고 [다른 이름으로 저장] → 파일 형식을 'Excel 통합 문서(*.xlsx)' 로 바꿔 저장한 뒤 다시 올려주세요.`;
+  if (box) msg(box, "warn", t.replace(/\n/g, " ")); else alert(t);
+  return true;
+}
 
 /* 끌어온 것에서 엑셀만 모은다. 폴더를 통째로 끌어와도 안을 뒤져서 다 꺼낸다.
    ※ dataTransfer.files 는 폴더를 '이름만 있는 빈 파일'로 주기 때문에 그것만 보면
@@ -196,7 +211,11 @@ async function filesFromDrop(dt) {
   const entries = [...(dt.items || [])]
     .map(i => (i.webkitGetAsEntry ? i.webkitGetAsEntry() : null)).filter(Boolean);
   const plain = [...(dt.files || [])];
-  if (!entries.length) return plain.filter(isXls);
+  if (!entries.length) {
+    const only = plain.filter(isXls);
+    only.oldXls = plain.filter(isOldXls);
+    return only;
+  }
 
   const readDir = dir => new Promise(res => {
     const rd = dir.createReader(), all = [];
@@ -204,17 +223,20 @@ async function filesFromDrop(dt) {
     const step = () => rd.readEntries(es => { if (!es.length) return res(all); all.push(...es); step(); }, () => res(all));
     step();
   });
-  const out = [];
+  const out = [], old = [];
   const walk = async e => {
     if (e.isFile) {
       const f = await new Promise(res => e.file(res, () => res(null)));
-      if (f && isXls(f)) out.push(f);
+      if (!f) return;
+      if (isXls(f)) out.push(f);
+      else if (isOldXls(f)) old.push(f);          // 왜 빠졌는지 알려주려고 따로 챙긴다
     } else if (e.isDirectory) {
       for (const c of await readDir(e)) await walk(c);
     }
   };
   for (const e of entries) await walk(e);
   out.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  out.oldXls = old;
   return out;
 }
 function bindDrop(id, cb) {
@@ -224,8 +246,9 @@ function bindDrop(id, cb) {
   el.addEventListener("drop", async ev => {
     const had = (ev.dataTransfer.items || ev.dataTransfer.files || []).length;
     const f = await filesFromDrop(ev.dataTransfer);
+    const oldWarned = warnOldXls(f.oldXls);          // 구버전 .xls 는 이유를 밝히고 뺀다
     if (f.length) cb(f);
-    else if (had) alert("엑셀 파일(.xlsx / .xlsm)이 없습니다.\n폴더를 끌어오면 안에 있는 엑셀을 모두 가져옵니다.");
+    else if (had && !oldWarned) alert("엑셀 파일(.xlsx / .xlsm)이 없습니다.\n폴더를 끌어오면 안에 있는 엑셀을 모두 가져옵니다.");
   });
 }
 let readFile = f => new Promise((res, rej) => {
@@ -506,6 +529,7 @@ function switchTab(t) {
    ================================================================= */
 $("f-order").addEventListener("change", function () {
   const fs = [...this.files]; this.value = "";
+  warnOldXls(fs, "msg-o");
   if (fs.length) setOrder(fs);
 });
 bindDrop("drop-order", f => setOrder(f));
@@ -1065,7 +1089,11 @@ function renderPreview() {
 }
 
 /* --- 업체 양식 --- */
-$("f-tpl").addEventListener("change", function () { const fs = [...this.files]; this.value = ""; addForms(fs); });
+$("f-tpl").addEventListener("change", function () {
+  const fs = [...this.files]; this.value = "";
+  warnOldXls(fs);                       // 구버전이면 왜 빠지는지 알린다
+  addForms(fs);
+});
 bindDrop("drop-tpl", f => addForms(f));
 /* 파일명에서 업체명 후보를 순서대로 뽑는다. 앞의 것이 이미 쓰이고 있으면 다음 것으로 넘어간다.
      "랩노마드 발주양식(디에스피).xlsx" → ①디에스피 ②랩노마드 ③디에스피 ④랩노마드 발주양식(디에스피)
