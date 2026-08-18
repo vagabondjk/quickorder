@@ -701,24 +701,36 @@ function convert(orderWb, tplWb, opts) {
      양식에 공급가 칸이 있으면 그 자리에, 없으면 맨 뒤에 칸을 만들어 붙인다. */
   const priceBookIn = opts.price && opts.price.book && opts.price.book.items && opts.price.book.items.length
     ? opts.price.book : null;
-  let priceCol = null, priceHit = 0;
+  /* 넣을 값 고르기 — 지금은 공급단가·배송비. 업체마다 원하는 게 다르다. */
+  const EXTRA = {
+    price: { title: "공급단가", find: /공급단가|공급가|매입가|매입단가|단가/, skip: /합계|총|금액/, get: m => m.price },
+    ship: { title: "배송비", find: /배송비|택배비/, skip: /합계|총/, get: m => (m.item && m.item.ship) || null },
+  };
+  const wantFields = ((opts.price && opts.price.fields) || ["price"]).filter(k => EXTRA[k]);
+  const extraCols = {};
+  let priceHit = 0;
   const missPrice = new Map();
   if (priceBookIn) {
-    const want = /공급단가|공급가|매입가|매입단가|단가/;
-    const skip = /합계|총|금액/;
-    for (let c = 1; c <= dims(tws).cols; c++) {
-      const h = normHeader(getV(tws, tgtHeaderRow, c));
-      if (h && want.test(h) && !skip.test(h)) { priceCol = c; break; }
-    }
-    if (!priceCol) {
-      priceCol = dims(tws).cols + 1;
-      const hc = tws.getRow(tgtHeaderRow).getCell(priceCol);
-      hc.value = "공급단가";
-      hc.style = Object.assign({}, tws.getRow(tgtHeaderRow).getCell(Math.max(1, priceCol - 1)).style);
-      tws.getColumn(priceCol).width = 12;
-      log("   (양식에 공급가 칸이 없어 맨 뒤에 '공급단가' 를 붙였습니다)");
-    }
+    wantFields.forEach(k => {
+      const spec = EXTRA[k];
+      let col = null;
+      for (let c = 1; c <= dims(tws).cols; c++) {
+        if (Object.values(extraCols).indexOf(c) >= 0) continue;
+        const h = normHeader(getV(tws, tgtHeaderRow, c));
+        if (h && spec.find.test(h) && !spec.skip.test(h)) { col = c; break; }
+      }
+      if (!col) {
+        col = dims(tws).cols + 1;
+        const hc = tws.getRow(tgtHeaderRow).getCell(col);
+        hc.value = spec.title;
+        hc.style = Object.assign({}, tws.getRow(tgtHeaderRow).getCell(Math.max(1, col - 1)).style);
+        tws.getColumn(col).width = 12;
+        log(`   (양식에 '${spec.title}' 칸이 없어 맨 뒤에 붙였습니다)`);
+      }
+      extraCols[k] = col;
+    });
   }
+  const priceCol = extraCols.price || null;
 
   const sd = dims(sws);
   /* 브랜드·옵션·날짜 열 — 공급가를 찾을 때 쓴다 (상품명만으로는 못 고른다) */
@@ -791,7 +803,7 @@ function convert(orderWb, tplWb, opts) {
     }
     /* 공급가 — 상품명은 '바꾸기 전' 이름으로 찾아야 한다.
        매핑표로 이름을 바꿔 놓고 그 이름으로 공급가표를 뒤지면 하나도 안 맞는다. */
-    if (priceBookIn && priceCol) {
+    if (priceBookIn && wantFields.length) {
       const pr = {
         brand: sBrandCol ? getV(sws, r, sBrandCol) : "",
         product: sProdCol ? getV(sws, r, sProdCol) : "",
@@ -799,8 +811,13 @@ function convert(orderWb, tplWb, opts) {
         date: sDateCol ? getV(sws, r, sDateCol) : "",
       };
       const m = matchPrice(priceBookIn, pr, (opts.price && opts.price.aliases) || null);
-      if (m && m.ok) { tws.getRow(outRow).getCell(priceCol).value = m.price; priceHit++; }
-      else {
+      if (m && m.ok) {
+        wantFields.forEach(k => {
+          const v = EXTRA[k].get(m);
+          if (v !== null && v !== undefined && v !== "") tws.getRow(outRow).getCell(extraCols[k]).value = v;
+        });
+        priceHit++;
+      } else {
         const nm = String(pr.product || "").trim();
         if (nm) missPrice.set(nm, (missPrice.get(nm) || 0) + 1);
       }
@@ -814,7 +831,8 @@ function convert(orderWb, tplWb, opts) {
     count, sheet: tws.name, byMall, noDate,
     renamed, nameMissing: nameMap ? top(missName) : [],
     priceCount: priceHit, priceMissing: priceBookIn ? top(missPrice) : [],
-    priceOn: !!priceBookIn,
+    priceOn: !!(priceBookIn && wantFields.length),
+    extraFields: priceBookIn ? wantFields.map(k => EXTRA[k].title) : [],
   };
 }
 

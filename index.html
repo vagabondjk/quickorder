@@ -230,6 +230,16 @@
   .vbtns button{flex:1;min-width:0;font-size:9.5px;font-weight:700;font-family:inherit;
     padding:4px 1px;border-radius:5px;border:1px solid var(--line);white-space:nowrap;
     letter-spacing:-.04em;background:var(--card2);color:var(--muted);cursor:pointer}
+  /* 업체 고르기 줄 (값 변경 / 추가 정보 메뉴) */
+  .vpick{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
+  .vpick .vp{font-size:11.5px;font-weight:700;padding:6px 10px;border-radius:999px;cursor:pointer;
+    border:1px solid var(--line);background:var(--card2);color:var(--muted);white-space:nowrap}
+  .vpick .vp.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
+  .vpick .vp.has{border-color:var(--ok);color:var(--ok)}
+  .vpick .vp.has.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
+  .exrow{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:9px 10px;margin-bottom:6px;
+    background:var(--card2);border:1px solid var(--line);border-radius:10px}
+  .exrow b{flex:1;min-width:110px;font-size:12.5px}
   /* 업체 카드에 붙는 설정 표시 (🏷 상품명 바꾸기 / 💰 공급가) */
   .vtag{flex:none;font-size:9.5px;font-weight:800;color:var(--brand);background:var(--brand-soft);
     border-radius:6px;padding:2px 5px;white-space:nowrap}
@@ -241,6 +251,11 @@
   .fold{margin-left:auto;font-size:11px;font-weight:800;color:var(--brand);background:var(--brand-soft);
     border:none;border-radius:999px;padding:4px 10px;cursor:pointer;font-family:inherit;white-space:nowrap}
   .vlist.folded{display:none}
+  /* 접어둔 상태에서 '무엇이 올라가 있는지' 한 줄로. 이게 없으면 아무것도 안 올린 줄 안다 */
+  .foldnote{background:color-mix(in srgb,var(--ok) 9%,var(--card2));border:1px solid var(--ok);
+    border-radius:10px;padding:9px 11px;margin-bottom:8px;font-size:12.5px;font-weight:700;color:var(--ok)}
+  .foldnote span{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-top:3px;
+    line-height:1.5;word-break:break-all}
   .vinfo{flex:1;min-width:0}
   .vinfo b{font-size:14px;font-weight:800;display:block}
   .vinfo span{font-size:11.5px;color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -520,6 +535,8 @@
       <h2><span class="n">2</span>공급사별 발주서 양식<span id="vcount"
         style="font-size:11.5px;font-weight:700;color:var(--muted);margin-left:6px"></span>
         <button class="fold" id="vfold" type="button">접기</button></h2>
+      <!-- 접었을 때 '아무것도 안 올라간 줄' 알게 되는 걸 막는다 -->
+      <div class="foldnote" id="vsummary" style="display:none"></div>
       <div class="vlist" id="vlist"><div class="empty">불러오는 중…</div></div>
       <button class="go" id="drive-tpl" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <label class="drop" id="drop-tpl" style="margin-top:8px;padding:14px">
@@ -532,6 +549,37 @@
     <div class="card" id="card3" style="display:none">
       <h2><span class="n">3</span>업체별 브랜드 선택</h2>
       <div id="vbrands"></div>
+    </div>
+
+    <!-- ④ 값 변경해서 양식에 넣기 — 업체가 원하는 상품명으로 바꿔서 보낸다 -->
+    <div class="card" id="card4" style="display:none">
+      <h2><span class="n">4</span>값 변경해서 양식에 넣기
+        <span style="font-size:11.5px;font-weight:700;color:var(--muted)">(선택)</span>
+        <button class="fold" id="nm-fold" type="button">접기</button></h2>
+      <div class="foldnote" id="nm-note" style="display:none"></div>
+      <div id="nm-body">
+        <p class="sub2" style="margin:0 0 8px">업체가 자기네 상품명으로 받길 원할 때 씁니다.
+          <b>변경전</b>(쇼핑몰 상품명) · <b>변경후</b>(업체 요청 상품명) 두 열짜리 엑셀을 한 번 올려두면
+          그 업체 발주서에 계속 적용됩니다.</p>
+        <div class="vpick" id="nm-pick"></div>
+        <div id="nm-detail"></div>
+      </div>
+    </div>
+
+    <!-- ⑤ 추가 정보 넣기 — 공급가표에서 값을 뽑아 발주서에 더한다 -->
+    <div class="card" id="card5" style="display:none">
+      <h2><span class="n">5</span>추가 정보 넣기
+        <span style="font-size:11.5px;font-weight:700;color:var(--muted)">(선택)</span>
+        <button class="fold" id="ex-fold" type="button">접기</button></h2>
+      <div class="foldnote" id="ex-note" style="display:none"></div>
+      <div id="ex-body">
+        <p class="sub2" style="margin:0 0 8px">업체가 <b>우리한테 주는 공급가</b>를 발주서에 적어달라고 할 때 씁니다.
+          <b>④ 정산</b> 탭에 올려둔 <b>업체별 공급가표</b>에서 상품마다 값을 찾아 넣습니다.
+          양식에 그 칸이 없으면 맨 뒤에 만들어 붙입니다.</p>
+        <div class="pvfoot" id="ex-book" style="margin:0 0 8px"></div>
+        <div class="vpick" id="ex-pick"></div>
+        <div id="ex-detail"></div>
+      </div>
     </div>
 
     <button class="go" id="run-o" disabled><span class="spin"></span><span id="run-o-lbl">발주서 변환하기</span></button>
@@ -844,40 +892,6 @@
 </div>
 
 <!-- 검색조건 관리 모달 (발주서/회신 공용) -->
-<!-- 업체 하나에만 걸리는 설정 — 상품명 바꾸기 / 공급가 넣기 -->
-<div class="modal" id="vsetmodal">
-  <div class="sheet">
-    <div class="grip"></div>
-    <h3 id="vset-title">업체 설정</h3>
-    <p class="sub2">이 업체 발주서에만 적용됩니다.</p>
-    <div class="sheetbody">
-      <div class="syncbox">
-        <div class="syncrow"><b>🏷 상품명 바꿔서 보내기</b>
-          <button class="minibtn" id="vset-nm-clear" style="display:none">해제</button></div>
-        <div class="synchint">업체가 자기네 상품명으로 받길 원할 때 씁니다.
-          <b>변경전</b>(쇼핑몰 상품명) · <b>변경후</b>(업체 요청 상품명) 두 열짜리 엑셀을 올려주세요.</div>
-        <div class="synctxt" id="vset-nm-state">아직 올린 매핑표가 없습니다</div>
-        <label class="drop" id="drop-vsetnm" style="margin-top:8px;padding:14px">
-          매핑표 엑셀 선택 또는 끌어오기
-          <span class="drophint">변경전 · 변경후 두 열</span>
-          <input type="file" id="f-vsetnm" accept=".xlsx,.xlsm,.xls">
-        </label>
-        <div class="setrow" style="margin-top:6px"><span style="flex:1"></span>
-          <button class="minibtn" id="vset-nm-tpl">📄 양식 받기</button>
-          <button class="minibtn" id="vset-nm-list" style="display:none">👁 내용 보기</button></div>
-      </div>
-      <div class="syncbox">
-        <div class="syncrow"><b>💰 공급가 넣기</b>
-          <button class="minibtn" id="vset-price">끄기</button></div>
-        <div class="synchint">정산 탭에 올려둔 <b>업체별 공급가표</b>에서 상품마다 단가를 찾아
-          발주서에 적어 보냅니다. 양식에 공급가 칸이 없으면 맨 뒤에 만들어 붙입니다.</div>
-        <div class="synctxt" id="vset-price-state"></div>
-      </div>
-    </div>
-    <div class="row"><button class="btn-cancel" id="vset-close">닫기</button></div>
-  </div>
-</div>
-
 <!-- 주문일 열이 없는 쇼핑몰 — 어느 열을 주문일로 쓸지 물어본다.
      안 물어보면 그 몰 주문이 날짜로 거를 때 통째로 빠진다 (실제로 30건이 사라졌다) -->
 <div class="modal" id="dcolmodal">

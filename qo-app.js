@@ -1402,60 +1402,81 @@ function addDupFixer(box, groups) {
   box.appendChild(w);
 }
 /* =================================================================
-   업체 하나에만 걸리는 설정 — 상품명 바꾸기 / 공급가 넣기
+   ④ 값 변경해서 양식에 넣기 — 업체가 원하는 상품명으로 바꿔서 보낸다
+   ⑤ 추가 정보 넣기 — 공급가표에서 값을 뽑아 발주서에 더한다
+
+   둘 다 '업체를 고르고 → 한 번 정해두면 계속 적용' 이다.
+   업체 양식 카드 안에 숨겨두니 있는 줄도 몰라서 별도 메뉴로 뺐다 (2026-08-18).
    ================================================================= */
-let vsetForm = null;
-function openVendorSet(f) {
-  vsetForm = f;
-  $("vset-title").textContent = `${f.name} 설정`;
-  drawVendorSet();
-  $("vsetmodal").classList.add("on");
+let nmPick = "", exPick = "";
+
+/* 업체 고르기 줄 — has 는 '이미 정해둔 게 있는 업체' */
+function drawPick(box, cur, hasFn, onPick) {
+  box.innerHTML = "";
+  S.forms.forEach(f => {
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "vp" + (f.name === cur ? " on" : "") + (hasFn(f) ? " has" : "");
+    el.textContent = (hasFn(f) ? "✔ " : "") + f.name;
+    el.onclick = () => onPick(f.name === cur ? "" : f.name);
+    box.appendChild(el);
+  });
 }
-function drawVendorSet() {
-  const f = vsetForm; if (!f) return;
-  const n = f.nameMap ? Object.keys(f.nameMap).length : 0;
-  $("vset-nm-state").textContent = n
-    ? `✔ ${esc(f.nameMapFile || "매핑표")} · ${n}개 상품명을 바꿔서 보냅니다`
-    : "아직 올린 매핑표가 없습니다";
-  $("vset-nm-clear").style.display = n ? "" : "none";
-  $("vset-nm-list").style.display = n ? "" : "none";
-  const on = !!f.withPrice;
-  $("vset-price").textContent = on ? "끄기" : "켜기";
-  $("vset-price").style.background = on ? "var(--brand-soft)" : "";
-  $("vset-price").style.color = on ? "var(--brand)" : "";
-  $("vset-price-state").textContent = on
-    ? "✔ 이 업체 발주서에 공급단가를 적어 보냅니다"
-    : "지금은 넣지 않습니다";
-}
-async function saveVendorSet() { if (vsetForm) { await DB.putForm(vsetForm); await loadForms(); drawVendorSet(); } }
-$("vset-close").onclick = () => $("vsetmodal").classList.remove("on");
-$("vsetmodal").onclick = e => { if (e.target === $("vsetmodal")) $("vsetmodal").classList.remove("on"); };
-$("vset-price").onclick = async () => {
-  if (!vsetForm) return;
-  if (!vsetForm.withPrice) {
-    const raw = await DB.get("priceBook", null);
-    const book = QO.priceBookFromRaw(raw);
-    if (!book.items.length) {
-      alert("정산 탭에 업체별 공급가표가 아직 없습니다.\n④ 정산 → '업체별 공급가표' 에 먼저 올려주세요.");
-      return;
-    }
+const formByName = n => S.forms.find(f => f.name === n) || null;
+async function saveForm(f) { await DB.putForm(f); await loadForms(); }
+
+/* ---------------- ④ 값 변경해서 양식에 넣기 ---------------- */
+const nmCount = f => (f && f.nameMap ? Object.keys(f.nameMap).length : 0);
+
+function drawNameMapCard() {
+  const card = $("card4"); if (!card) return;
+  if (!S.forms.length) { card.style.display = "none"; return; }
+  card.style.display = "block";
+  drawPick($("nm-pick"), nmPick, f => nmCount(f) > 0, n => { nmPick = n; drawNameMapCard(); });
+
+  const box = $("nm-detail");
+  const f = formByName(nmPick);
+  if (!f) {
+    const done = S.forms.filter(x => nmCount(x) > 0);
+    box.innerHTML = done.length
+      ? `<div class="pvfoot">지금 적용 중 — ${done.map(x => `${esc(x.name)} <b>${nmCount(x)}개</b>`).join(" · ")}<br>바꿀 업체를 눌러 표를 올리거나 바꾸세요.</div>`
+      : `<div class="pvfoot">위에서 업체를 고르면 매핑표를 올릴 수 있어요.</div>`;
+    return;
   }
-  vsetForm.withPrice = !vsetForm.withPrice;
-  await saveVendorSet();
-};
-$("vset-nm-clear").onclick = async () => {
-  if (!vsetForm || !confirm("올려둔 상품명 매핑표를 해제할까요?")) return;
-  vsetForm.nameMap = null; vsetForm.nameMapFile = ""; vsetForm.nameMapList = null;
-  await saveVendorSet();
-};
-$("vset-nm-list").onclick = () => {
-  const l = (vsetForm && vsetForm.nameMapList) || [];
-  if (!l.length) return;
-  alert("상품명 바꾸기 (" + l.length + "개)\n\n"
-    + l.slice(0, 40).map(x => `${x.from}\n   → ${x.to}`).join("\n\n")
-    + (l.length > 40 ? `\n\n… 외 ${l.length - 40}개` : ""));
-};
-$("vset-nm-tpl").onclick = async () => {
+  const n = nmCount(f);
+  box.innerHTML = `
+    <div class="exrow"><b>${esc(f.name)}</b>
+      <span style="font-size:11.5px;font-weight:700;color:${n ? "var(--ok)" : "var(--muted)"}">
+        ${n ? `✔ ${esc(f.nameMapFile || "매핑표")} · ${n}개` : "아직 올린 표가 없습니다"}</span>
+      ${n ? `<button class="minibtn" id="nm-list">👁 내용 보기</button><button class="minibtn" id="nm-clear">해제</button>` : ""}
+    </div>
+    <label class="drop" id="drop-nm" style="padding:14px">
+      매핑표 엑셀 선택 또는 끌어오기
+      <span class="drophint">변경전(쇼핑몰 상품명) · 변경후(업체 요청 상품명) 두 열</span>
+      <input type="file" id="f-nm" accept=".xlsx,.xlsm,.xls">
+    </label>
+    <div class="setrow" style="margin-top:6px"><span style="flex:1"></span>
+      <button class="minibtn" id="nm-tpl">📄 빈 양식 받기</button></div>`;
+
+  $("f-nm").addEventListener("change", function () {
+    const file = this.files[0]; this.value = "";
+    if (file) takeNameMap(f, file);
+  });
+  bindDrop("drop-nm", fs => { if (fs[0]) takeNameMap(f, fs[0]); });
+  $("nm-tpl").onclick = nameMapTemplate;
+  if ($("nm-clear")) $("nm-clear").onclick = async () => {
+    if (!confirm(`'${f.name}' 의 매핑표를 해제할까요?`)) return;
+    f.nameMap = null; f.nameMapList = null; f.nameMapFile = "";
+    await saveForm(f); drawNameMapCard();
+  };
+  if ($("nm-list")) $("nm-list").onclick = () => {
+    const l = f.nameMapList || [];
+    alert(`${f.name} — 상품명 바꾸기 (${l.length}개)\n\n`
+      + l.slice(0, 40).map(x => `${x.from}\n   → ${x.to}`).join("\n\n")
+      + (l.length > 40 ? `\n\n… 외 ${l.length - 40}개` : ""));
+  };
+}
+async function nameMapTemplate() {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("상품명매핑");
   ws.addRow(["변경전(쇼핑몰 상품명)", "변경후(업체 요청 상품명)"]);
@@ -1463,31 +1484,120 @@ $("vset-nm-tpl").onclick = async () => {
   ws.getColumn(1).width = 46; ws.getColumn(2).width = 34;
   ws.getRow(1).font = { bold: true };
   download(await QO.saveWorkbook(wb), "상품명매핑_양식.xlsx");
-};
-async function takeNameMap(file) {
-  if (!vsetForm) return;
+}
+async function takeNameMap(f, file) {
   try {
     const wb = await QO.loadWorkbook(await readFile(file));
     const r = QO.readNameMap(wb);
-    vsetForm.nameMap = r.map;
-    vsetForm.nameMapList = r.list;
-    vsetForm.nameMapFile = file.name;
-    await saveVendorSet();
+    f.nameMap = r.map; f.nameMapList = r.list; f.nameMapFile = file.name;
+    await saveForm(f);
+    drawNameMapCard();
+    msg("msg-o", "ok", `✔ ${f.name} — 상품명 ${r.list.length}개를 바꿔서 보냅니다.`);
     if (r.dup.length) alert(`같은 상품명이 두 번 나와 마지막 것만 씁니다 (${r.dup.length}개):\n` + r.dup.slice(0, 8).join("\n"));
   } catch (e) { alert("매핑표를 읽지 못했어요: " + e.message); }
 }
-$("f-vsetnm").addEventListener("change", function () {
-  const f = this.files[0]; this.value = "";
-  if (f) takeNameMap(f);
+
+/* ---------------- ⑤ 추가 정보 넣기 ---------------- */
+/* 넣을 수 있는 값 — 공급가표에서 뽑아온다 */
+const EXTRA_FIELDS = [
+  { k: "price", name: "공급단가", hint: "업체에 지급할 개당 단가" },
+  { k: "ship", name: "배송비", hint: "공급가표에 적힌 배송비" },
+];
+const exOn = f => (f && f.extra) || (f && f.withPrice ? { price: true } : {});   // 예전 설정도 읽는다
+const exAny = f => EXTRA_FIELDS.some(x => exOn(f)[x.k]);
+
+async function drawExtraCard() {
+  const card = $("card5"); if (!card) return;
+  if (!S.forms.length) { card.style.display = "none"; return; }
+  card.style.display = "block";
+
+  const book = QO.priceBookFromRaw(await DB.get("priceBook", null));
+  $("ex-book").innerHTML = book.items.length
+    ? `공급가표: <b>${book.items.length}개</b> 상품 (④ 정산 탭에서 올린 것)`
+    : `<span style="color:var(--warn)">⚠ 공급가표가 아직 없습니다 — ④ 정산 탭의 '업체별 공급가표' 에 먼저 올려주세요.</span>`;
+
+  drawPick($("ex-pick"), exPick, exAny, n => { exPick = n; drawExtraCard(); });
+
+  const box = $("ex-detail");
+  const f = formByName(exPick);
+  if (!f) {
+    const done = S.forms.filter(exAny);
+    box.innerHTML = done.length
+      ? `<div class="pvfoot">지금 넣는 중 — ${done.map(x =>
+          `${esc(x.name)} <b>${EXTRA_FIELDS.filter(e => exOn(x)[e.k]).map(e => e.name).join("·")}</b>`).join(" · ")}</div>`
+      : `<div class="pvfoot">위에서 업체를 고르면 어떤 값을 넣을지 정할 수 있어요.</div>`;
+    return;
+  }
+  const on = exOn(f);
+  box.innerHTML = EXTRA_FIELDS.map(e => `
+    <div class="exrow"><b>${esc(e.name)}</b>
+      <span style="font-size:11px;color:var(--muted);flex:none">${esc(e.hint)}</span>
+      <button class="minibtn" data-ex="${e.k}"
+        style="${on[e.k] ? "background:var(--brand-soft);color:var(--brand);border-color:var(--brand)" : ""}">
+        ${on[e.k] ? "넣는 중" : "넣기"}</button></div>`).join("");
+  box.querySelectorAll("[data-ex]").forEach(btn => {
+    btn.onclick = async () => {
+      const k = btn.dataset.ex;
+      const cur = Object.assign({}, exOn(f));
+      if (!cur[k] && !book.items.length) {
+        alert("정산 탭에 업체별 공급가표가 아직 없습니다.\n④ 정산 → '업체별 공급가표' 에 먼저 올려주세요.");
+        return;
+      }
+      cur[k] = !cur[k];
+      f.extra = cur;
+      delete f.withPrice;                 // 예전 설정은 여기로 옮겨 담는다
+      await saveForm(f);
+      drawExtraCard();
+    };
+  });
+}
+function drawVendorOptCards() { drawNameMapCard(); drawExtraCard(); refreshFolds(); }
+
+/* 두 메뉴 다 '선택 기능' 이라 평소엔 접어둔다 — 화면을 먹지 않게.
+   접은 상태는 기억한다. */
+const FOLDS = {};
+function bindFold(btnId, bodyId, key, defFolded, noteId, summary) {
+  const btn = $(btnId), body = $(bodyId);
+  if (!btn || !body) return;
+  const K = () => CONFIG.ls(key);
+  const read = () => { try { const v = localStorage.getItem(K()); return v === null ? !!defFolded : v === "1"; } catch (e) { return !!defFolded; } };
+  const apply = () => {
+    const off = read();
+    body.style.display = off ? "none" : "";
+    btn.textContent = off ? "펴기" : "접기";
+    /* 접어둔 채로도 '뭐가 정해져 있는지' 보여준다 — 안 보이면 안 했다고 생각한다 */
+    const note = noteId && $(noteId);
+    if (note) {
+      const html = off && summary ? summary() : "";
+      note.innerHTML = html || "";
+      note.style.display = html ? "" : "none";
+    }
+  };
+  FOLDS[btnId] = apply;
+  btn.onclick = () => { try { localStorage.setItem(K(), read() ? "0" : "1"); } catch (e) {} apply(); };
+  apply();
+}
+bindFold("nm-fold", "nm-body", "qo_fold_namemap", true, "nm-note", () => {
+  const done = S.forms.filter(f => nmCount(f) > 0);
+  if (!done.length) return "";
+  return `✔ 상품명 바꿔서 보내는 업체 <b>${done.length}곳</b>`
+    + `<span>${esc(done.map(f => `${f.name} ${nmCount(f)}개`).join(" · "))}</span>`;
 });
-bindDrop("drop-vsetnm", fs => { if (fs[0]) takeNameMap(fs[0]); });
+bindFold("ex-fold", "ex-body", "qo_fold_extra", true, "ex-note", () => {
+  const done = S.forms.filter(exAny);
+  if (!done.length) return "";
+  return `✔ 추가 정보를 넣는 업체 <b>${done.length}곳</b>`
+    + `<span>${esc(done.map(f => `${f.name} — ${EXTRA_FIELDS.filter(e => exOn(f)[e.k]).map(e => e.name).join("·")}`).join(" · "))}</span>`;
+});
+const refreshFolds = () => Object.values(FOLDS).forEach(fn => { try { fn(); } catch (e) {} });
+
 
 /* 양식 목록 접기 — 업체가 늘면 이 카드만으로 화면이 꽉 찬다.
    접어둔 상태는 기억한다 (업체별로 따로). */
 const VFOLD = () => CONFIG.ls("qo_fold_forms");
 const foldedForms = () => { try { return localStorage.getItem(VFOLD()) === "1"; } catch (e) { return false; } };
 function applyFormFold() {
-  const box = $("vlist"), btn = $("vfold"), cnt = $("vcount");
+  const box = $("vlist"), btn = $("vfold"), cnt = $("vcount"), note = $("vsummary");
   if (!box || !btn) return;
   const has = S.forms.length > 0;
   const off = foldedForms();
@@ -1496,10 +1606,22 @@ function applyFormFold() {
   box.classList.toggle("folded", off && has);
   // 제목 줄이 좁은 화면에서 두 줄로 접히지 않게 짧게 (14/14)
   if (cnt) cnt.textContent = has ? `${S.forms.filter(f => f.checked).length}/${S.forms.length}` : "";
+  /* ★ 접어두면 '아무것도 안 올라간 줄' 알게 된다 — 접었을 때만 요약을 보여준다 */
+  if (note) {
+    const show = has && off;
+    note.style.display = show ? "" : "none";
+    if (show) {
+      const on = S.forms.filter(f => f.checked);
+      note.innerHTML = `✔ 공급사 발주서 양식 <b>${S.forms.length}곳</b> 올려둠`
+        + (on.length !== S.forms.length ? ` · 이번에 쓸 곳 <b>${on.length}곳</b>` : "")
+        + `<span>${esc(S.forms.map(f => f.name).join(" · "))}</span>`;
+    }
+  }
 }
 if ($("vfold")) $("vfold").onclick = () => {
   try { localStorage.setItem(VFOLD(), foldedForms() ? "0" : "1"); } catch (e) {}
   applyFormFold();
+  drawVendorOptCards();
 };
 
 function drawForms() {
@@ -1520,17 +1642,13 @@ function drawForms() {
     /* 이 업체에만 걸린 설정이 있으면 이름 옆에 표시한다 — 열어보지 않아도 알게 */
     const tags = [];
     if (f.nameMap && Object.keys(f.nameMap).length) tags.push(`🏷${Object.keys(f.nameMap).length}`);
-    if (f.withPrice) tags.push("💰");
+    if (exAny(f)) tags.push("💰");
     el.innerHTML = `<div class="vtop"><span class="box">${CHK}</span><b>${esc(f.name)}</b>`
       + (tags.length ? `<span class="vtag" title="상품명 바꾸기 / 공급가 넣기">${esc(tags.join(" "))}</span>` : "")
       + `<button class="vdel">✕</button></div>
       <span class="vfile" title="${esc(f.file)}">${esc(f.file)}</span>
-      <div class="vbtns"><button class="rn">이름수정</button><button class="cfg">설정</button><button class="dl">엑셀 받기</button></div>`;
+      <div class="vbtns"><button class="rn">이름수정</button><button class="dl">엑셀 받기</button></div>`;
     el.onclick = async ev => {
-      if (ev.target.classList.contains("cfg")) {
-        ev.stopPropagation();
-        openVendorSet(f); return;
-      }
       if (ev.target.classList.contains("rn")) {
         ev.stopPropagation();
         await renameForm(f); return;
@@ -1553,6 +1671,7 @@ function drawForms() {
     box.appendChild(el);
   });
   applyFormFold();
+  drawVendorOptCards();       // ④ 값 변경 · ⑤ 추가 정보 메뉴도 같이 갱신
 }
 
 /* --- 업체별 브랜드 --- */
@@ -1719,7 +1838,7 @@ $("run-o").onclick = async function () {
     /* 공급가표는 한 번만 풀어서 돌려 쓴다 (업체마다 다시 풀 이유가 없다).
        정산 탭이 쓰는 그 표 그대로다 — 단가가 서로 어긋나면 안 된다. */
     let priceCtx = null;
-    if (picked.some(f => f.withPrice)) {
+    if (picked.some(exAny)) {
       const book = QO.priceBookFromRaw(await DB.get("priceBook", null));
       if (book.items.length) priceCtx = { book, aliases: await DB.get("priceAliases", {}) };
       else msg("msg-o", "warn", "⚠ 공급가 넣기를 켠 업체가 있는데 정산 탭에 공급가표가 없습니다 — 공급가는 비워 둡니다.");
@@ -1746,7 +1865,9 @@ $("run-o").onclick = async function () {
       const r = QO.convert(orderWb, tplWb, {
         brands: brandFilter, dates: S.dateSel.length ? S.dateSel : null, dateHeader: S.dateHeader,
         nameMap: f.nameMap || null,                       // 업체가 원하는 상품명으로
-        price: f.withPrice ? priceCtx : null,             // 공급가 넣기
+        price: exAny(f) && priceCtx
+          ? Object.assign({ fields: EXTRA_FIELDS.filter(e => exOn(f)[e.k]).map(e => e.k) }, priceCtx)
+          : null,
       });
       /* ★ 고른 날짜에 주문이 없으면 발주서를 만들지 않는다 (2026-08-18).
          예전에는 0건짜리 빈 발주서가 결과에 그대로 나와서, 업체에 보낼 것이
