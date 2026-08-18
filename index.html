@@ -230,6 +230,13 @@
   .vbtns button{flex:1;min-width:0;font-size:9.5px;font-weight:700;font-family:inherit;
     padding:4px 1px;border-radius:5px;border:1px solid var(--line);white-space:nowrap;
     letter-spacing:-.04em;background:var(--card2);color:var(--muted);cursor:pointer}
+  /* 업체 카드에 붙는 설정 표시 (🏷 상품명 바꾸기 / 💰 공급가) */
+  .vtag{flex:none;font-size:9.5px;font-weight:800;color:var(--brand);background:var(--brand-soft);
+    border-radius:6px;padding:2px 5px;white-space:nowrap}
+  /* 못 찾은 상품 목록 — 조용히 넘어가면 업체가 그대로 받는다 */
+  .misslist{font-size:11px;line-height:1.55;color:var(--muted);background:var(--card2);
+    border:1px solid var(--line);border-radius:8px;padding:7px 9px;margin-top:5px;word-break:break-all}
+  .misslist b{color:var(--warn)}
   /* 카드 제목 옆 접기/펴기 */
   .fold{margin-left:auto;font-size:11px;font-weight:800;color:var(--brand);background:var(--brand-soft);
     border:none;border-radius:999px;padding:4px 10px;cursor:pointer;font-family:inherit;white-space:nowrap}
@@ -837,6 +844,40 @@
 </div>
 
 <!-- 검색조건 관리 모달 (발주서/회신 공용) -->
+<!-- 업체 하나에만 걸리는 설정 — 상품명 바꾸기 / 공급가 넣기 -->
+<div class="modal" id="vsetmodal">
+  <div class="sheet">
+    <div class="grip"></div>
+    <h3 id="vset-title">업체 설정</h3>
+    <p class="sub2">이 업체 발주서에만 적용됩니다.</p>
+    <div class="sheetbody">
+      <div class="syncbox">
+        <div class="syncrow"><b>🏷 상품명 바꿔서 보내기</b>
+          <button class="minibtn" id="vset-nm-clear" style="display:none">해제</button></div>
+        <div class="synchint">업체가 자기네 상품명으로 받길 원할 때 씁니다.
+          <b>변경전</b>(쇼핑몰 상품명) · <b>변경후</b>(업체 요청 상품명) 두 열짜리 엑셀을 올려주세요.</div>
+        <div class="synctxt" id="vset-nm-state">아직 올린 매핑표가 없습니다</div>
+        <label class="drop" id="drop-vsetnm" style="margin-top:8px;padding:14px">
+          매핑표 엑셀 선택 또는 끌어오기
+          <span class="drophint">변경전 · 변경후 두 열</span>
+          <input type="file" id="f-vsetnm" accept=".xlsx,.xlsm,.xls">
+        </label>
+        <div class="setrow" style="margin-top:6px"><span style="flex:1"></span>
+          <button class="minibtn" id="vset-nm-tpl">📄 양식 받기</button>
+          <button class="minibtn" id="vset-nm-list" style="display:none">👁 내용 보기</button></div>
+      </div>
+      <div class="syncbox">
+        <div class="syncrow"><b>💰 공급가 넣기</b>
+          <button class="minibtn" id="vset-price">끄기</button></div>
+        <div class="synchint">정산 탭에 올려둔 <b>업체별 공급가표</b>에서 상품마다 단가를 찾아
+          발주서에 적어 보냅니다. 양식에 공급가 칸이 없으면 맨 뒤에 만들어 붙입니다.</div>
+        <div class="synctxt" id="vset-price-state"></div>
+      </div>
+    </div>
+    <div class="row"><button class="btn-cancel" id="vset-close">닫기</button></div>
+  </div>
+</div>
+
 <!-- 주문일 열이 없는 쇼핑몰 — 어느 열을 주문일로 쓸지 물어본다.
      안 물어보면 그 몰 주문이 날짜로 거를 때 통째로 빠진다 (실제로 30건이 사라졌다) -->
 <div class="modal" id="dcolmodal">

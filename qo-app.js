@@ -1401,6 +1401,87 @@ function addDupFixer(box, groups) {
   }));
   box.appendChild(w);
 }
+/* =================================================================
+   업체 하나에만 걸리는 설정 — 상품명 바꾸기 / 공급가 넣기
+   ================================================================= */
+let vsetForm = null;
+function openVendorSet(f) {
+  vsetForm = f;
+  $("vset-title").textContent = `${f.name} 설정`;
+  drawVendorSet();
+  $("vsetmodal").classList.add("on");
+}
+function drawVendorSet() {
+  const f = vsetForm; if (!f) return;
+  const n = f.nameMap ? Object.keys(f.nameMap).length : 0;
+  $("vset-nm-state").textContent = n
+    ? `✔ ${esc(f.nameMapFile || "매핑표")} · ${n}개 상품명을 바꿔서 보냅니다`
+    : "아직 올린 매핑표가 없습니다";
+  $("vset-nm-clear").style.display = n ? "" : "none";
+  $("vset-nm-list").style.display = n ? "" : "none";
+  const on = !!f.withPrice;
+  $("vset-price").textContent = on ? "끄기" : "켜기";
+  $("vset-price").style.background = on ? "var(--brand-soft)" : "";
+  $("vset-price").style.color = on ? "var(--brand)" : "";
+  $("vset-price-state").textContent = on
+    ? "✔ 이 업체 발주서에 공급단가를 적어 보냅니다"
+    : "지금은 넣지 않습니다";
+}
+async function saveVendorSet() { if (vsetForm) { await DB.putForm(vsetForm); await loadForms(); drawVendorSet(); } }
+$("vset-close").onclick = () => $("vsetmodal").classList.remove("on");
+$("vsetmodal").onclick = e => { if (e.target === $("vsetmodal")) $("vsetmodal").classList.remove("on"); };
+$("vset-price").onclick = async () => {
+  if (!vsetForm) return;
+  if (!vsetForm.withPrice) {
+    const raw = await DB.get("priceBook", null);
+    const book = QO.priceBookFromRaw(raw);
+    if (!book.items.length) {
+      alert("정산 탭에 업체별 공급가표가 아직 없습니다.\n④ 정산 → '업체별 공급가표' 에 먼저 올려주세요.");
+      return;
+    }
+  }
+  vsetForm.withPrice = !vsetForm.withPrice;
+  await saveVendorSet();
+};
+$("vset-nm-clear").onclick = async () => {
+  if (!vsetForm || !confirm("올려둔 상품명 매핑표를 해제할까요?")) return;
+  vsetForm.nameMap = null; vsetForm.nameMapFile = ""; vsetForm.nameMapList = null;
+  await saveVendorSet();
+};
+$("vset-nm-list").onclick = () => {
+  const l = (vsetForm && vsetForm.nameMapList) || [];
+  if (!l.length) return;
+  alert("상품명 바꾸기 (" + l.length + "개)\n\n"
+    + l.slice(0, 40).map(x => `${x.from}\n   → ${x.to}`).join("\n\n")
+    + (l.length > 40 ? `\n\n… 외 ${l.length - 40}개` : ""));
+};
+$("vset-nm-tpl").onclick = async () => {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("상품명매핑");
+  ws.addRow(["변경전(쇼핑몰 상품명)", "변경후(업체 요청 상품명)"]);
+  ws.addRow(["[헤트라스] 프리미엄 부드러운 이중미세모 칫솔 21개입", "프리미엄 칫솔 21P"]);
+  ws.getColumn(1).width = 46; ws.getColumn(2).width = 34;
+  ws.getRow(1).font = { bold: true };
+  download(await QO.saveWorkbook(wb), "상품명매핑_양식.xlsx");
+};
+async function takeNameMap(file) {
+  if (!vsetForm) return;
+  try {
+    const wb = await QO.loadWorkbook(await readFile(file));
+    const r = QO.readNameMap(wb);
+    vsetForm.nameMap = r.map;
+    vsetForm.nameMapList = r.list;
+    vsetForm.nameMapFile = file.name;
+    await saveVendorSet();
+    if (r.dup.length) alert(`같은 상품명이 두 번 나와 마지막 것만 씁니다 (${r.dup.length}개):\n` + r.dup.slice(0, 8).join("\n"));
+  } catch (e) { alert("매핑표를 읽지 못했어요: " + e.message); }
+}
+$("f-vsetnm").addEventListener("change", function () {
+  const f = this.files[0]; this.value = "";
+  if (f) takeNameMap(f);
+});
+bindDrop("drop-vsetnm", fs => { if (fs[0]) takeNameMap(fs[0]); });
+
 /* 양식 목록 접기 — 업체가 늘면 이 카드만으로 화면이 꽉 찬다.
    접어둔 상태는 기억한다 (업체별로 따로). */
 const VFOLD = () => CONFIG.ls("qo_fold_forms");
@@ -1436,10 +1517,20 @@ function drawForms() {
     el.className = "vrow" + (f.checked ? " on" : "");
     /* 미리보기 버튼은 뺐다 (2026-08-18) — 양식은 한 번 보면 그만인데 카드마다
        자리를 먹었다. 내용을 봐야 하면 '엑셀 받기' 로 받아서 열면 된다. */
-    el.innerHTML = `<div class="vtop"><span class="box">${CHK}</span><b>${esc(f.name)}</b><button class="vdel">✕</button></div>
+    /* 이 업체에만 걸린 설정이 있으면 이름 옆에 표시한다 — 열어보지 않아도 알게 */
+    const tags = [];
+    if (f.nameMap && Object.keys(f.nameMap).length) tags.push(`🏷${Object.keys(f.nameMap).length}`);
+    if (f.withPrice) tags.push("💰");
+    el.innerHTML = `<div class="vtop"><span class="box">${CHK}</span><b>${esc(f.name)}</b>`
+      + (tags.length ? `<span class="vtag" title="상품명 바꾸기 / 공급가 넣기">${esc(tags.join(" "))}</span>` : "")
+      + `<button class="vdel">✕</button></div>
       <span class="vfile" title="${esc(f.file)}">${esc(f.file)}</span>
-      <div class="vbtns"><button class="rn">이름수정</button><button class="dl">엑셀 받기</button></div>`;
+      <div class="vbtns"><button class="rn">이름수정</button><button class="cfg">설정</button><button class="dl">엑셀 받기</button></div>`;
     el.onclick = async ev => {
+      if (ev.target.classList.contains("cfg")) {
+        ev.stopPropagation();
+        openVendorSet(f); return;
+      }
       if (ev.target.classList.contains("rn")) {
         ev.stopPropagation();
         await renameForm(f); return;
@@ -1625,6 +1716,14 @@ $("run-o").onclick = async function () {
   try {
     const picked = S.forms.filter(f => f.checked);
     const results = [], skipped = [], empty = [];
+    /* 공급가표는 한 번만 풀어서 돌려 쓴다 (업체마다 다시 풀 이유가 없다).
+       정산 탭이 쓰는 그 표 그대로다 — 단가가 서로 어긋나면 안 된다. */
+    let priceCtx = null;
+    if (picked.some(f => f.withPrice)) {
+      const book = QO.priceBookFromRaw(await DB.get("priceBook", null));
+      if (book.items.length) priceCtx = { book, aliases: await DB.get("priceAliases", {}) };
+      else msg("msg-o", "warn", "⚠ 공급가 넣기를 켠 업체가 있는데 정산 탭에 공급가표가 없습니다 — 공급가는 비워 둡니다.");
+    }
     for (const f of picked) {
       const sel = S.sel[f.name] || [];
       /* ★ 고른 날짜에 주문이 없는 업체는 '브랜드 미선택' 이 아니다 — 그냥 보낼 게 없는 것이다.
@@ -1646,6 +1745,8 @@ $("run-o").onclick = async function () {
       const brandFilter = (S.brands.length && sel.length !== S.brands.length) ? sel : null;
       const r = QO.convert(orderWb, tplWb, {
         brands: brandFilter, dates: S.dateSel.length ? S.dateSel : null, dateHeader: S.dateHeader,
+        nameMap: f.nameMap || null,                       // 업체가 원하는 상품명으로
+        price: f.withPrice ? priceCtx : null,             // 공급가 넣기
       });
       /* ★ 고른 날짜에 주문이 없으면 발주서를 만들지 않는다 (2026-08-18).
          예전에는 0건짜리 빈 발주서가 결과에 그대로 나와서, 업체에 보낼 것이
@@ -1654,6 +1755,8 @@ $("run-o").onclick = async function () {
       const out = await QO.saveWorkbook(tplWb);
       results.push({ supplier: f.name, count: r.count, buf: out,
         byMall: r.byMall || {}, noDate: r.noDate || 0,
+        renamed: r.renamed || 0, nameMissing: r.nameMissing || [],
+        priceOn: !!r.priceOn, priceCount: r.priceCount || 0, priceMissing: r.priceMissing || [],
         // 파일명 고정 형식: 오늘날짜_보내는곳_업체명_발주양식.xlsx
         // ※ 사용자가 별도로 요청하지 않는 한 이 형식을 바꾸지 말 것
         // 가운데 '보내는곳' 은 법인이 여럿이면 그 업체 주문이 속한 법인(더벨로샵/커민사이드),
@@ -1761,9 +1864,31 @@ function showResultO(results, skipped, verify) {
     const mallList = Object.entries(r.byMall || {}).sort((a, b) => b[1] - a[1]);
     const mallHtml = mallList.length
       ? `<div class="mallrow">${mallList.map(([m, n]) => `<span>${esc(m)} <b>${n}</b></span>`).join("")}</div>` : "";
+    /* 상품명 바꾸기 · 공급가 넣기 결과 — 못 찾은 건 반드시 보여준다.
+       조용히 원래 이름/빈칸으로 나가면 업체가 그걸 그대로 받는다. */
+    let extra = "";
+    if (r.renamed || (r.nameMissing && r.nameMissing.length)) {
+      extra += `<div class="mallrow"><span>🏷 상품명 바꿈 <b>${r.renamed}</b></span>`
+        + (r.nameMissing.length ? `<span style="border-color:var(--warn);color:var(--warn)">매핑표에 없음 <b>${r.nameMissing.length}종</b></span>` : "")
+        + `</div>`;
+      if (r.nameMissing.length)
+        extra += `<div class="misslist">매핑표에 없어 원래 이름으로 나갑니다 —<br>`
+          + r.nameMissing.slice(0, 6).map(x => `· ${esc(x.name)} <b>${x.count}건</b>`).join("<br>")
+          + (r.nameMissing.length > 6 ? `<br>… 외 ${r.nameMissing.length - 6}종` : "") + `</div>`;
+    }
+    if (r.priceOn) {
+      const bad = r.count - r.priceCount;
+      extra += `<div class="mallrow"><span>💰 공급가 <b>${r.priceCount}/${r.count}</b></span>`
+        + (bad > 0 ? `<span style="border-color:var(--warn);color:var(--warn)">못 찾음 <b>${bad}건</b></span>` : "")
+        + `</div>`;
+      if (r.priceMissing && r.priceMissing.length)
+        extra += `<div class="misslist">공급가표에서 못 찾아 빈칸으로 둡니다 —<br>`
+          + r.priceMissing.slice(0, 6).map(x => `· ${esc(x.name)} <b>${x.count}건</b>`).join("<br>")
+          + (r.priceMissing.length > 6 ? `<br>… 외 ${r.priceMissing.length - 6}종` : "") + `</div>`;
+    }
     el.innerHTML = `<div class="rtop"><div class="vinfo"><b>${esc(cleanVendor(r.supplier))}</b><span>${esc(r.filename)}</span></div>
       <span class="cnt">${r.count}건</span></div>
-      ${mallHtml}
+      ${mallHtml}${extra}
       <div class="cands"></div>
       <div class="rmail"><input type="text" placeholder="${esc(r.supplier)} 이메일 (여러 개는 쉼표로)"
         value="${esc(S.vendorEmails[r.supplier] || "")}" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">

@@ -691,7 +691,41 @@ function convert(orderWb, tplWb, opts) {
     if (rowsToClear.length) log(`   (양식에 있던 지난 주문 ${rowsToClear.length}줄을 비웠습니다)`);
   }
 
+  /* ---- 업체가 원하는 상품명으로 바꾸기 ---- */
+  const nameMap = opts.nameMap || null;
+  let renamed = 0;
+  const missName = new Map();          // 매핑표에 없어 그대로 나간 상품명
+
+  /* ---- 공급가 넣기 ----
+     정산 탭에 올려둔 업체별 공급가표에서 상품마다 단가를 찾아 채운다.
+     양식에 공급가 칸이 있으면 그 자리에, 없으면 맨 뒤에 칸을 만들어 붙인다. */
+  const priceBookIn = opts.price && opts.price.book && opts.price.book.items && opts.price.book.items.length
+    ? opts.price.book : null;
+  let priceCol = null, priceHit = 0;
+  const missPrice = new Map();
+  if (priceBookIn) {
+    const want = /공급단가|공급가|매입가|매입단가|단가/;
+    const skip = /합계|총|금액/;
+    for (let c = 1; c <= dims(tws).cols; c++) {
+      const h = normHeader(getV(tws, tgtHeaderRow, c));
+      if (h && want.test(h) && !skip.test(h)) { priceCol = c; break; }
+    }
+    if (!priceCol) {
+      priceCol = dims(tws).cols + 1;
+      const hc = tws.getRow(tgtHeaderRow).getCell(priceCol);
+      hc.value = "공급단가";
+      hc.style = Object.assign({}, tws.getRow(tgtHeaderRow).getCell(Math.max(1, priceCol - 1)).style);
+      tws.getColumn(priceCol).width = 12;
+      log("   (양식에 공급가 칸이 없어 맨 뒤에 '공급단가' 를 붙였습니다)");
+    }
+  }
+
   const sd = dims(sws);
+  /* 브랜드·옵션·날짜 열 — 공급가를 찾을 때 쓴다 (상품명만으로는 못 고른다) */
+  const sBrandCol = findBrandColumn(sws, srcHeaderRow);
+  const sOptCol = smap.OPTION || null;
+  const sProdCol = smap.PRODUCT || null;
+  const sDateCol = smap.ORDER_DATE || smap.COLLECT_DATE || null;
   /* 어느 쇼핑몰에서 몇 건인지 세어 둔다 — 결과 화면에 그대로 보여준다.
      합친 표에만 있는 열이라, 없으면 조용히 건너뛴다. */
   let mallCol = null;
@@ -713,7 +747,16 @@ function convert(orderWb, tplWb, opts) {
       if (!dv) { noDate++; continue; }
       if (!dateSet.has(dv)) continue;
     }
-    const vals = pairs.map(([scol, tcols]) => [tcols, getV(sws, r, scol)]);
+    const vals = pairs.map(([scol, tcols]) => {
+      let v = getV(sws, r, scol);
+      /* 업체가 원하는 상품명으로 바꿔서 내보낸다 (그 업체 발주서에만) */
+      if (nameMap && scol === sProdCol && !isBlank(v)) {
+        const to = applyNameMap(nameMap, v);
+        if (to !== v) { v = to; renamed++; }
+        else missName.set(String(v), (missName.get(String(v)) || 0) + 1);
+      }
+      return [tcols, v];
+    });
     if (vals.every(([, v]) => isBlank(v))) continue;
     for (const [tcols, v] of vals) {
       for (const tcol of tcols) {
@@ -746,10 +789,33 @@ function convert(orderWb, tplWb, opts) {
       const mv = String(getV(sws, r, mallCol) || "").trim();
       if (mv) byMall[mv] = (byMall[mv] || 0) + 1;
     }
+    /* 공급가 — 상품명은 '바꾸기 전' 이름으로 찾아야 한다.
+       매핑표로 이름을 바꿔 놓고 그 이름으로 공급가표를 뒤지면 하나도 안 맞는다. */
+    if (priceBookIn && priceCol) {
+      const pr = {
+        brand: sBrandCol ? getV(sws, r, sBrandCol) : "",
+        product: sProdCol ? getV(sws, r, sProdCol) : "",
+        option: sOptCol ? getV(sws, r, sOptCol) : "",
+        date: sDateCol ? getV(sws, r, sDateCol) : "",
+      };
+      const m = matchPrice(priceBookIn, pr, (opts.price && opts.price.aliases) || null);
+      if (m && m.ok) { tws.getRow(outRow).getCell(priceCol).value = m.price; priceHit++; }
+      else {
+        const nm = String(pr.product || "").trim();
+        if (nm) missPrice.set(nm, (missPrice.get(nm) || 0) + 1);
+      }
+    }
     outRow++; count++;
   }
   log(`총 ${count}건 기입`);
-  return { count, sheet: tws.name, byMall, noDate };
+  const top = m => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20)
+    .map(([name, n]) => ({ name, count: n }));
+  return {
+    count, sheet: tws.name, byMall, noDate,
+    renamed, nameMissing: nameMap ? top(missName) : [],
+    priceCount: priceHit, priceMissing: priceBookIn ? top(missPrice) : [],
+    priceOn: !!priceBookIn,
+  };
 }
 
 /* 선택한 날짜 기준 '변환되어야 할' 주문 건수 (브랜드별) — 변환 결과 검증용 */
@@ -1264,6 +1330,91 @@ function priceRowKey(brand, product, option) {
   return [k.b, k.pFull, k.o].join("|");
 }
 
+/* ---------------- 저장해 둔 공급가표(raw) → 공급가 책 ----------------
+   정산 탭이 IndexedDB 에 넣어 둔 그대로를 읽는다. 발주 탭에서도 같은 표를 써야
+   '정산에서 쓰는 단가' 와 '발주서에 찍히는 단가' 가 어긋나지 않는다.
+   ※ 예전에는 이 풀어내는 코드가 qo-settle 안에만 있었다. 두 탭이 따로 풀면
+     언젠가 갈라진다 — 그래서 여기로 옮겨 한 곳에서만 정한다. */
+function priceRowsFromRaw(raw) {
+  const out = { rows: [], shipModes: {}, payDays: {} };
+  if (!raw || !raw.sheets) return out;
+  const off = raw.off || [];
+  const t = v => (v === null || v === undefined ? "" : String(v).trim());
+  raw.sheets.forEach(sh => {
+    if (off.indexOf(sh.name) >= 0) return;
+    const g = (r, k) => (sh.map[k] === undefined ? "" : r[sh.map[k]]);
+    if (sh.kind === "ship") {
+      sh.rows.forEach(r => {
+        const v = t(g(r, "vendor")); if (!v) return;
+        out.shipModes[v] = t(g(r, "shipMode"));
+        const d = t(g(r, "payDay")); if (d) out.payDays[v] = d;
+      });
+    } else {
+      sh.rows.forEach(r => out.rows.push({
+        vendor: t(g(r, "vendor")), brand: t(g(r, "brand")), product: t(g(r, "product")),
+        option: t(g(r, "option")), price: g(r, "price"), ship: g(r, "ship"),
+        from: g(r, "from"), to: g(r, "to"), _sheet: sh.name,
+      }));
+    }
+  });
+  return out;
+}
+function priceBookFromRaw(raw) {
+  const p = priceRowsFromRaw(raw);
+  const book = buildPriceBook(p.rows, { shipModes: p.shipModes });
+  book.shipModes = p.shipModes;
+  book.payDays = p.payDays;
+  return book;
+}
+
+/* ---------------- 업체가 원하는 상품명으로 바꾸기 ----------------
+   업체에 따라 '우리 쇼핑몰 상품명' 이 아니라 '자기네 상품명' 으로 받길 원한다.
+   변경전 / 변경후 두 열짜리 엑셀을 업체별로 올려두면 그 업체 발주서에만 적용한다. */
+const NAMEMAP_FROM = ["변경전", "변경 전", "쇼핑몰상품명", "기존상품명", "원래상품명", "before"];
+const NAMEMAP_TO = ["변경후", "변경 후", "브랜드요청상품명", "요청상품명", "바꿀상품명", "after"];
+const nameMapKey = v => String(v === null || v === undefined ? "" : v)
+  .replace(/\s+/g, "").replace(/[()（）[\]]/g, "").toLowerCase();
+
+function readNameMap(wb) {
+  const ws = wb.worksheets && wb.worksheets[0];
+  if (!ws) throw new Error("시트를 찾지 못했어요.");
+  const d = dims(ws);
+  let hr = 0, cFrom = 0, cTo = 0;
+  for (let r = 1; r <= Math.min(d.rows, 10) && !hr; r++) {
+    let a = 0, b = 0;
+    for (let c = 1; c <= d.cols; c++) {
+      const h = normHeader(getV(ws, r, c)).toLowerCase();
+      if (!h) continue;
+      if (!a && NAMEMAP_FROM.some(k => h.includes(normHeader(k).toLowerCase()))) a = c;
+      else if (!b && NAMEMAP_TO.some(k => h.includes(normHeader(k).toLowerCase()))) b = c;
+    }
+    if (a && b) { hr = r; cFrom = a; cTo = b; }
+  }
+  /* 헤더가 없으면 '두 열짜리 표' 로 본다 — 사람들이 헤더 없이 만들어 오는 일이 흔하다 */
+  if (!hr) {
+    if (d.cols < 2) throw new Error("'변경전' · '변경후' 두 열이 필요합니다.");
+    hr = 0; cFrom = 1; cTo = 2;
+  }
+  const map = {}, list = [], dup = [];
+  for (let r = hr + 1; r <= d.rows; r++) {
+    const from = getV(ws, r, cFrom), to = getV(ws, r, cTo);
+    if (isBlank(from) || isBlank(to)) continue;
+    const k = nameMapKey(from);
+    if (!k) continue;
+    if (map[k] !== undefined && map[k] !== String(to).trim()) dup.push(String(from).trim());
+    map[k] = String(to).trim();
+    list.push({ from: String(from).trim(), to: String(to).trim() });
+  }
+  if (!list.length) throw new Error("바꿀 상품명을 한 줄도 찾지 못했습니다. '변경전' · '변경후' 열을 확인해 주세요.");
+  return { map, list, dup };
+}
+/* 상품명 하나를 바꾼다. 못 찾으면 원래 이름 그대로 (조용히 비우지 않는다) */
+function applyNameMap(map, name) {
+  if (!map) return name;
+  const k = nameMapKey(name);
+  return (k && map[k] !== undefined) ? map[k] : name;
+}
+
 /* 주문 한 줄에 맞는 공급단가 찾기
    aliases: {주문키: 공급가표키} — 이름이 달라 자동으로 못 붙는 상품을 사람이 한 번 이어준 것.
    별칭이 있으면 이름 비교를 건너뛰고 그 상품으로 바로 간다(적용기간은 그대로 따진다). */
@@ -1705,6 +1856,7 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   valueTransformForHeader, nameFromFilename, normKey,
   mergeOrders, mallKey, dateLikeColumns, brandFromName, brandFromKnown, resolveBrand, aliasKey, convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, carrierKey, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, isOldXlsBuffer, todayStr, fmtDate,
   normPriceText, toPriceNumber, priceKeyParts, priceRowKey, buildPriceBook, matchPrice,
+  priceRowsFromRaw, priceBookFromRaw, readNameMap, applyNameMap, nameMapKey,
   rankPriceCandidates, settle, settleCheck,
   settleSheetHead, settleSheetRow, isPriceHeader, isInternalHeader, vendorSheetColumns, carryNote };
 });

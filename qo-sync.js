@@ -71,7 +71,10 @@ const SYNC = (() => {
       version: 1,
       updatedAt: Date.now(),
       kv,
-      forms: forms.map(f => ({ name: f.name, file: f.file, checked: f.checked !== false, data: b64FromBuf(f.data) })),
+      /* 업체별 설정(상품명 매핑 · 공급가 넣기)도 같이 실어야 기기를 바꿔도 남는다 */
+      forms: forms.map(f => ({ name: f.name, file: f.file, checked: f.checked !== false,
+        nameMap: f.nameMap || null, nameMapList: f.nameMapList || null, nameMapFile: f.nameMapFile || "",
+        withPrice: !!f.withPrice, data: b64FromBuf(f.data) })),
     };
   }
 
@@ -97,7 +100,9 @@ const SYNC = (() => {
         const at = Number(tomb[f.name]) || 0;
         if (at && at >= bundleAt) continue;             // 지운 뒤로 바뀐 게 없으면 되살리지 않는다
         if (at) revived.push(f.name);                   // 백업이 더 최신 → 되살리고 표시는 지운다
-        await DB.putForm({ name: f.name, file: f.file, checked: f.checked !== false, data: bufFromB64(f.data) });
+        await DB.putForm({ name: f.name, file: f.file, checked: f.checked !== false,
+          nameMap: f.nameMap || null, nameMapList: f.nameMapList || null, nameMapFile: f.nameMapFile || "",
+          withPrice: !!f.withPrice, data: bufFromB64(f.data) });
       }
       if (revived.length) {
         revived.forEach(n => { delete tomb[n]; });

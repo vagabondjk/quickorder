@@ -149,31 +149,10 @@ const ST = (() => {
     await DB.set("settleCarry", { at: Date.now(), list });
   }
   async function saveBrandFix() { await DB.set("settleBrandVendor", brandFix); }
-  function rebuildBook() {
-    if (!pbRaw || !pbRaw.sheets) { pbook = QO.buildPriceBook([]); return; }
-    const off = pbRaw.off || [];
-    const shipModes = {}, payDays = {}, rows = [];
-    pbRaw.sheets.forEach(sh => {
-      if (off.indexOf(sh.name) >= 0) return;
-      const g = (r, k) => (sh.map[k] === undefined ? "" : r[sh.map[k]]);
-      if (sh.kind === "ship") {
-        sh.rows.forEach(r => {
-          const v = s(g(r, "vendor")); if (!v) return;
-          shipModes[v] = s(g(r, "shipMode"));
-          const d = s(g(r, "payDay")); if (d) payDays[v] = d;
-        });
-      } else {
-        sh.rows.forEach(r => rows.push({
-          vendor: s(g(r, "vendor")), brand: s(g(r, "brand")), product: s(g(r, "product")),
-          option: s(g(r, "option")), price: g(r, "price"), ship: g(r, "ship"),
-          from: g(r, "from"), to: g(r, "to"), _sheet: sh.name,
-        }));
-      }
-    });
-    pbook = QO.buildPriceBook(rows, { shipModes });
-    pbook.shipModes = shipModes;
-    pbook.payDays = payDays;
-  }
+  /* 공급가표 풀어내는 코드는 qo-logic 한 곳에만 둔다 (QO.priceBookFromRaw).
+     발주 탭도 같은 표에서 단가를 뽑기 때문에, 두 군데서 따로 풀면 언젠가 갈라진다 —
+     '정산에서 쓰는 단가' 와 '발주서에 찍히는 단가' 가 달라지면 사고다. */
+  function rebuildBook() { pbook = QO.priceBookFromRaw(pbRaw); }
   const hasBook = () => pbook.items.length > 0;
 
   /* =================================================================
