@@ -1726,15 +1726,31 @@ function buildVendorBrands() {
   });
   /* ★ 고른 날짜에 주문이 있는 업체만 보여준다.
      · 이미 브랜드가 배정된 업체 → 그 브랜드에 주문이 있어야 뜬다
-     · 아직 아무것도 배정 안 된 업체 → 주인 없는 브랜드가 남아 있을 때만 뜬다
-       (그래야 새 브랜드를 배정할 자리가 사라지지 않는다) */
+     · 아직 배정 안 된 업체 → '이름이 맞아떨어지는 주인 없는 브랜드' 가 있을 때만 뜬다
+
+     ※ 예전에는 주인 없는 브랜드가 하나라도 있으면 배정 안 된 업체를 전부 띄웠다.
+       8/18 에 주문이 하나도 없는 고양이수산·나경·내추럴이믹스까지 나와서
+       '이 날짜에 발주가 있나' 하고 헷갈렸다 (2026-08-18 지적).
+     ※ 이름이 안 맞는 새 브랜드는 여기서 안 보여도 놓치지 않는다 —
+       변환 뒤 '어느 업체에도 배정되지 않은 브랜드' 로 크게 알려준다. */
   const live = brandsNow();
   const liveSet = new Set(live);
   const freeLive = live.filter(b => !checked.some(f => (S.sel[f.name] || []).includes(b)));
+  const norm = v => String(v || "").replace(/\s+/g, "").toLowerCase();
+  const looksMine = f => {
+    const n = norm(f.name);
+    return !!n && freeLive.some(b => { const t = norm(b); return t && (t === n || t.includes(n) || n.includes(t)); });
+  };
+  /* 이름이 맞는 업체가 하나도 없는 '주인 없는 브랜드' — 이건 사람이 정해줘야 한다.
+     이때만 배정 안 된 업체를 같이 띄운다 (그래야 고를 자리가 있다). */
+  const orphan = freeLive.filter(b => !checked.some(f => {
+    const n = norm(f.name), t = norm(b);
+    return n && t && (t === n || t.includes(n) || n.includes(t));
+  }));
   const shown = checked.filter(f => {
     const mine = S.sel[f.name] || [];
     if (mine.length) return mine.some(b => liveSet.has(b));
-    return freeLive.length > 0;
+    return looksMine(f) || orphan.length > 0;
   });
   const hidden = checked.filter(f => !shown.includes(f));
   if (!shown.length) { card.style.display = "none"; box.innerHTML = ""; refreshO(); return; }
@@ -1758,9 +1774,11 @@ function buildVendorBrands() {
   const foot = $("card3").querySelector(".pvfoot") || (() => {
     const d = document.createElement("div"); d.className = "pvfoot"; $("card3").appendChild(d); return d;
   })();
-  foot.textContent = hidden.length
-    ? `고른 날짜에 주문이 없어 ${hidden.length}곳은 숨겼습니다 — ${hidden.map(f => f.name).join(", ")}`
-    : "";
+  foot.innerHTML = (orphan.length
+      ? `<b style="color:var(--warn)">🔔 업체가 정해지지 않은 브랜드: ${esc(orphan.join(", "))}</b> — 아래에서 맡을 업체를 골라주세요.<br>` : "")
+    + (hidden.length
+      ? `고른 날짜에 주문이 없어 ${hidden.length}곳은 숨겼습니다 — ${esc(hidden.map(f => f.name).join(", "))}`
+      : "");
   refreshO();
 }
 function renderVendorChips(wrap, f) {
