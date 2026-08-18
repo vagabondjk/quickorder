@@ -100,8 +100,6 @@
   .drop:hover,.drop.hi{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
   .drop b{display:block;color:var(--ink);font-size:13.5px;margin-top:5px;word-break:break-all}
   /* 폴더째 끌어올 수 있다는 건 보이지 않으면 아무도 모른다 — 한 줄로만 알려준다 */
-  .drophint{display:block;font-size:11px;font-weight:600;color:var(--faint);margin-top:3px}
-  .drop:hover .drophint,.drop.hi .drophint{color:inherit;opacity:.75}
   /* 드롭 영역 안의 파일 목록 — 목록을 눌러도 파일 선택창이 열리지 않게 한다 */
   .dropfiles{display:flex;flex-wrap:wrap;gap:5px;justify-content:center;margin-top:8px}
   .dropfiles .fchip{display:inline-flex;align-items:center;gap:5px;max-width:100%;
@@ -504,7 +502,6 @@
       <button class="go" id="mail-order" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
       <label class="drop" id="drop-order" style="margin-top:8px">
         디바이스 파일 선택 또는 끌어오기
-        <span class="drophint">여러 쇼핑몰 · 폴더째 가능 · 올릴 때마다 <b>더해집니다</b> (지우려면 해제)</span>
         <b id="order-name"></b>
         <input type="file" id="f-order" accept=".xlsx,.xlsm,.xls" multiple>
       </label>
@@ -546,7 +543,6 @@
       <button class="go" id="drive-tpl" style="margin:0 0 8px;font-size:14.5px;padding:13px;background:var(--ok);color:#fff">📁 구글 드라이브에서 파일 퀵로딩</button>
       <label class="drop" id="drop-tpl" style="margin-top:8px;padding:14px">
         디바이스 파일 선택 또는 끌어오기
-        <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
         <input type="file" id="f-tpl" accept=".xlsx,.xlsm,.xls" multiple>
       </label>
     </div>
@@ -569,6 +565,11 @@
             통째로 바꿉니다. 예) <i>오늘만특가 오브제 2구 앙쥬 세트</i> → <i>오브제 2구 앙쥬</i><br>
           브랜드마다 시트가 나뉜 파일이면 <b>업체 이름과 같은 시트</b>를 찾아 씁니다.
           한 번 올려두면 그 업체 발주서에 계속 적용됩니다.</p>
+        <label class="drop" id="drop-rule-nm" style="padding:14px;margin-bottom:8px">
+          규칙표 엑셀 선택 또는 끌어오기 — 한 번만 올리면 됩니다
+          <input type="file" id="f-rule-nm" accept=".xlsx,.xlsm,.xls">
+        </label>
+        <div class="pvfoot" style="margin:0 0 6px">업체를 하나씩 손보려면 —</div>
         <div class="vpick" id="nm-pick"></div>
         <div id="nm-detail"></div>
       </div>
@@ -585,6 +586,11 @@
           <b>④ 정산</b> 탭에 올려둔 <b>업체별 공급가표</b>에서 상품마다 값을 찾아 넣습니다.
           양식에 그 칸이 없으면 맨 뒤에 만들어 붙입니다.</p>
         <div class="pvfoot" id="ex-book" style="margin:0 0 8px"></div>
+        <label class="drop" id="drop-rule-ex" style="padding:14px;margin-bottom:8px">
+          규칙표 엑셀 선택 또는 끌어오기 — 한 번만 올리면 됩니다
+          <input type="file" id="f-rule-ex" accept=".xlsx,.xlsm,.xls">
+        </label>
+        <div class="pvfoot" style="margin:0 0 6px">업체를 하나씩 손보려면 —</div>
         <div class="vpick" id="ex-pick"></div>
         <div id="ex-detail"></div>
       </div>
@@ -610,7 +616,6 @@
       <button class="go" id="mail-sab" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
       <label class="drop" id="drop-sab">
         디바이스 파일 선택 또는 끌어오기
-        <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
         <b id="sab-name"></b>
         <div class="dropfiles" id="sab-files"></div>
         <input type="file" id="f-sab" accept=".xlsx,.xlsm,.xls" multiple>
@@ -627,7 +632,6 @@
       <button class="go" id="mail-rep" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
       <label class="drop" id="drop-rep" style="padding:14px;margin-top:8px">
         디바이스 파일 선택 또는 끌어오기
-        <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
         <input type="file" id="f-rep" accept=".xlsx,.xlsm,.xls" multiple>
       </label>
       <div class="vlist" id="replist" style="margin-top:8px"></div>
@@ -653,7 +657,6 @@
       <div class="setrow"><span id="cs-filter">CS 검색: 문의, 교환, 반품, 취소</span><button class="minibtn" id="cs-filter-btn">검색조건</button></div>
       <label class="drop" id="drop-cs" style="margin-top:8px;padding:16px">
         디바이스 파일 선택 또는 끌어오기
-        <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
         <b id="cs-fname"></b>
         <input type="file" id="f-cs" accept=".xlsx,.xlsm,.xls" multiple>
       </label>
@@ -691,7 +694,6 @@
       <button class="go" id="st-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
       <label class="drop" id="drop-st" style="margin-top:8px;padding:16px">
         디바이스 파일 선택 또는 끌어오기
-        <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
         <b id="st-fname"></b>
         <input type="file" id="f-st" accept=".xlsx,.xlsm,.xls" multiple>
         <!-- 불러온 파일을 이 안에 보여준다 (발주·송장 탭과 같은 모양).
@@ -721,7 +723,6 @@
       <button class="go" id="pb-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
       <label class="drop" id="drop-pb" style="margin:0 0 8px;padding:16px">
         디바이스 파일 선택 또는 끌어오기
-        <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
         <input type="file" id="f-pb" accept=".xlsx,.xlsm,.xls" multiple>
       </label>
       <div class="setrow" style="margin:0 0 8px"><span style="flex:1"></span>
@@ -751,7 +752,6 @@
       <button class="go" id="pay-mail" style="margin:0 0 8px;font-size:14.5px;padding:13px">📧 메일에서 파일 퀵로딩</button>
       <label class="drop" id="drop-pay" style="margin:0 0 8px;padding:16px">
         디바이스 파일 선택 또는 끌어오기
-        <span class="drophint">여러 개 · 폴더째 끌어오기 가능</span>
         <input type="file" id="f-pay" accept=".xlsx,.xlsm,.xls" multiple>
       </label>
       <label class="minibtn" id="pay-dir-btn" style="display:none;margin:0 0 8px;text-align:center">

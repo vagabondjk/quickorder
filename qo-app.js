@@ -1511,7 +1511,6 @@ function drawNameMapCard() {
     </div>
     <label class="drop" id="drop-nm" style="padding:14px">
       매핑표 엑셀 선택 또는 끌어오기
-      <span class="drophint">변경전 · 변경후 두 열 (변경전을 비우면 키워드 매핑)</span>
       <input type="file" id="f-nm" accept=".xlsx,.xlsm,.xls">
     </label>
     <div class="setrow" style="margin-top:6px"><span style="flex:1"></span>
@@ -1536,6 +1535,43 @@ function drawNameMapCard() {
       + (l.length > 40 ? `\n\n… 외 ${l.length - 40}개` : ""));
   };
 }
+/* ★ 규칙표 한 번 올리면 시트마다 알아서 업체에 배정한다 (2026-08-18).
+   파일에 '플로_값변경…' · '마이옵티멀_추가정보넣기' 처럼 업체별 시트가 들어 있으니,
+   업체를 하나씩 골라 같은 파일을 여러 번 올릴 이유가 없다. */
+const vnorm = v => String(v || "").replace(/\s+/g, "").toLowerCase();
+async function applyRuleFile(file) {
+  try {
+    const wb = await QO.loadWorkbook(await readFile(file));
+    const sheets = QO.readAllRuleSheets(wb);
+    if (!sheets.length) {
+      alert("이 파일에서 '매핑조건 / 추가정보' 표를 찾지 못했습니다.\n"
+        + "시트 이름을 '업체명_값변경해서 양식에 넣기' · '업체명_추가정보넣기' 로,\n"
+        + "1행에 매핑조건·추가정보, 2행에 항목 이름을 적어주세요.");
+      return;
+    }
+    const done = [], miss = [];
+    for (const s of sheets) {
+      const h = vnorm(s.vendorHint);
+      /* 시트 앞머리가 비면(업체 이름이 안 붙은 파일) 지금 고른 업체에 건다 */
+      const f = h
+        ? S.forms.find(x => { const n = vnorm(x.name); return n && (n === h || n.includes(h) || h.includes(n)); })
+        : formByName(s.kind === "rename" ? nmPick : exPick);
+      if (!f) { miss.push(`${s.vendorHint || "(업체 미상)"} — 그 이름의 양식이 없습니다`); continue; }
+      if (s.kind === "rename") { f.renameTable = s.table; f.renameFile = file.name; }
+      else { f.extraTable = s.table; f.extraFile = file.name; }
+      await DB.putForm(f);
+      done.push(`${f.name}: ${s.kind === "rename" ? "값 변경" : "추가 정보"} ${s.table.rules.length}줄`
+        + (s.kind === "extra" ? ` → ${s.table.fields.join(", ")}` : ""));
+    }
+    await loadForms();
+    drawVendorOptCards();
+    if (!done.length) { alert("적용된 업체가 없습니다.\n" + miss.join("\n")); return; }
+    msg("msg-o", miss.length ? "warn" : "ok",
+      `✔ 규칙표를 ${done.length}곳에 적용했어요 — ${done.join(" · ")}`
+      + (miss.length ? ` · ⚠ 건너뜀: ${miss.join(", ")}` : ""));
+  } catch (e) { alert("규칙표를 읽지 못했어요: " + e.message); }
+}
+
 /* 규칙표 올리기 — ⑤ 에서 올려도 값 변경 규칙이 같이 들어 있으면 같이 받아둔다 */
 async function takeExtraTable(f, file) {
   try {
@@ -1603,6 +1639,12 @@ const EXTRA_FIELDS = [
 ];
 const exOn = f => (f && f.extra) || (f && f.withPrice ? { price: true } : {});   // 예전 설정도 읽는다
 const exAny = f => EXTRA_FIELDS.some(x => exOn(f)[x.k]) || !!(f && f.extraTable && f.extraTable.rules);
+/* 이 업체에 무엇을 넣고 있는지 한 줄로 — 규칙표 항목도 같이 (예: 상품코드 · 공급단가) */
+const exLabel = f => {
+  const a1 = (f && f.extraTable && f.extraTable.fields) || [];
+  const a2 = EXTRA_FIELDS.filter(e => exOn(f)[e.k]).map(e => e.name);
+  return a1.concat(a2).join(" · ") || "없음";
+};
 
 async function drawExtraCard() {
   const card = $("card5"); if (!card) return;
@@ -1615,15 +1657,14 @@ async function drawExtraCard() {
     : `<span style="color:var(--warn)">⚠ 공급가표가 아직 없습니다 — ④ 정산 탭의 '업체별 공급가표' 에 먼저 올려주세요.</span>`;
 
   drawPick($("ex-pick"), exPick, exAny, n => { exPick = n; drawExtraCard(); },
-    f => EXTRA_FIELDS.filter(e => exOn(f)[e.k]).map(e => e.name).join("·"));
+    f => (exAny(f) ? exLabel(f) : ""));
 
   const box = $("ex-detail");
   const f = formByName(exPick);
   if (!f) {
     const done = S.forms.filter(exAny);
     box.innerHTML = done.length
-      ? `<div class="pvfoot">지금 넣는 중 — ${done.map(x =>
-          `${esc(x.name)} <b>${EXTRA_FIELDS.filter(e => exOn(x)[e.k]).map(e => e.name).join("·")}</b>`).join(" · ")}</div>`
+      ? `<div class="pvfoot">지금 넣는 중 — ${done.map(x => `${esc(x.name)} <b>${esc(exLabel(x))}</b>`).join(" · ")}</div>`
       : `<div class="pvfoot">위에서 업체를 고르면 어떤 값을 넣을지 정할 수 있어요.</div>`;
     return;
   }
@@ -1637,7 +1678,6 @@ async function drawExtraCard() {
     </div>
     <label class="drop" id="drop-ex" style="padding:14px;margin-bottom:8px">
       규칙표 엑셀 선택 또는 끌어오기
-      <span class="drophint">1행 매핑조건 · 추가정보 / 2행 항목이름 (상품명 · 옵션 · 브랜드 → 상품코드 · 공급가)</span>
       <input type="file" id="f-ex" accept=".xlsx,.xlsm,.xls">
     </label>
     <div class="pvfoot" style="margin:0 0 8px">또는 ④ 정산 탭의 공급가표에서 바로 가져오기 —</div>`
@@ -1710,9 +1750,16 @@ bindFold("ex-fold", "ex-body", "qo_fold_extra", true, "ex-note", () => {
   const done = S.forms.filter(exAny);
   if (!done.length) return "";
   return `✔ 추가 정보를 넣는 업체 <b>${done.length}곳</b>`
-    + `<span>${esc(done.map(f => `${f.name} — ${EXTRA_FIELDS.filter(e => exOn(f)[e.k]).map(e => e.name).join("·")}`).join(" · "))}</span>`;
+    + `<span>${esc(done.map(f => `${f.name} — ${exLabel(f)}`).join(" · "))}</span>`;
 });
 const refreshFolds = () => Object.values(FOLDS).forEach(fn => { try { fn(); } catch (e) {} });
+
+/* 카드 위쪽 업로드 — 업체를 안 골라도 시트 이름대로 알아서 배정한다 */
+[["f-rule-nm", "drop-rule-nm"], ["f-rule-ex", "drop-rule-ex"]].forEach(([inp, drop]) => {
+  const el = $(inp);
+  if (el) el.addEventListener("change", function () { const f = this.files[0]; this.value = ""; if (f) applyRuleFile(f); });
+  if ($(drop)) bindDrop(drop, fs => { if (fs[0]) applyRuleFile(fs[0]); });
+});
 
 
 /* 양식 목록 접기 — 업체가 늘면 이 카드만으로 화면이 꽉 찬다.

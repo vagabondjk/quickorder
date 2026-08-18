@@ -1707,6 +1707,22 @@ function readVendorRules(wb, opts) {
   return out;
 }
 
+/* 파일 안의 모든 규칙 시트를 훑는다 — 한 번 올리면 시트마다 알아서 배정하려고.
+   [{ vendorHint, kind, table }] — vendorHint 는 시트 이름 앞머리(업체명)다. */
+function readAllRuleSheets(wb) {
+  const out = [];
+  (wb.worksheets || []).forEach(ws => {
+    const name = String(ws.name || "");
+    const kind = /값\s*변경/.test(name) ? "rename" : /추가\s*정보/.test(name) ? "extra" : null;
+    if (!kind) return;
+    const t = readRuleSheet(ws, kind);
+    if (!t) return;
+    const i = name.indexOf("_");
+    out.push({ vendorHint: i > 0 ? name.slice(0, i).trim() : "", kind, table: t });
+  });
+  return out;
+}
+
 /* 옛 형태(평평한 객체)도 그대로 읽는다 — 이미 올려둔 매핑표가 있다 */
 function normNameMap(m) {
   if (!m) return null;
@@ -2168,7 +2184,7 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   mergeOrders, mallKey, dateLikeColumns, brandFromName, brandFromKnown, resolveBrand, aliasKey, convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, carrierKey, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, isOldXlsBuffer, todayStr, fmtDate,
   normPriceText, toPriceNumber, priceKeyParts, priceRowKey, buildPriceBook, matchPrice,
   priceRowsFromRaw, priceBookFromRaw, readNameMap, applyNameMap, nameMapKey, normNameMap,
-  readVendorRules, readRuleSheet, matchRule,
+  readVendorRules, readRuleSheet, readAllRuleSheets, matchRule,
   rankPriceCandidates, settle, settleCheck,
   settleSheetHead, settleSheetRow, isPriceHeader, isInternalHeader, vendorSheetColumns, carryNote };
 });
