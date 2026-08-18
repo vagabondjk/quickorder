@@ -22,7 +22,7 @@ const SYNC = (() => {
     // v6.1 — 업체별 공급가표. 이게 빠지면 기기를 바꿨을 때 단가와 연결표가 통째로 사라진다
     // 지운 업체 양식 표시 — 이게 빠지면 다른 기기의 백업이 지운 양식을 되살린다
     // 상품명 → 업체 연결표. 빠지면 기기를 바꿨을 때 지정해 둔 것이 통째로 사라진다
-    "orderAliases",
+    "orderAliases", "orderDateCols",
     "formsDeleted", "masterRevoked", "signupSheetId", "rosterSheetId", "settlePins",
     "pbSenders", "pbKeywords", "pbExclude", "paySenders", "payKeywords", "payExclude",
     "priceBook", "priceAliases", "priceAliasInfo", "settleBrandVendor", "settleVendors", "settleCarry",

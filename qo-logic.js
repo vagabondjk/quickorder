@@ -292,6 +292,36 @@ function findDateColumns(ws, headerRow) {
   }
   return out;
 }
+/* 날짜 '같아 보이는' 열을 값으로 찾아낸다.
+   헤더 이름만으로는 못 찾는 것이 있다 — 이제너두의 '출고지시일' 은 주문일 키워드에
+   안 걸린다. 그래서 실제 값을 몇 개 읽어 날짜로 풀리는지 본다.
+   ※ 주문번호·우편번호 같은 숫자가 엑셀 일련번호로 잘못 풀리는 걸 막으려고
+     ① 헤더 이름으로 한 번 거르고 ② 풀린 날짜가 2000~2099 년인지 본다. */
+function dateLikeColumns(ws, headerRow) {
+  const d = dims(ws), out = [];
+  const bad = /번호|코드|금액|단가|수량|가격|율|비율|id|no$|zip/i;
+  const seen = new Set(findDateColumns(ws, headerRow).map(x => x[0]));
+  findDateColumns(ws, headerRow).forEach(x => out.push({ col: x[0], header: x[1] }));
+  for (let c = 1; c <= d.cols; c++) {
+    if (seen.has(c)) continue;
+    const h = getV(ws, headerRow, c);
+    if (typeof h !== "string" || !h.trim()) continue;
+    if (bad.test(normHeader(h))) continue;
+    let tried = 0, ok = 0;
+    for (let r = headerRow + 1; r <= Math.min(headerRow + 40, d.rows) && tried < 12; r++) {
+      const v = getV(ws, r, c);
+      if (isBlank(v)) continue;
+      tried++;
+      const s = extractDate(v);
+      if (s && +s.slice(0, 4) >= 2000 && +s.slice(0, 4) <= 2099) ok++;
+    }
+    /* 표본이 하나뿐이어도(주문이 한 건인 몰) 헤더가 날짜처럼 생겼으면 받아준다.
+       이름이 아무 단서도 안 주는 열은 표본 두 개 이상을 요구한다. */
+    const looksDate = /일$|일시|일자|날짜|date/i.test(normHeader(h));
+    if (ok && ok / tried >= 0.8 && (tried >= 2 || looksDate)) out.push({ col: c, header: h.trim() });
+  }
+  return out;
+}
 function defaultDateColumn(ws, headerRow) {
   const cols = findDateColumns(ws, headerRow);
   if (!cols.length) return [null, null];
@@ -445,9 +475,17 @@ function aliasKey(name) {
     .toLowerCase().slice(0, 40);
 }
 
+/* 쇼핑몰 이름에서 날짜 꼬리를 뗀다 — '이제너두)벨로-0818' → '이제너두)벨로'.
+   '이 몰은 이 열을 주문일로 쓴다' 같은 기억은 다음 달 파일에도 이어져야 한다. */
+function mallKey(name) {
+  return String(name || "").replace(/\.[^.]+$/, "").replace(/[-_]\d{2,8}\s*$/, "").trim();
+}
+
 function mergeOrders(sources, opts) {
   opts = opts || {};
   const aliases = opts.aliases || null;
+  const dateFrom = opts.dateFrom || {};      // { 몰이름: '쓸 날짜 열 헤더' }
+  const dateless = [];                       // 주문일 열이 없는 몰 (화면에서 물어본다)
   const rows = [], fields = new Set();
   let brandSeen = false;
   (sources || []).forEach(src => {
@@ -457,6 +495,29 @@ function mergeOrders(sources, opts) {
     const hr = findHeaderRow(ws);
     const map = buildOrderFieldMap(ws, hr, "source");
     const brandCol = findBrandColumn(ws, hr);
+    /* ★ 주문일은 필수다. 없으면 그 몰 주문은 날짜로 고를 때 통째로 빠진다.
+       (이제너두는 '출고지시일' 만, 메가존은 '결제일시' 만 있었다 — 30건이 사라졌다)
+       그래서 ① 사람이 정해준 열이 있으면 그걸 주문일로 쓰고
+             ② 없으면 후보를 모아 화면에서 물어보게 한다. 몰래 아무거나 쓰지 않는다. */
+    if (!map.ORDER_DATE) {
+      const cands = dateLikeColumns(ws, hr).filter(x => x.col !== map.COLLECT_DATE);
+      const want = dateFrom[mallKey(mall)] || dateFrom[mall];
+      const hit = want ? cands.find(x => x.header === want) : null;
+      if (hit) map.ORDER_DATE = hit.col;
+      else {
+        const sampleOf = c => {
+          for (let r = hr + 1; r <= Math.min(hr + 40, dims(ws).rows); r++) {
+            const v = cv(ws.getRow(r).getCell(c));
+            if (!isBlank(v)) return fmtDate(extractDate(v)) || String(v).slice(0, 20);
+          }
+          return "";
+        };
+        dateless.push({
+          mall, key: mallKey(mall),
+          candidates: cands.map(x => ({ header: x.header, sample: sampleOf(x.col) })),
+        });
+      }
+    }
     const maxRow = dims(ws).rows;
     for (let r = hr + 1; r <= maxRow; r++) {
       const rec = { __mall: mall, __corp: src.corp || "" };
@@ -527,6 +588,7 @@ function mergeOrders(sources, opts) {
     brands: [...new Set(rows.map(r => r.__brand).filter(Boolean))],
     unknown: [...unknown.values()].sort((a, b) => b.count - a.count),
     unknownRows: rows.filter(r => !r.__brand).length,
+    dateless,        // 주문일 열이 없는 몰 — 화면에서 어느 열을 쓸지 물어본다
   };
 }
 
@@ -1614,7 +1676,7 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   toDateValue, isDateHeader, hasDateFormat, hasTimeFormat,
   findDateColumns, defaultDateColumn, orderDateInfo, formatPhone, stripHyphen,
   valueTransformForHeader, nameFromFilename, normKey,
-  mergeOrders, brandFromName, brandFromKnown, resolveBrand, aliasKey, convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, carrierKey, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, isOldXlsBuffer, todayStr, fmtDate,
+  mergeOrders, mallKey, dateLikeColumns, brandFromName, brandFromKnown, resolveBrand, aliasKey, convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, carrierKey, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, isOldXlsBuffer, todayStr, fmtDate,
   normPriceText, toPriceNumber, priceKeyParts, priceRowKey, buildPriceBook, matchPrice,
   rankPriceCandidates, settle, settleCheck,
   settleSheetHead, settleSheetRow, isPriceHeader, isInternalHeader, vendorSheetColumns, carryNote };

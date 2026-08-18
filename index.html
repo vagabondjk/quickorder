@@ -281,6 +281,12 @@
   .msg.err{background:var(--danger-soft);color:color-mix(in srgb,var(--danger) 78%,var(--ink))}
   .msg.warn{background:var(--warn-soft);color:color-mix(in srgb,var(--warn) 80%,var(--ink))}
   /* 업체를 못 정한 주문 — 눈에 띄어야 한다. 이대로 두면 그 주문은 어느 발주서에도 안 실린다 */
+  /* 주문일 열 고르기 */
+  .dcolrow{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:10px;margin-bottom:7px;
+    background:var(--card2);border:1px solid var(--line);border-radius:10px}
+  .dcolrow b{flex:1;min-width:130px;font-size:13px}
+  .dcolrow select{flex:none;max-width:100%;font-size:12px}
+  .dcolrow .none{width:100%;font-size:11.5px;font-weight:600;color:var(--warn)}
   /* 발주서 한 건이 어느 쇼핑몰에서 몇 건 왔는지 */
   .mallrow{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0 2px}
   .mallrow span{font-size:11px;font-weight:700;color:var(--muted);background:var(--card2);
@@ -824,6 +830,23 @@
 </div>
 
 <!-- 검색조건 관리 모달 (발주서/회신 공용) -->
+<!-- 주문일 열이 없는 쇼핑몰 — 어느 열을 주문일로 쓸지 물어본다.
+     안 물어보면 그 몰 주문이 날짜로 거를 때 통째로 빠진다 (실제로 30건이 사라졌다) -->
+<div class="modal" id="dcolmodal">
+  <div class="sheet">
+    <div class="grip"></div>
+    <h3>주문일 열을 정해주세요</h3>
+    <p class="sub2">아래 쇼핑몰 발주서에는 <b>주문일</b> 열이 없습니다.
+      그대로 두면 날짜로 고를 때 이 주문들이 전부 빠집니다.
+      비슷한 날짜 열 중에서 무엇을 주문일로 쓸지 골라주세요. <b>한 번 고르면 기억합니다.</b></p>
+    <div class="sheetbody"><div id="dcol-list"></div></div>
+    <div class="row">
+      <button class="btn-cancel" id="dcol-skip">나중에</button>
+      <button class="btn-go" id="dcol-ok">이대로 적용</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="filtermodal">
   <div class="sheet">
     <div class="grip"></div>

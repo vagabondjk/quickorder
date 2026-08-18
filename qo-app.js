@@ -589,11 +589,16 @@ async function setOrderFiles(srcs, icon) {
   await rebuildMerged();
 }
 
+/* '이 몰은 이 열을 주문일로 쓴다' — 한 번 고르면 기억한다 (다음 달 파일에도 적용) */
+const orderDateCols = () => DB.get("orderDateCols", {});
+
 /* 합치기 — 연결표가 바뀌면 여기만 다시 부르면 된다 */
 async function rebuildMerged() {
   const parts = S.orderParts;
   if (!parts || !parts.length) return;
-  const m = QO.mergeOrders(parts, { aliases: await orderAliases(), knownBrands: knownBrandList() });
+  const m = QO.mergeOrders(parts, {
+    aliases: await orderAliases(), knownBrands: knownBrandList(), dateFrom: await orderDateCols(),
+  });
   if (!m.rows) throw new Error("고른 파일에서 주문 줄을 찾지 못했습니다.");
   S.merged = m;
   const buf = await QO.saveWorkbook(m.wb);
@@ -604,6 +609,8 @@ async function rebuildMerged() {
     + (m.corps.length ? `<span style="display:block;font-weight:700;color:var(--brand);font-size:11.5px;margin-top:2px">${esc(m.corps.join(" · "))}</span>` : "")
     + `<span style="display:block;font-weight:600;color:var(--muted);font-size:11.5px;margin-top:2px">${esc(names)}</span>`;
   drawUnknownBrands();
+  /* 주문일 열이 없는 몰이 있으면 물어본다 — 그냥 두면 그 몰 주문이 통째로 빠진다 */
+  if (m.dateless && m.dateless.length) askDateColumns(m.dateless);
   if (m.unknownRows) {
     msg("msg-o", "warn", `✔ 쇼핑몰 ${m.malls.length || n}곳의 주문 ${m.rows}건을 합쳤어요. `
       + `다만 ${m.unknownRows}건은 어느 업체 상품인지 알 수 없습니다 — 아래에서 지정해 주세요.`);
@@ -611,6 +618,50 @@ async function rebuildMerged() {
     msg("msg-o", "ok", `✔ 쇼핑몰 ${m.malls.length || n}곳의 주문 ${m.rows}건을 합쳤어요 · 업체 ${m.brands.length}곳 — 아래에서 날짜 고르고 변환하세요`);
   }
 }
+
+/* ★ 주문일 열이 없는 쇼핑몰에 대해 '무엇을 주문일로 쓸지' 물어본다.
+   주문일은 필수 값이다. 없으면 날짜로 거를 때 그 몰 주문이 통째로 빠지는데,
+   예전에는 그 사실만 알려주고 끝이라 사람이 원본을 열어 손으로 확인해야 했다.
+   (이제너두는 '출고지시일', 메가존은 '결제일시' 밖에 없었다 — 30건이 사라졌다)
+   ※ 앱이 대신 고르지는 않는다. 어느 날짜를 주문일로 볼지는 장사하는 사람이 정할 일이다. */
+function askDateColumns(list) {
+  const box = $("dcol-list"), modal = $("dcolmodal");
+  if (!box || !modal) return;
+  box.innerHTML = "";
+  list.forEach(d => {
+    const row = document.createElement("div");
+    row.className = "dcolrow";
+    row.innerHTML = `<b>${esc(d.mall)}</b>`;
+    if (!d.candidates.length) {
+      row.innerHTML += `<span class="none">이 파일에는 날짜로 쓸 만한 열이 하나도 없습니다 — 날짜 없이 처리됩니다.</span>`;
+    } else {
+      const sel = document.createElement("select");
+      sel.className = "minibtn";
+      sel.dataset.key = d.key;
+      sel.innerHTML = `<option value="">쓰지 않음 (날짜 없이)</option>`
+        + d.candidates.map(c => `<option value="${esc(c.header)}">${esc(c.header)}${c.sample ? " — 예: " + esc(c.sample) : ""}</option>`).join("");
+      sel.value = d.candidates[0].header;         // 제일 그럴듯한 것을 미리 골라둔다
+      row.appendChild(sel);
+    }
+    box.appendChild(row);
+  });
+  modal.classList.add("on");
+}
+$("dcol-skip").onclick = () => $("dcolmodal").classList.remove("on");
+$("dcolmodal").onclick = e => { if (e.target === $("dcolmodal")) $("dcolmodal").classList.remove("on"); };
+$("dcol-ok").onclick = async function () {
+  const all = await orderDateCols();
+  let n = 0;
+  $("dcol-list").querySelectorAll("select[data-key]").forEach(sel => {
+    if (sel.value) { all[sel.dataset.key] = sel.value; n++; }
+    else delete all[sel.dataset.key];
+  });
+  await DB.set("orderDateCols", all);
+  $("dcolmodal").classList.remove("on");
+  if (!n) return;
+  await rebuildMerged();                     // 정한 대로 다시 합친다
+  await loadDates(); await drawPreview(); buildVendorBrands(); refreshO();
+};
 
 /* 업체를 못 정한 상품을 띄우고, 한 번 고르면 연결표에 기억한다.
    ★ 조용히 빠뜨리지 않는다 — 업체가 안 정해진 주문은 어느 발주서에도 안 실린다. */
