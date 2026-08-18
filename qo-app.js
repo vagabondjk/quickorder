@@ -1829,13 +1829,32 @@ function buildVendorBrands() {
   const liveSet = new Set(live);
   const freeLive = live.filter(b => !checked.some(f => (S.sel[f.name] || []).includes(b)));
   const norm = v => String(v || "").replace(/\s+/g, "").toLowerCase();
-  const looksMine = f => {
+  let looksMine = () => false;   // 아래에서 자동 배정을 마친 뒤 정해진다
+  /* ★ 규칙표에 적힌 브랜드로 업체를 알아낸다 (2026-08-18).
+     '플라이밀' 은 업체가 아니라 에프앤엘의 브랜드다. 이름이 다르니 자동으로 안 붙어
+     '업체가 정해지지 않은 브랜드' 로 남았다. 그런데 올려둔 규칙표
+     (에프앤엘_추가정보넣기)의 브랜드 조건에 '플라이밀' 이 적혀 있다 —
+     사용자가 이미 알려준 정보다. 그걸 읽어 자동으로 잇는다. */
+  const autoBrand = [];
+  freeLive.forEach(b => {
+    const t = norm(b);
+    if (!t) return;
+    const owner = checked.find(f => [f.renameTable, f.extraTable].some(tb =>
+      tb && tb.rules && tb.rules.some(r => (r.cond || []).some(c => c.field === "BRAND" && norm(c.raw) === t))));
+    if (!owner) return;
+    (S.sel[owner.name] = S.sel[owner.name] || []).push(b);
+    S.brandVendor[b] = owner.name;
+    autoBrand.push(`${b} → ${owner.name}`);
+  });
+  if (autoBrand.length) { try { DB.set("brandVendor", S.brandVendor); } catch (e) {} }
+  const free2 = live.filter(b => !checked.some(f => (S.sel[f.name] || []).includes(b)));
+
+  looksMine = f => {
     const n = norm(f.name);
-    return !!n && freeLive.some(b => { const t = norm(b); return t && (t === n || t.includes(n) || n.includes(t)); });
+    return !!n && free2.some(b => { const t = norm(b); return t && (t === n || t.includes(n) || n.includes(t)); });
   };
-  /* 이름이 맞는 업체가 하나도 없는 '주인 없는 브랜드' — 이건 사람이 정해줘야 한다.
-     이때만 배정 안 된 업체를 같이 띄운다 (그래야 고를 자리가 있다). */
-  const orphan = freeLive.filter(b => !checked.some(f => {
+  /* 이름도 규칙표도 안 맞는 '주인 없는 브랜드' — 이건 사람이 정해줘야 한다 */
+  const orphan = free2.filter(b => !checked.some(f => {
     const n = norm(f.name), t = norm(b);
     return n && t && (t === n || t.includes(n) || n.includes(t));
   }));
@@ -1899,7 +1918,9 @@ function buildVendorBrands() {
   const foot = $("card3").querySelector(".pvfoot") || (() => {
     const d = document.createElement("div"); d.className = "pvfoot"; $("card3").appendChild(d); return d;
   })();
-  foot.innerHTML = (hidden.length
+  foot.innerHTML = (autoBrand.length
+      ? `규칙표를 보고 자동으로 이었습니다 — <b>${esc(autoBrand.join(" · "))}</b><br>` : "")
+    + (hidden.length
       ? `고른 날짜에 주문이 없어 ${hidden.length}곳은 숨겼습니다 — ${esc(hidden.map(f => f.name).join(", "))}`
       : "");
   refreshO();
