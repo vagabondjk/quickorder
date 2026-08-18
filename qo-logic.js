@@ -11,7 +11,11 @@
 /* ---------------- 표준 항목 정의 (ORDER_FIELDS) ---------------- */
 const ORDER_FIELDS = [
   ["ORDER_NO",  ["주문번호"], ["회차","결제","배송","상품"]],
-  ["PRODUCT",   ["상품명","제품명","상품"], ["코드","번호","회차","옵션","단품"]],
+  /* ★ '상품판매유형'·'상품유형' 처럼 상품의 성격을 적은 열은 상품명이 아니다.
+     LG 발주서에서 이게 상품명 자리를 차지해 발주서 상품칸이 전부 '기본' 으로 나갔다
+     (진짜 상품명은 뒤쪽 '주문상품' 열이었다). 유형·구분 계열을 전부 막는다. */
+  ["PRODUCT",   ["상품명","제품명","주문상품","상품"],
+                ["코드","번호","회차","옵션","단품","유형","구분","분류","상태","종류","카테고리"]],
   ["OPTION",    ["옵션","단품명","단품"], ["코드"]],
   ["QTY",       ["수량"], []],
   ["AMOUNT",    ["결제금액","주문금액","판매금액","공급금액","금액"], ["할인"]],
@@ -20,8 +24,10 @@ const ORDER_FIELDS = [
   ["COLLECT_DATE",["주문수집일자","주문수집일","수집일자","수집일"], []],
   ["ORDER_DATE",["주문일시","주문일자","주문일"], ["지시","예정","예약","희망","완료","출하"]],
   ["PAY_DATE",  ["결제일시","결제일자","결제일"], []],
-  ["RECIPIENT", ["수령인명","수령인","수취인","받는분","받는사람","이름"], ["전화","연락처","주소","코드","번호"]],
-  ["RECIPIENT_PHONE", ["수령인연락처1","휴대폰번호","전화번호1","연락처1","수취인전화","휴대전화","휴대폰","전화번호","연락처"], ["가상","mail","2"]],
+  // '수령자명'(메가존·이지웰·티딜·현대샵) 이 빠져 있어 수령인이 통째로 비었다 — 252줄
+  ["RECIPIENT", ["수령인명","수령자명","수령인","수령자","수취인","받는분","받는사람","이름"],
+                ["전화","연락처","휴대","주소","코드","번호","위치"]],
+  ["RECIPIENT_PHONE", ["수령인연락처1","수령자휴대폰번호","휴대폰번호","전화번호1","연락처1","수취인전화","휴대전화","휴대폰","전화번호","연락처"], ["가상","mail","2"]],
   ["RECIPIENT_PHONE2",["수령인연락처2","연락처2","전화번호2"], ["가상","mail"]],
   ["ADDRESS",   ["배송주소","전체받는사람주소","수령인주소","주소"], ["코드"]],
   ["MESSAGE",   ["배송메시지","배송메세지","고객배송요청사항","배송요청","요청사항","주문요청메시지","메시지","메세지"], []],
@@ -37,7 +43,9 @@ const DATE_COL_KEYWORDS = ["수집일","주문일","일자","일시"];
 const COLLECT_KEYWORDS = ["주문수집일","수집일자","수집일"];
 const FIELD_KR = {ORDER_NO:"주문번호",PRODUCT:"상품",OPTION:"옵션",QTY:"수량",AMOUNT:"금액",
   COLLECT_DATE:"주문수집일자",ORDER_DATE:"주문일시",PAY_DATE:"결제일시",RECIPIENT:"수령인",RECIPIENT_PHONE:"연락처1",
-  RECIPIENT_PHONE2:"연락처2",ADDRESS:"주소",MESSAGE:"배송메시지",ZIP:"우편번호",ORDERER:"주문자"};
+  RECIPIENT_PHONE2:"연락처2",ADDRESS:"주소",MESSAGE:"배송메시지",ZIP:"우편번호",ORDERER:"주문자",
+  // 이 둘이 빠져 있어 합친 표 헤더에 CARRIER/INVOICE 가 영문 그대로 찍혔다
+  CARRIER:"택배사",INVOICE:"송장번호"};
 
 /* ---------------- 셀 값 읽기 (ExcelJS 값 형태 정규화) ---------------- */
 function cv(cell) {
@@ -80,10 +88,18 @@ function canonField(h) {
   if (s.includes("우편번호")) return "ZIP";
   if (s.includes("수량")) return "QTY";
   if (s.includes("옵션")) return "OPTION";
+  /* '단품명' 은 옵션이다 (삼성계열·이제너두). 상품명보다 먼저 걸러야
+     아래 '…명' 규칙에 상품으로 끌려가지 않는다. */
+  if (s.includes("단품")) return "OPTION";
   if (s.includes("주소")) return "ADDR";
+  /* ★ '상품판매유형' 처럼 상품의 '성격'을 적은 열이 상품명 자리를 차지하면
+     발주서 상품칸이 통째로 '기본' 같은 값으로 나간다 (LG 파일에서 실제로 그랬다).
+     이런 꼬리표가 붙은 열은 상품명이 아니다. */
+  if (s.includes("상품") && /유형|구분|분류|상태|종류|카테고리/.test(s)) return null;
   if (s.includes("상품명")) return "PRODUCT";
   if (s.includes("상품") && !s.includes("번호")) return "PRODUCT";
-  if (s.includes("수취인") || s.includes("수령인") || s.includes("받는사람") || s.includes("받는분") || s === "이름") return "RECIPIENT";
+  if (s.includes("수취인") || s.includes("수령인") || s.includes("수령자")
+      || s.includes("받는사람") || s.includes("받는분") || s === "이름") return "RECIPIENT";
   if (s.includes("주문자") || s.includes("구매자") || s.includes("보내는")) return "ORDERER";
   return null;
 }
@@ -143,7 +159,7 @@ function buildOrderFieldMap(ws, headerRow, role = "target") {
       result.RECIPIENT_PHONE = phones[0];
       if (phones.length > 1) result.RECIPIENT_PHONE2 = phones[1];
     } else {
-      let cand = phones.filter(c => ["수령인","수취인","받는"].some(k => headers[c].includes(k)));
+      let cand = phones.filter(c => ["수령인","수취인","수령자","받는"].some(k => headers[c].includes(k)));
       if (!cand.length && result.RECIPIENT) cand = phones.filter(c => c > result.RECIPIENT);
       if (!cand.length) cand = phones;
       result.RECIPIENT_PHONE = cand[0];
@@ -172,13 +188,23 @@ function pickOrderSheet(wb) {
 }
 
 /* ---------------- 브랜드 ---------------- */
+/* 업체(브랜드) 열 찾기.
+   쇼핑몰마다 이름이 다르다 — 삼성계열은 '브랜드', LG 는 '브랜드명'/'brandName'.
+   ※ '브랜드코드'(brandNo) 는 숫자라 업체명이 아니다. 반드시 걸러낸다. */
+const BRAND_HEADERS = ["브랜드", "브랜드명", "brandname"];
 function findBrandColumn(ws, headerRow) {
   const d = dims(ws);
+  let loose = null;
   for (let c = 1; c <= d.cols; c++) {
     const v = getV(ws, headerRow, c);
-    if (typeof v === "string" && v.trim() === BRAND_HEADER) return c;
+    if (typeof v !== "string") continue;
+    const s = normHeader(v).toLowerCase();
+    if (!s) continue;
+    if (/코드|번호|no$|code$/.test(s)) continue;
+    if (s === "브랜드") return c;                       // 정확히 맞으면 바로
+    if (BRAND_HEADERS.includes(s) && loose === null) loose = c;
   }
-  return null;
+  return loose;
 }
 function listBrands(wb) {
   const ws = pickOrderSheet(wb);
