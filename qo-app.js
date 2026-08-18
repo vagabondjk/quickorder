@@ -182,23 +182,24 @@ async function shareFile(buf, filename) {
    ★ '~$이름.xlsx' 는 엑셀이 파일을 열어둔 동안 만드는 잠금 파일이다. 확장자는 같지만
      내용은 엑셀이 아니라서, 폴더째 끌어오면 여기서 읽다가 통째로 실패한다.
      실제 발주서 폴더에 두 개 들어 있었다 (2026-08-18). 이름으로 걸러낸다. */
+/* 엑셀 파일인가. 구버전 .xls (엑셀 97-2003) 도 받는다 — qo-logic 이 읽어서
+   변환해 준다. 업체가 양식을 .xlsx 로 바꿔주지 않는 경우가 많아 앱이 떠안는다.
+   ★ '~$이름.xlsx' 는 엑셀이 파일을 열어둔 동안 만드는 잠금 파일이다. 확장자는 같지만
+     내용은 엑셀이 아니라서, 폴더째 끌어오면 여기서 읽다가 통째로 실패한다.
+     실제 발주서 폴더에 두 개 들어 있었다 (2026-08-18). 이름으로 걸러낸다. */
 const isXls = f => {
   const n = (f && f.name) || "";
-  return /\.xls[xm]$/i.test(n) && !/^~\$/.test(n.replace(/^.*[\\/]/, ""));
+  return /\.xls[xm]?$/i.test(n) && !/^~\$/.test(n.replace(/^.*[\\/]/, ""));
 };
-/* ★ 구버전 .xls (엑셀 97-2003) 는 읽을 수 없다.
-   .xlsx 는 XML 을 묶은 zip 이고, .xls 는 그 자체가 바이너리 덩어리(OLE2/BIFF)라
-   아예 다른 형식이다. 지금 쓰는 엑셀 라이브러리는 .xlsx 만 다룬다.
-   ※ 예전엔 이런 파일을 조용히 걸러 버렸다. 그러면 폴더째 올렸을 때 그 업체 양식만
-     쥐도 새도 모르게 빠진 채 발주가 나간다 — 못 읽는 것보다 나쁘다. 반드시 알린다. */
 const isOldXls = f => /\.xls$/i.test((f && f.name) || "");
-function warnOldXls(files, box) {
+/* 구버전이 섞여 있으면 알려만 준다 (읽기는 한다).
+   결과물은 .xlsx 로 나가므로 그 점을 짚어준다. */
+function noteOldXls(files, box) {
   const old = [...(files || [])].filter(isOldXls);
   if (!old.length) return false;
-  const names = old.map(f => f.name).join("\n · ");
-  const t = `구버전 엑셀(.xls) 파일은 읽을 수 없어요 — ${old.length}개를 빼고 진행합니다.\n · ${names}\n\n`
-    + `엑셀에서 열고 [다른 이름으로 저장] → 파일 형식을 'Excel 통합 문서(*.xlsx)' 로 바꿔 저장한 뒤 다시 올려주세요.`;
-  if (box) msg(box, "warn", t.replace(/\n/g, " ")); else alert(t);
+  const t = `구버전 엑셀(.xls) ${old.length}개를 읽었습니다 (${old.map(f => f.name).join(", ")}). `
+    + `만들어지는 파일은 .xlsx 로 나갑니다.`;
+  if (box) msg(box, "ok", "ℹ " + t);
   return true;
 }
 
@@ -246,9 +247,8 @@ function bindDrop(id, cb) {
   el.addEventListener("drop", async ev => {
     const had = (ev.dataTransfer.items || ev.dataTransfer.files || []).length;
     const f = await filesFromDrop(ev.dataTransfer);
-    const oldWarned = warnOldXls(f.oldXls);          // 구버전 .xls 는 이유를 밝히고 뺀다
     if (f.length) cb(f);
-    else if (had && !oldWarned) alert("엑셀 파일(.xlsx / .xlsm)이 없습니다.\n폴더를 끌어오면 안에 있는 엑셀을 모두 가져옵니다.");
+    else if (had) alert("엑셀 파일이 없습니다.\n폴더를 끌어오면 안에 있는 엑셀(.xlsx · .xlsm · .xls)을 모두 가져옵니다.");
   });
 }
 let readFile = f => new Promise((res, rej) => {
@@ -529,7 +529,7 @@ function switchTab(t) {
    ================================================================= */
 $("f-order").addEventListener("change", function () {
   const fs = [...this.files]; this.value = "";
-  warnOldXls(fs, "msg-o");
+  noteOldXls(fs, "msg-o");
   if (fs.length) setOrder(fs);
 });
 bindDrop("drop-order", f => setOrder(f));
@@ -1091,7 +1091,7 @@ function renderPreview() {
 /* --- 업체 양식 --- */
 $("f-tpl").addEventListener("change", function () {
   const fs = [...this.files]; this.value = "";
-  warnOldXls(fs);                       // 구버전이면 왜 빠지는지 알린다
+  noteOldXls(fs);
   addForms(fs);
 });
 bindDrop("drop-tpl", f => addForms(f));
@@ -1215,7 +1215,7 @@ async function saveForms(list) {
 async function addForms(files) {
   const list = [];
   for (const f of files) {
-    if (!/\.xls[xm]$/i.test(f.name)) continue;
+    if (!isXls(f)) continue;
     list.push({ fileName: f.name, buf: await readFile(f) });
   }
   if (!list.length) return;
@@ -1875,7 +1875,7 @@ bindDrop("drop-rep", f => addReps(f));
 
 async function addReps(files) {
   for (const f of files) {
-    if (!/\.xls[xm]$/i.test(f.name)) continue;
+    if (!isXls(f)) continue;
     if (S.reps.some(r => r.name === f.name)) continue;
     S.reps.push({ name: f.name, data: await readFile(f) });
   }

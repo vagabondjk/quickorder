@@ -10,12 +10,16 @@ const ASSETS = ["./", "./index.html", "./qo-config.js", "./qo-version.js", "./qo
   "./qo-cs.js", "./qo-settle.js",
   "./manifest.json", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 // 절대 안 바뀌는 외부 라이브러리는 캐시 우선(빠름)
-const CDN = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
+// SheetJS 는 구버전 .xls(엑셀 97-2003) 를 읽는 데만 쓴다 — ExcelJS 가 못 읽는 형식이다
+const CDNS = [
+  "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js",
+  "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js",
+];
 
 self.addEventListener("install", e => {
   e.waitUntil(
     caches.open(CACHE)
-      .then(c => c.addAll([...ASSETS, CDN].map(u => new Request(u, { cache: "reload" }))))
+      .then(c => c.addAll([...ASSETS, ...CDNS].map(u => new Request(u, { cache: "reload" }))))
       .catch(() => {})
       .then(() => self.skipWaiting())   // 새 워커 즉시 활성화
   );
@@ -34,7 +38,7 @@ self.addEventListener("fetch", e => {
   const url = e.request.url;
 
   // 외부 라이브러리(CDN): 캐시 우선 (변하지 않으므로)
-  if (url === CDN) {
+  if (CDNS.includes(url)) {
     e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request)));
     return;
   }

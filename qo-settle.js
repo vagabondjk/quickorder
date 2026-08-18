@@ -538,7 +538,7 @@ const ST = (() => {
     });
     box.querySelectorAll(".stdl").forEach(b => b.onclick = async () => {
       const f = files[Number(b.dataset.i)];
-      try { download(await fileExcel(f), String(f.name).replace(/\.xls[xm]$/i, "") + ".xlsx"); }
+      try { download(await fileExcel(f), String(f.name).replace(/\.xls[xm]?$/i, "") + ".xlsx"); }
       catch (e) { msg("msg-s", "err", "⚠ " + e.message); }
     });
     box.querySelectorAll(".vdel").forEach(b => b.onclick = () => {
@@ -2146,7 +2146,7 @@ const ST = (() => {
       try { await addPriceBook(await readFile(f), f.name); }
       catch (e) { msg("msg-pb", "err", "⚠ " + f.name + " — " + e.message); }
     };
-    const pbFile = () => (pbRaw && pbRaw.name ? pbRaw.name.replace(/\.xls[xm]$/i, "") : "공급가표") + ".xlsx";
+    const pbFile = () => (pbRaw && pbRaw.name ? pbRaw.name.replace(/\.xls[xm]?$/i, "") : "공급가표") + ".xlsx";
     $("pb-pv").onclick = async () => {
       try { openPreview(await priceBookExcel(), "업체별 공급가표"); }
       catch (e) { msg("msg-pb", "err", "⚠ " + e.message); }
@@ -2193,7 +2193,7 @@ const ST = (() => {
     const dirIn = $("f-pay-dir");
     if (dirIn && "webkitdirectory" in dirIn) $("pay-dir-btn").style.display = "inline-block";
     if (dirIn) dirIn.addEventListener("change", async function () {
-      const fs = [...this.files].filter(f => /\.xls[xm]$/i.test(f.name)); this.value = "";
+      const fs = [...this.files].filter(isXls); this.value = "";
       if (!fs.length) { msg("msg-pay", "warn", "그 폴더에 엑셀 파일이 없어요."); return; }
       for (const f of fs) await takePay(f);
       msg("msg-pay", "ok", `✔ 폴더에서 엑셀 ${fs.length}개를 불러왔어요.`);

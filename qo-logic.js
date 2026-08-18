@@ -14,8 +14,13 @@ const ORDER_FIELDS = [
   /* ★ '상품판매유형'·'상품유형' 처럼 상품의 성격을 적은 열은 상품명이 아니다.
      LG 발주서에서 이게 상품명 자리를 차지해 발주서 상품칸이 전부 '기본' 으로 나갔다
      (진짜 상품명은 뒤쪽 '주문상품' 열이었다). 유형·구분 계열을 전부 막는다. */
-  ["PRODUCT",   ["상품명","제품명","주문상품","상품"],
-                ["코드","번호","회차","옵션","단품","유형","구분","분류","상태","종류","카테고리"]],
+  /* 업체 양식은 상품 칸 이름이 제각각이다 — 품목·품목명·품명·아이템명·발송제품.
+     이게 안 잡히면 그 업체는 '상품 칸이 텅 빈' 발주서를 받는다. 건수는 맞아서
+     눈으로는 안 보인다 (2026-08-18 실제 양식 14개 중 10개가 이랬다).
+     ※ 앞에 있는 이름이 이긴다. '상품명' 을 '품명' 보다 먼저 둬야
+       '상품명' 열이 '품명' 규칙에 걸려 엉뚱한 열로 가지 않는다. */
+  ["PRODUCT",   ["상품명","제품명","주문상품","품목명","아이템명","발송제품","품명","품목","상품","아이템"],
+                ["코드","번호","회차","옵션","단품","유형","구분","분류","상태","종류","카테고리","단가","금액"]],
   ["OPTION",    ["옵션","단품명","단품"], ["코드"]],
   ["QTY",       ["수량"], []],
   ["AMOUNT",    ["결제금액","주문금액","판매금액","공급금액","금액"], ["할인"]],
@@ -24,12 +29,14 @@ const ORDER_FIELDS = [
   ["COLLECT_DATE",["주문수집일자","주문수집일","수집일자","수집일"], []],
   ["ORDER_DATE",["주문일시","주문일자","주문일"], ["지시","예정","예약","희망","완료","출하"]],
   ["PAY_DATE",  ["결제일시","결제일자","결제일"], []],
-  // '수령자명'(메가존·이지웰·티딜·현대샵) 이 빠져 있어 수령인이 통째로 비었다 — 252줄
-  ["RECIPIENT", ["수령인명","수령자명","수령인","수령자","수취인","받는분","받는사람","이름"],
+  /* '수령자명'(메가존·이지웰·티딜·현대샵) 이 빠져 있어 수령인이 통째로 비었다 — 252줄.
+     업체 양식 쪽은 '수화인명'(헤트라스)·'수신인'(프로퍼마켓)·'고객명'(신진) 도 쓴다. */
+  ["RECIPIENT", ["수령인명","수령자명","수령인","수령자","수취인","수화인","수신인","받는분","받는사람","고객명","이름"],
                 ["전화","연락처","휴대","주소","코드","번호","위치"]],
   ["RECIPIENT_PHONE", ["수령인연락처1","수령자휴대폰번호","휴대폰번호","전화번호1","연락처1","수취인전화","휴대전화","휴대폰","전화번호","연락처"], ["가상","mail","2"]],
   ["RECIPIENT_PHONE2",["수령인연락처2","연락처2","전화번호2"], ["가상","mail"]],
-  ["ADDRESS",   ["배송주소","전체받는사람주소","수령인주소","주소"], ["코드"]],
+  // '수령지'(더그란)·'통합배송지'(모스스토리) 도 주소다
+  ["ADDRESS",   ["배송주소","전체받는사람주소","수령인주소","주소","배송지","수령지"], ["코드","번호"]],
   ["MESSAGE",   ["배송메시지","배송메세지","고객배송요청사항","배송요청","요청사항","주문요청메시지","메시지","메세지"], []],
   ["ZIP",       ["우편번호"], []],
   ["ORDERER",   ["주문자명","주문자","구매자","보내는"], ["전화","연락처","mail","가상"]],
@@ -577,6 +584,22 @@ function convert(orderWb, tplWb, opts) {
     const tf = valueTransformForHeader(th);
     if (tf) colTransform[c] = tf;
     if (isDateHeader(th)) dateCols.add(c);
+  }
+
+  /* ★★ 양식에 남아 있던 지난번 주문을 먼저 지운다 (2026-08-18).
+     업체 양식은 대개 '지난달 발주서 그대로'다 — 헤트라스 915줄, 아렌시아 392줄,
+     코칸 수천 줄. 안 지우고 위에서부터 덮어쓰면 이번 주문 아래로 지난 주문이
+     그대로 남아 업체가 같은 건을 다시 보낸다. 실제로 새 주문 줄에 지난 운송장번호가
+     붙어 나가기도 했다 (이번 주문에는 송장이 없으니 옛 값이 그대로 남아서).
+     값만 지우고 서식은 건드리지 않는다. 채워진 칸만 훑어서 큰 시트에서도 빠르다.
+     ※ 남겨야 할 이유가 있으면 opts.keepExisting 으로 끌 수 있다. */
+  if (!opts.keepExisting) {
+    const rowsToClear = [];
+    tws.eachRow({ includeEmpty: false }, (row, rn) => { if (rn > tgtHeaderRow) rowsToClear.push(rn); });
+    rowsToClear.forEach(rn => {
+      tws.getRow(rn).eachCell({ includeEmpty: false }, cell => { cell.value = null; });
+    });
+    if (rowsToClear.length) log(`   (양식에 있던 지난 주문 ${rowsToClear.length}줄을 비웠습니다)`);
   }
 
   const sd = dims(sws);
@@ -1481,7 +1504,65 @@ function previewSheets(wb, limit) {
 }
 
 /* ---------------- 워크북 헬퍼 ---------------- */
+/* ---------------- 구버전 .xls (엑셀 97-2003) ----------------
+   .xlsx 는 XML 을 묶은 zip 이고 .xls 는 그 자체가 바이너리 덩어리(OLE2/BIFF)라
+   아예 다른 형식이다. ExcelJS 는 .xlsx 만 다루므로 .xls 는 SheetJS 로 읽어
+   ExcelJS 워크북으로 옮겨 담는다. 그 뒤로는 모든 처리가 지금까지와 똑같다.
+
+   ※ 업체가 양식을 .xlsx 로 바꿔주지 않는 경우가 많아 앱이 떠안는다 (2026-08-18).
+   ※ 값·시트이름·열너비만 옮긴다. 글꼴·색 같은 꾸밈은 넘어오지 않는다 —
+     실제 업체 양식(헤트라스·코칸)은 병합 없는 단순 표라 잃을 것이 없었다.
+     결과물은 .xlsx 로 나간다. */
+const OLE2 = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+function isOldXlsBuffer(data) {
+  try {
+    const u = new Uint8Array(data.buffer && data.byteLength !== undefined ? data.buffer : data,
+                             data.byteOffset || 0, 8);
+    return OLE2.every((b, i) => u[i] === b);
+  } catch (e) { return false; }
+}
+function sheetJS() {
+  if (typeof XLSX !== "undefined") return XLSX;                       // 브라우저 (CDN)
+  if (typeof require === "function") { try { return require("xlsx"); } catch (e) {} }  // Node
+  return null;
+}
+/* SheetJS 로 읽은 것을 ExcelJS 워크북으로 옮긴다.
+   값은 형을 지켜서 넣는다 — 날짜는 Date, 수량은 숫자. 문자열로 바꾸면 뒤에서
+   날짜 서식·수량 계산이 전부 깨진다. */
+function xlsToWorkbook(data) {
+  const X = sheetJS();
+  if (!X) throw new Error("구버전 엑셀(.xls) 을 읽을 수 없습니다. .xlsx 로 저장해 주세요.");
+  const src = X.read(data, { type: "array", cellDates: true, cellNF: false, cellStyles: false });
+  const wb = new ExcelJS.Workbook();
+  src.SheetNames.forEach(name => {
+    const sws = src.Sheets[name];
+    const ws = wb.addWorksheet(name || "Sheet1");
+    if (!sws || !sws["!ref"]) return;
+    const rows = X.utils.sheet_to_json(sws, { header: 1, raw: true, blankrows: true, defval: null });
+    /* 뒤쪽 빈 줄은 버린다. .xls 는 쓰지도 않은 범위를 크게 잡아두는 일이 흔해서
+       (코칸 양식은 65,523행으로 잡힌다) 그대로 옮기면 셀 수만 백만 단위로 불어난다. */
+    let last = 0;
+    rows.forEach((r, i) => {
+      if (Array.isArray(r) && r.some(v => v !== null && v !== undefined && String(v).trim() !== "")) last = i + 1;
+    });
+    rows.slice(0, last).forEach(r => ws.addRow(Array.isArray(r) ? r : []));
+    /* 열 너비는 사람이 열어봤을 때 표가 읽히느냐를 좌우한다 — 이건 옮겨준다.
+       SheetJS 는 안 쓰는 열까지 257개를 채워 주므로 실제 쓰인 만큼만 본다. */
+    const cols = sws["!cols"] || [];
+    const used = ws.columnCount || 0;
+    for (let i = 0; i < Math.min(cols.length, used); i++) {
+      const w = cols[i] && (cols[i].wch || (cols[i].wpx ? cols[i].wpx / 7 : 0));
+      if (w) ws.getColumn(i + 1).width = w;
+    }
+    (sws["!merges"] || []).forEach(m => {
+      try { ws.mergeCells(m.s.r + 1, m.s.c + 1, m.e.r + 1, m.e.c + 1); } catch (e) {}
+    });
+  });
+  if (!wb.worksheets.length) wb.addWorksheet("Sheet1");
+  return wb;
+}
 async function loadWorkbook(dataOrBuffer) {
+  if (isOldXlsBuffer(dataOrBuffer)) return xlsToWorkbook(dataOrBuffer);
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(dataOrBuffer);
   return wb;
@@ -1500,7 +1581,7 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   toDateValue, isDateHeader, hasDateFormat, hasTimeFormat,
   findDateColumns, defaultDateColumn, orderDateInfo, formatPhone, stripHyphen,
   valueTransformForHeader, nameFromFilename, normKey,
-  mergeOrders, brandFromName, brandFromKnown, resolveBrand, aliasKey, convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, carrierKey, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, todayStr, fmtDate,
+  mergeOrders, brandFromName, brandFromKnown, resolveBrand, aliasKey, convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, carrierKey, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, isOldXlsBuffer, todayStr, fmtDate,
   normPriceText, toPriceNumber, priceKeyParts, priceRowKey, buildPriceBook, matchPrice,
   rankPriceCandidates, settle, settleCheck,
   settleSheetHead, settleSheetRow, isPriceHeader, isInternalHeader, vendorSheetColumns, carryNote };
