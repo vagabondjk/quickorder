@@ -233,10 +233,31 @@ function extractDate(v) {
   if (v === null || v === undefined) return null;
   if (v instanceof Date) {
     const p = n => String(n).padStart(2, "0");
+    /* 우리가 셀에 넣는 날짜는 'UTC 자정' 이다 (아래 dateOnlyCell 참고).
+       그런 값은 UTC 로 읽어야 한다 — 한국(UTC+9)에서 로컬로 읽으면 같은 날이지만,
+       UTC 보다 서쪽 시간대에서는 하루 앞으로 밀린다. */
+    if (v.getUTCHours() === 0 && v.getUTCMinutes() === 0 && v.getUTCSeconds() === 0 && v.getUTCMilliseconds() === 0)
+      return "" + v.getUTCFullYear() + p(v.getUTCMonth() + 1) + p(v.getUTCDate());
     return "" + v.getFullYear() + p(v.getMonth() + 1) + p(v.getDate());
   }
   const d = String(v).replace(/\D/g, "");
   return d.length >= 8 ? d.slice(0, 8) : null;
+}
+/* ★★ 엑셀 셀에 넣을 '날짜만' 값을 만든다 (2026-08-18).
+
+   ExcelJS 는 Date 를 엑셀 일련번호로 바꿀 때 UTC 를 기준으로 삼는다.
+   그래서 한국에서 new Date(2026,7,13) (로컬 자정 8/13) 을 넣으면
+   2026-08-12T15:00Z → 일련번호 46246.625 로 적히고, 엑셀은 이걸 '8월 12일' 로 보여준다.
+   업체에 나가는 발주서의 주문일이 전부 하루씩 앞당겨져 나가고 있었다.
+
+   그래서 '그 날의 UTC 자정' 으로 만든다 → 일련번호가 딱 정수가 되어
+   어느 프로그램에서 열어도 의도한 날짜 그대로 보인다.
+   시간은 뺀다 — 발주서에는 날짜만 있으면 되고, 시간이 남아 있으면
+   시간대에 따라 또 하루가 밀린다. */
+function dateOnlyCell(v) {
+  const d = toDateValue(v);
+  if (!d) return null;
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
 }
 function isCollectHeader(h) {
   const s = String(h).replace(/\s/g, "");
@@ -556,7 +577,13 @@ function mergeOrders(sources, opts) {
   if (corpSeen) head.push("법인");
   ws.addRow(head);
   rows.forEach(rec => {
-    const line = cols.map(c => (rec[c] === undefined ? null : rec[c]));
+    /* 날짜는 'UTC 자정' 으로 바꿔 넣는다. 원래 Date 를 그대로 두면 새벽 주문
+       (한국 00~09시)이 엑셀에서 전날로 보인다 — ExcelJS 가 UTC 로 환산해서다. */
+    const line = cols.map(c => {
+      const v = rec[c];
+      if (v === undefined) return null;
+      return v instanceof Date ? dateOnlyCell(v) : v;
+    });
     if (brandSeen) line.push(rec.__brand || null);
     line.push(rec.__mall);
     if (corpSeen) line.push(rec.__corp || null);
@@ -696,11 +723,11 @@ function convert(orderWb, tplWb, opts) {
         const cell = tws.getRow(outRow).getCell(tcol);
         // 날짜 열은 '진짜 날짜'로 넣고 표시형식까지 걸어준다.
         // (안 걸면 엑셀·구글시트에서 46231.6 같은 일련번호로 보인다)
-        const dv = dateCols.has(tcol) && !isBlank(out) ? toDateValue(out) : null;
+        const dv = dateCols.has(tcol) && !isBlank(out) ? dateOnlyCell(out) : null;
         if (dv) {
           // 시간은 뺀다 — 업체에 나가는 발주서에는 날짜만 있으면 된다.
-          // 값 자체를 자정으로 맞춰야 서식을 바꿔도 시간이 되살아나지 않는다.
-          cell.value = new Date(dv.getFullYear(), dv.getMonth(), dv.getDate());
+          // ★ 로컬 자정이 아니라 UTC 자정이어야 한다 (dateOnlyCell 주석 참고).
+          cell.value = dv;
           // 날짜 서식이 없거나, 시간까지 보여주는 서식이면 날짜만 나오게 바꾼다.
           // (업체 양식이 "yyyy/mm/dd" 처럼 날짜만이면 그대로 존중)
           if (!hasDateFormat(cell.numFmt) || hasTimeFormat(cell.numFmt)) {
