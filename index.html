@@ -506,6 +506,8 @@
         <b id="order-name"></b>
         <input type="file" id="f-order" accept=".xlsx,.xlsm,.xls" multiple>
       </label>
+      <!-- 빈 주문일시를 다른 날짜로 메꿨을 때 — 몰래 바꾸지 않는다 -->
+      <div class="msg show" id="order-datefill" style="display:none;margin-top:8px"></div>
       <!-- 업체를 못 정한 상품 — 한 번 고르면 연결표에 기억한다 -->
       <div id="brand-unknown" style="display:none;margin-top:10px"></div>
       <div class="setrow" id="order-clear-row" style="display:none;margin-top:4px">

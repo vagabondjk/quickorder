@@ -636,6 +636,16 @@ async function rebuildMerged() {
   drawUnknownBrands();
   /* 주문일 열이 없는 몰이 있으면 물어본다 — 그냥 두면 그 몰 주문이 통째로 빠진다 */
   if (m.dateless && m.dateless.length) askDateColumns(m.dateless);
+  /* 줄 단위로 비어 있던 주문일시를 메꿨으면 무엇으로 메꿨는지 밝힌다 */
+  const filled = Object.entries(m.dateFilled || {});
+  const fnote = $("order-datefill");
+  if (fnote) {
+    fnote.style.display = filled.length ? "" : "none";
+    fnote.innerHTML = filled.length
+      ? `ℹ 주문일시가 비어 있던 주문을 같은 줄의 다른 날짜로 채웠습니다 — `
+        + filled.map(([k, v]) => `<b>${esc(k)} ${v}건</b>`).join(" · ")
+      : "";
+  }
   const head = n > 1 ? `✔ 쇼핑몰 ${m.malls.length || n}곳의 주문 ${m.rows}건을 합쳤어요` : `✔ 주문 ${m.rows}건을 읽었어요`;
   if (m.unknownRows) {
     msg("msg-o", "warn", `${head}. 다만 ${m.unknownRows}건은 어느 업체 상품인지 알 수 없습니다 — 아래에서 지정해 주세요.`);
@@ -1939,6 +1949,8 @@ $("run-o").onclick = async function () {
     verify.noDate = src.noDate || 0;
     verify.noDateByMall = src.noDateByMall || {};
     verify.noDateByBrand = src.noDateByBrand || {};
+    verify.noDateRows = src.noDateRows || [];
+    verify.dateHeaderUsed = src.dateHeaderUsed || "";
     showResultO(results, skipped, verify);
     msg("msg-o", verify.diff === 0 ? "ok" : "warn",
       (verify.diff === 0 ? "✔ 변환 완료! 건수 일치 " : "⚠ 변환 완료 (건수 불일치 확인) ")
@@ -1991,9 +2003,17 @@ function showResultO(results, skipped, verify) {
       n.className = "msg show warn";
       const byMall = Object.entries(verify.noDateByMall || {}).sort((a, b) => b[1] - a[1]);
       const byBrand = Object.entries(verify.noDateByBrand || {}).sort((a, b) => b[1] - a[1]);
-      let h = `⚠ 주문일이 비어 있는 주문 <b>${verify.noDate}건</b>은 날짜로 고를 수 없어 빠졌습니다.`;
+      let h = `⚠ '${esc(verify.dateHeaderUsed || "주문일시")}' 를 읽지 못한 주문 <b>${verify.noDate}건</b>이 날짜로 고를 수 없어 빠졌습니다.`;
       if (byMall.length) h += `<br>· 쇼핑몰: ${byMall.map(([m, c]) => `${esc(m)} <b>${c}건</b>`).join(" · ")}`;
       if (byBrand.length) h += `<br>· 업체: ${byBrand.map(([b, c]) => `${esc(b)} <b>${c}건</b>`).join(" · ")}`;
+      /* ★ 어떤 줄이 그렇게 잡혔는지 실제 값을 보여준다.
+         '비어 있다' 는 판정이 틀렸을 수도 있는데, 건수만 보여주면 확인할 방법이 없다. */
+      if (verify.noDateRows && verify.noDateRows.length) {
+        h += `<div class="misslist">실제로 읽은 값 (처음 ${verify.noDateRows.length}줄) —<br>`
+          + verify.noDateRows.map(x =>
+              `· ${x.row}행${x.order ? ` (주문 ${esc(x.order)})` : ""} · ${esc(x.header)} = <b>${esc(x.raw)}</b> <small>[${esc(x.type)}]</small>`).join("<br>")
+          + `</div>`;
+      }
       h += `<br>날짜를 '전체'로 두고 다시 변환하면 포함됩니다.`;
       n.innerHTML = h;
       box.appendChild(n);

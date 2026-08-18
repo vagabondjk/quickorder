@@ -507,6 +507,7 @@ function mergeOrders(sources, opts) {
   const aliases = opts.aliases || null;
   const dateFrom = opts.dateFrom || {};      // { 몰이름: '쓸 날짜 열 헤더' }
   const dateless = [];                       // 주문일 열이 없는 몰 (화면에서 물어본다)
+  const dateFilled = {};                     // 빈 주문일시를 무엇으로 메꿨는지 {수집일자: 102}
   const rows = [], fields = new Set();
   let brandSeen = false;
   (sources || []).forEach(src => {
@@ -552,6 +553,20 @@ function mergeOrders(sources, opts) {
         if (!isBlank(b)) rec.__brand = b;
       }
       if (!any) continue;
+      /* ★ 주문일시 칸이 '줄 단위로' 비어 있는 경우 (2026-08-18).
+         열은 있는데 어떤 줄만 비어 있으면, 날짜로 거를 때 그 줄만 조용히 빠진다.
+         랩노마드 8월 통합 파일에서 102건이 이렇게 빠졌다.
+         그래서 같은 줄의 다른 날짜(수집일자 → 결제일시)로 메꾼다.
+         무엇으로 메꿨는지는 세어서 알려준다 — 몰래 바꾸지 않는다. */
+      if (isBlank(rec.ORDER_DATE)) {
+        const alt = !isBlank(rec.COLLECT_DATE) ? ["COLLECT_DATE", "수집일자"]
+                  : !isBlank(rec.PAY_DATE) ? ["PAY_DATE", "결제일시"] : null;
+        if (alt) {
+          rec.ORDER_DATE = rec[alt[0]];
+          fields.add("ORDER_DATE");
+          dateFilled[alt[1]] = (dateFilled[alt[1]] || 0) + 1;
+        }
+      }
       /* 브랜드 열이 없는 몰이라도 상품명·연결표로 업체를 정할 수 있다.
          그래서 '브랜드 열이 있었는가' 가 아니라 '실제로 정해졌는가' 로 판단한다 —
          예전엔 브랜드 열 있는 파일이 하나도 없으면 브랜드 칸 자체가 안 생겼다. */
@@ -616,6 +631,7 @@ function mergeOrders(sources, opts) {
     unknown: [...unknown.values()].sort((a, b) => b.count - a.count),
     unknownRows: rows.filter(r => !r.__brand).length,
     dateless,        // 주문일 열이 없는 몰 — 화면에서 어느 열을 쓸지 물어본다
+    dateFilled,      // 줄 단위로 비어 있던 주문일시를 다른 날짜로 메꾼 건수
   };
 }
 
@@ -861,6 +877,11 @@ function countOrders(orderWb, opts) {
   }
   let total = 0, noDate = 0;
   const byBrand = {}, noDateByMall = {}, noDateByBrand = {};
+  /* 어떤 줄이 '날짜 없음' 으로 잡혔는지 표본을 남긴다.
+     건수만 알려주면 원본 어디를 봐야 할지 알 수 없고, 판정이 틀렸을 때
+     틀렸다는 것조차 확인할 방법이 없다 (2026-08-18). */
+  const noDateRows = [];
+  const ordCol = (() => { const m = buildOrderFieldMap(ws, hr, "source"); return m.ORDER_NO || null; })();
   for (let r = hr + 1; r <= d.rows; r++) {
     let any = false;
     for (const c of cols) { if (!isBlank(getV(ws, r, c))) { any = true; break; } }
@@ -874,6 +895,16 @@ function countOrders(orderWb, opts) {
         const mv = mcol ? String(getV(ws, r, mcol) || "").trim() : "";
         if (mv) noDateByMall[mv] = (noDateByMall[mv] || 0) + 1;
         if (b) noDateByBrand[b] = (noDateByBrand[b] || 0) + 1;
+        if (noDateRows.length < 5) {
+          const raw = getV(ws, r, dcol);
+          noDateRows.push({
+            row: r,
+            order: ordCol ? String(getV(ws, r, ordCol) || "") : "",
+            header: String(getV(ws, hr, dcol) || ""),
+            raw: raw === null || raw === undefined ? "(빈칸)" : String(raw).slice(0, 30),
+            type: raw instanceof Date ? "날짜" : typeof raw,
+          });
+        }
         continue;
       }
       if (!dateSet.has(dv)) continue;
@@ -881,7 +912,7 @@ function countOrders(orderWb, opts) {
     total++;
     byBrand[b] = (byBrand[b] || 0) + 1;
   }
-  return { total, byBrand, noDate, noDateByMall, noDateByBrand };
+  return { total, byBrand, noDate, noDateByMall, noDateByBrand, noDateRows, dateHeaderUsed: dcol ? String(getV(ws, hr, dcol) || "") : "" };
 }
 
 /* ===================================================================
