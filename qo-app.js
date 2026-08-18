@@ -1480,7 +1480,11 @@ const formByName = n => S.forms.find(f => f.name === n) || null;
 async function saveForm(f) { await DB.putForm(f); await loadForms(); }
 
 /* ---------------- ④ 값 변경해서 양식에 넣기 ---------------- */
-const nmCount = f => { const m = f && QO.normNameMap(f.nameMap); return m ? Object.keys(m.exact).length + m.keys.length : 0; };
+const nmCount = f => {
+  if (f && f.renameTable && f.renameTable.rules) return f.renameTable.rules.length;
+  const m = f && QO.normNameMap(f.nameMap);
+  return m ? Object.keys(m.exact).length + m.keys.length : 0;
+};
 
 function drawNameMapCard() {
   const card = $("card4"); if (!card) return;
@@ -1532,6 +1536,25 @@ function drawNameMapCard() {
       + (l.length > 40 ? `\n\n… 외 ${l.length - 40}개` : ""));
   };
 }
+/* 규칙표 올리기 — ⑤ 에서 올려도 값 변경 규칙이 같이 들어 있으면 같이 받아둔다 */
+async function takeExtraTable(f, file) {
+  try {
+    const wb = await QO.loadWorkbook(await readFile(file));
+    const vr = QO.readVendorRules(wb, { vendor: f.name });
+    if (!vr.extra && !vr.rename) {
+      alert("이 파일에서 '매핑조건 / 추가정보' 표를 찾지 못했습니다.\n"
+        + "1행에 매핑조건·추가정보, 2행에 항목 이름(상품명·옵션·브랜드 → 상품코드·공급가)을 적어주세요.");
+      return;
+    }
+    const got = [];
+    if (vr.extra) { f.extraTable = vr.extra; f.extraFile = file.name; got.push(`추가 정보 ${vr.extra.rules.length}줄 → ${vr.extra.fields.join(", ")} (${vr.extra.sheet})`); }
+    if (vr.rename) { f.renameTable = vr.rename; f.renameFile = file.name; got.push(`값 변경 ${vr.rename.rules.length}줄 (${vr.rename.sheet})`); }
+    await saveForm(f);
+    drawVendorOptCards();
+    msg("msg-o", "ok", `✔ ${f.name} — ${got.join(" · ")}`);
+  } catch (e) { alert("규칙표를 읽지 못했어요: " + e.message); }
+}
+
 async function nameMapTemplate() {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("상품명매핑");
@@ -1547,6 +1570,19 @@ async function nameMapTemplate() {
 async function takeNameMap(f, file) {
   try {
     const wb = await QO.loadWorkbook(await readFile(file));
+    /* 먼저 '매핑조건' 규칙표인지 본다 (브랜드 발주서 값변경_추가정보넣기.xlsx 형태).
+       한 파일에 값변경·추가정보가 같이 들어 있으면 둘 다 받아둔다 —
+       사용자가 같은 파일을 ④ 와 ⑤ 에 두 번 올리지 않아도 되게. */
+    const vr = QO.readVendorRules(wb, { vendor: f.name });
+    if (vr.rename || vr.extra) {
+      const got = [];
+      if (vr.rename) { f.renameTable = vr.rename; f.renameFile = file.name; got.push(`값 변경 ${vr.rename.rules.length}개 (${vr.rename.sheet})`); }
+      if (vr.extra) { f.extraTable = vr.extra; f.extraFile = file.name; got.push(`추가 정보 ${vr.extra.rules.length}개 → ${vr.extra.fields.join(", ")} (${vr.extra.sheet})`); }
+      await saveForm(f);
+      drawVendorOptCards();
+      msg("msg-o", "ok", `✔ ${f.name} — ${got.join(" · ")}`);
+      return;
+    }
     const r = QO.readNameMap(wb, { vendor: f.name });
     f.nameMap = r.map; f.nameMapList = r.list; f.nameMapFile = file.name;
     await saveForm(f);
@@ -1566,7 +1602,7 @@ const EXTRA_FIELDS = [
   { k: "ship", name: "배송비", hint: "공급가표에 적힌 배송비" },
 ];
 const exOn = f => (f && f.extra) || (f && f.withPrice ? { price: true } : {});   // 예전 설정도 읽는다
-const exAny = f => EXTRA_FIELDS.some(x => exOn(f)[x.k]);
+const exAny = f => EXTRA_FIELDS.some(x => exOn(f)[x.k]) || !!(f && f.extraTable && f.extraTable.rules);
 
 async function drawExtraCard() {
   const card = $("card5"); if (!card) return;
@@ -1592,12 +1628,36 @@ async function drawExtraCard() {
     return;
   }
   const on = exOn(f);
-  box.innerHTML = EXTRA_FIELDS.map(e => `
+  const t = f.extraTable;
+  box.innerHTML = `
+    <div class="exrow"><b>규칙표로 넣기</b>
+      <span style="font-size:11.5px;font-weight:700;color:${t ? "var(--ok)" : "var(--muted)"}">
+        ${t ? `✔ ${esc(f.extraFile || "규칙표")} · ${t.rules.length}줄 → ${esc(t.fields.join(", "))}` : "아직 올린 규칙표가 없습니다"}</span>
+      ${t ? `<button class="minibtn" id="ex-clear">해제</button>` : ""}
+    </div>
+    <label class="drop" id="drop-ex" style="padding:14px;margin-bottom:8px">
+      규칙표 엑셀 선택 또는 끌어오기
+      <span class="drophint">1행 매핑조건 · 추가정보 / 2행 항목이름 (상품명 · 옵션 · 브랜드 → 상품코드 · 공급가)</span>
+      <input type="file" id="f-ex" accept=".xlsx,.xlsm,.xls">
+    </label>
+    <div class="pvfoot" style="margin:0 0 8px">또는 ④ 정산 탭의 공급가표에서 바로 가져오기 —</div>`
+    + EXTRA_FIELDS.map(e => `
     <div class="exrow"><b>${esc(e.name)}</b>
       <span style="font-size:11px;color:var(--muted);flex:none">${esc(e.hint)}</span>
       <button class="minibtn" data-ex="${e.k}"
         style="${on[e.k] ? "background:var(--brand-soft);color:var(--brand);border-color:var(--brand)" : ""}">
         ${on[e.k] ? "넣는 중" : "넣기"}</button></div>`).join("");
+
+  $("f-ex").addEventListener("change", function () {
+    const file = this.files[0]; this.value = "";
+    if (file) takeExtraTable(f, file);
+  });
+  bindDrop("drop-ex", fs => { if (fs[0]) takeExtraTable(f, fs[0]); });
+  if ($("ex-clear")) $("ex-clear").onclick = async () => {
+    if (!confirm(`'${f.name}' 의 규칙표를 해제할까요?`)) return;
+    f.extraTable = null; f.extraFile = "";
+    await saveForm(f); drawExtraCard();
+  };
   box.querySelectorAll("[data-ex]").forEach(btn => {
     btn.onclick = async () => {
       const k = btn.dataset.ex;
@@ -1779,13 +1839,46 @@ function buildVendorBrands() {
     const n = norm(f.name), t = norm(b);
     return n && t && (t === n || t.includes(n) || n.includes(t));
   }));
+  /* ★ 주인 없는 브랜드가 있다고 업체를 전부 띄우지 않는다 (2026-08-18).
+     하나만 남아도 14곳이 다 나와서, 그 날짜에 주문도 없는 업체가 '브랜드를 고르라' 고
+     떴다. 그런 브랜드는 아래 '업체 정하기' 줄에서 바로 지정하게 한다. */
   const shown = checked.filter(f => {
     const mine = S.sel[f.name] || [];
     if (mine.length) return mine.some(b => liveSet.has(b));
-    return looksMine(f) || orphan.length > 0;
+    return looksMine(f);
   });
   const hidden = checked.filter(f => !shown.includes(f));
-  if (!shown.length) { card.style.display = "none"; box.innerHTML = ""; refreshO(); return; }
+  if (!shown.length && !orphan.length) { card.style.display = "none"; box.innerHTML = ""; refreshO(); return; }
+
+  /* 주인 없는 브랜드 — 브랜드마다 업체를 바로 고르게 한다.
+     업체 카드를 전부 펼치는 대신 이 줄에서 끝낸다. */
+  if (orphan.length) {
+    const ob = document.createElement("div");
+    ob.className = "warnbox";
+    ob.innerHTML = `<b>🔔 업체가 정해지지 않은 브랜드 ${orphan.length}개</b>`
+      + `<span>이 브랜드 주문은 아직 어느 발주서에도 안 실립니다. 맡을 업체를 골라주세요.</span>`;
+    box.appendChild(ob);
+    orphan.forEach(b => {
+      const row = document.createElement("div");
+      row.className = "exrow";
+      const n = brandCountOf(b);
+      row.innerHTML = `<b>${esc(b)}</b>`
+        + (n === null ? "" : `<span style="font-size:11.5px;font-weight:800;color:var(--brand);flex:none">${n}건</span>`);
+      const sel = document.createElement("select");
+      sel.className = "minibtn";
+      sel.innerHTML = `<option value="">업체 선택…</option>`
+        + checked.map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join("");
+      sel.onchange = () => {
+        if (!sel.value) return;
+        (S.sel[sel.value] = S.sel[sel.value] || []).push(b);
+        S.brandVendor[b] = sel.value;
+        DB.set("brandVendor", S.brandVendor);
+        buildVendorBrands();
+      };
+      row.appendChild(sel);
+      box.appendChild(row);
+    });
+  }
   shown.forEach(f => {
     const wrap = document.createElement("div");
     wrap.className = "vendorbox";
@@ -1806,9 +1899,7 @@ function buildVendorBrands() {
   const foot = $("card3").querySelector(".pvfoot") || (() => {
     const d = document.createElement("div"); d.className = "pvfoot"; $("card3").appendChild(d); return d;
   })();
-  foot.innerHTML = (orphan.length
-      ? `<b style="color:var(--warn)">🔔 업체가 정해지지 않은 브랜드: ${esc(orphan.join(", "))}</b> — 아래에서 맡을 업체를 골라주세요.<br>` : "")
-    + (hidden.length
+  foot.innerHTML = (hidden.length
       ? `고른 날짜에 주문이 없어 ${hidden.length}곳은 숨겼습니다 — ${esc(hidden.map(f => f.name).join(", "))}`
       : "");
   refreshO();
@@ -1819,9 +1910,13 @@ function renderVendorChips(wrap, f) {
   brandsBox.innerHTML = brandsNow().map(b => {
     const mine = (S.sel[f.name] || []).includes(b);
     const owner = brandOwner(b, f.name);
-    if (mine) return `<span class="brow on" data-b="${esc(b)}"><span class="box">${CHK}</span>${esc(b)}</span>`;
-    if (owner) return `<span class="brow taken" data-b="${esc(b)}" title="${esc(owner)}가 선택함">${esc(b)} <small>· ${esc(owner)}</small></span>`;
-    return `<span class="brow" data-b="${esc(b)}"><span class="box">${CHK}</span>${esc(b)}</span>`;
+    /* 고른 날짜에 그 브랜드 주문이 몇 건인지 칩에 같이 적는다 —
+       어느 브랜드가 이번에 물량이 있는지 눌러보지 않고 알 수 있게 */
+    const n = brandCountOf(b);
+    const cnt = n === null ? "" : ` <em class="bcnt">${n}</em>`;
+    if (mine) return `<span class="brow on" data-b="${esc(b)}"><span class="box">${CHK}</span>${esc(b)}${cnt}</span>`;
+    if (owner) return `<span class="brow taken" data-b="${esc(b)}" title="${esc(owner)}가 선택함">${esc(b)}${cnt} <small>· ${esc(owner)}</small></span>`;
+    return `<span class="brow" data-b="${esc(b)}"><span class="box">${CHK}</span>${esc(b)}${cnt}</span>`;
   }).join("");
   brandsBox.querySelectorAll(".brow").forEach(chip => {
     chip.onclick = () => {
@@ -1841,8 +1936,12 @@ function renderVendorChips(wrap, f) {
   updCnt(wrap, f);
 }
 function updCnt(wrap, f) {
-  const n = S.sel[f.name].length;
-  wrap.querySelector(".cnt").textContent = n ? `${n}개 선택` : "선택 없음 → 건너뜀";
+  const sel = S.sel[f.name] || [];
+  /* 고른 브랜드의 주문이 이번에 몇 건인지도 같이 — 이 업체에 뭘 보내는지 바로 보이게 */
+  const orders = S.brandCount ? sel.reduce((a, b) => a + (S.brandCount[b] || 0), 0) : null;
+  wrap.querySelector(".cnt").textContent = !sel.length ? "선택 없음 → 건너뜀"
+    : orders === null ? `${sel.length}개 선택`
+    : `${sel.length}개 선택 · 주문 ${orders}건`;
 }
 
 /* 불러온 파일 '해제' — 드롭 영역에 파일이 올라와 있을 때만 버튼을 보여준다.
@@ -1856,12 +1955,18 @@ async function clearOrderFile() {
   S.orderWb = null; S.orderBuf = null; S.orderName = ""; S.orderSrcs = null;
   S.orderParts = null; S.merged = null; S.orderAdded = null;
   drawUnknownBrands();
-  S.brands = []; S.dateSel = [];
+  S.brands = []; S.dateSel = []; S.dateAll = []; S.dateHeader = null;
+  S.pv = null; S.brandCount = null; S.noDateInfo = null;
   $("order-name").textContent = "";
   $("drop-order").classList.remove("on");
   const fi = $("f-order"); if (fi) fi.value = "";
-  const dw = $("date-wrap"); if (dw) dw.style.display = "none";
-  const ro = $("result-o"); if (ro) ro.style.display = "none";
+  /* 파일을 내렸으면 그 파일로 만든 화면도 같이 내린다.
+     ★ '내용 확인'(prev-wrap)이 남아 있어서, 해제했는데도 주문이 그대로 있는 것처럼 보였다. */
+  ["date-wrap", "prev-wrap", "result-o", "order-datefill"].forEach(id => {
+    const el = $(id); if (el) el.style.display = "none";
+  });
+  const dc = $("dt-chips"); if (dc) dc.innerHTML = "";
+  const pt = $("pv-table"); if (pt) pt.innerHTML = "";
   msg("msg-o", "", "");
   buildVendorBrands(); refreshO(); updateClearRows();
 }
@@ -1947,6 +2052,8 @@ $("run-o").onclick = async function () {
       const r = QO.convert(orderWb, tplWb, {
         brands: brandFilter, dates: S.dateSel.length ? S.dateSel : null, dateHeader: S.dateHeader,
         nameMap: f.nameMap || null,                       // 업체가 원하는 상품명으로
+        rename: f.renameTable || null,                    // 매핑조건 규칙표
+        extra: f.extraTable || null,                      // 추가 정보 규칙표
         price: exAny(f) && priceCtx
           ? Object.assign({ fields: EXTRA_FIELDS.filter(e => exOn(f)[e.k]).map(e => e.k) }, priceCtx)
           : null,
@@ -1960,6 +2067,8 @@ $("run-o").onclick = async function () {
         byMall: r.byMall || {}, noDate: r.noDate || 0,
         renamed: r.renamed || 0, nameMissing: r.nameMissing || [],
         priceOn: !!r.priceOn, priceCount: r.priceCount || 0, priceMissing: r.priceMissing || [],
+        tableOn: !!r.tableOn, tableFields: r.tableFields || [],
+        tableCount: r.tableCount || 0, tableMissing: r.tableMissing || [],
         // 파일명 고정 형식: 오늘날짜_보내는곳_업체명_발주양식.xlsx
         // ※ 사용자가 별도로 요청하지 않는 한 이 형식을 바꾸지 말 것
         // 가운데 '보내는곳' 은 법인이 여럿이면 그 업체 주문이 속한 법인(더벨로샵/커민사이드),
@@ -2088,6 +2197,16 @@ function showResultO(results, skipped, verify) {
         extra += `<div class="misslist">매핑표에 없어 원래 이름으로 나갑니다 —<br>`
           + r.nameMissing.slice(0, 6).map(x => `· ${esc(x.name)} <b>${x.count}건</b>`).join("<br>")
           + (r.nameMissing.length > 6 ? `<br>… 외 ${r.nameMissing.length - 6}종` : "") + `</div>`;
+    }
+    if (r.tableOn) {
+      const bad = r.count - r.tableCount;
+      extra += `<div class="mallrow"><span>📎 ${esc(r.tableFields.join("·"))} <b>${r.tableCount}/${r.count}</b></span>`
+        + (bad > 0 ? `<span style="border-color:var(--warn);color:var(--warn)">못 찾음 <b>${bad}건</b></span>` : "")
+        + `</div>`;
+      if (r.tableMissing && r.tableMissing.length)
+        extra += `<div class="misslist">규칙표에서 못 찾아 빈칸으로 둡니다 —<br>`
+          + r.tableMissing.slice(0, 6).map(x => `· ${esc(x.name)} <b>${x.count}건</b>`).join("<br>")
+          + (r.tableMissing.length > 6 ? `<br>… 외 ${r.tableMissing.length - 6}종` : "") + `</div>`;
     }
     if (r.priceOn) {
       const bad = r.count - r.priceCount;

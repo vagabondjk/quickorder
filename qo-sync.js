@@ -74,7 +74,10 @@ const SYNC = (() => {
       /* 업체별 설정(상품명 매핑 · 공급가 넣기)도 같이 실어야 기기를 바꿔도 남는다 */
       forms: forms.map(f => ({ name: f.name, file: f.file, checked: f.checked !== false,
         nameMap: f.nameMap || null, nameMapList: f.nameMapList || null, nameMapFile: f.nameMapFile || "",
-        withPrice: !!f.withPrice, extra: f.extra || null, data: b64FromBuf(f.data) })),
+        withPrice: !!f.withPrice, extra: f.extra || null,
+        renameTable: f.renameTable || null, renameFile: f.renameFile || "",
+        extraTable: f.extraTable || null, extraFile: f.extraFile || "",
+        data: b64FromBuf(f.data) })),
     };
   }
 
@@ -102,7 +105,10 @@ const SYNC = (() => {
         if (at) revived.push(f.name);                   // 백업이 더 최신 → 되살리고 표시는 지운다
         await DB.putForm({ name: f.name, file: f.file, checked: f.checked !== false,
           nameMap: f.nameMap || null, nameMapList: f.nameMapList || null, nameMapFile: f.nameMapFile || "",
-          withPrice: !!f.withPrice, extra: f.extra || null, data: bufFromB64(f.data) });
+          withPrice: !!f.withPrice, extra: f.extra || null,
+          renameTable: f.renameTable || null, renameFile: f.renameFile || "",
+          extraTable: f.extraTable || null, extraFile: f.extraFile || "",
+          data: bufFromB64(f.data) });
       }
       if (revived.length) {
         revived.forEach(n => { delete tomb[n]; });

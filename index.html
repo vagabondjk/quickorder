@@ -203,6 +203,11 @@
   .brow.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
   .brow.taken{opacity:.5;border-style:dashed;background:var(--card2);color:var(--muted);cursor:pointer}
   .brow.taken small{font-weight:700;color:var(--faint)}
+  /* 브랜드 칩의 주문 건수 — 이번에 어느 브랜드에 물량이 있는지 눌러보지 않고 알게 */
+  .brow .bcnt{font-style:normal;font-size:11px;font-weight:800;color:var(--brand);
+    background:var(--brand-soft);border-radius:999px;padding:1px 6px;margin-left:-2px}
+  .brow.on .bcnt{background:var(--card);color:var(--brand)}
+  .brow.taken .bcnt{background:var(--card);color:var(--faint)}
   .box{width:21px;height:21px;border-radius:6px;border:2px solid var(--line);flex:none;
     display:grid;place-items:center;background:var(--card)}
   .brow .box{width:15px;height:15px;border-radius:4px}

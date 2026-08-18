@@ -728,8 +728,15 @@ function convert(orderWb, tplWb, opts) {
 
   /* ---- 업체가 원하는 상품명으로 바꾸기 ---- */
   const nameMap = opts.nameMap || null;
+  const renameTbl = opts.rename && opts.rename.rules && opts.rename.rules.length ? opts.rename : null;
   let renamed = 0;
   const missName = new Map();          // 매핑표에 없어 그대로 나간 상품명
+
+  /* ---- 규칙표로 '추가 정보' 열 붙이기 (상품코드·공급가 등) ---- */
+  const extraTbl = opts.extra && opts.extra.rules && opts.extra.rules.length ? opts.extra : null;
+  const extraTblCols = {};
+  let extraHit = 0;
+  const missExtra = new Map();
 
   /* ---- 공급가 넣기 ----
      정산 탭에 올려둔 업체별 공급가표에서 상품마다 단가를 찾아 채운다.
@@ -767,6 +774,27 @@ function convert(orderWb, tplWb, opts) {
   }
   const priceCol = extraCols.price || null;
 
+  /* 규칙표가 준 '추가 정보' 열을 양식에 만든다 (같은 이름이 이미 있으면 그 자리에) */
+  if (extraTbl) {
+    extraTbl.fields.forEach(name => {
+      const key = normHeader(name);
+      let col = null;
+      for (let c = 1; c <= dims(tws).cols; c++) {
+        if (Object.values(extraTblCols).indexOf(c) >= 0 || Object.values(extraCols).indexOf(c) >= 0) continue;
+        if (normHeader(getV(tws, tgtHeaderRow, c)) === key) { col = c; break; }
+      }
+      if (!col) {
+        col = dims(tws).cols + 1;
+        const hc = tws.getRow(tgtHeaderRow).getCell(col);
+        hc.value = name;
+        hc.style = Object.assign({}, tws.getRow(tgtHeaderRow).getCell(Math.max(1, col - 1)).style);
+        tws.getColumn(col).width = Math.max(10, Math.min(20, String(name).length + 6));
+        log(`   (양식에 '${name}' 칸이 없어 맨 뒤에 붙였습니다)`);
+      }
+      extraTblCols[name] = col;
+    });
+  }
+
   const sd = dims(sws);
   /* 브랜드·옵션·날짜 열 — 공급가를 찾을 때 쓴다 (상품명만으로는 못 고른다) */
   const sBrandCol = findBrandColumn(sws, srcHeaderRow);
@@ -796,10 +824,20 @@ function convert(orderWb, tplWb, opts) {
     }
     const vals = pairs.map(([scol, tcols]) => {
       let v = getV(sws, r, scol);
-      /* 업체가 원하는 상품명으로 바꿔서 내보낸다 (그 업체 발주서에만) */
-      if (nameMap && scol === sProdCol && !isBlank(v)) {
-        const to = applyNameMap(nameMap, v);
-        if (to !== v) { v = to; renamed++; }
+      /* 업체가 원하는 상품명으로 바꿔서 내보낸다 (그 업체 발주서에만).
+         규칙표(매핑조건)를 먼저 보고, 없으면 예전 매핑표를 본다. */
+      if ((renameTbl || nameMap) && scol === sProdCol && !isBlank(v)) {
+        let to = v;
+        if (renameTbl) {
+          const hit = matchRule(renameTbl, {
+            product: v,
+            option: sOptCol ? getV(sws, r, sOptCol) : "",
+            brand: sBrandCol ? getV(sws, r, sBrandCol) : "",
+          });
+          if (hit) to = hit.vals[renameTbl.fields[0]];
+        }
+        if (to === v && nameMap) to = applyNameMap(nameMap, v);
+        if (to !== v && !isBlank(to)) { v = to; renamed++; }
         else missName.set(String(v), (missName.get(String(v)) || 0) + 1);
       }
       return [tcols, v];
@@ -838,6 +876,25 @@ function convert(orderWb, tplWb, opts) {
     }
     /* 공급가 — 상품명은 '바꾸기 전' 이름으로 찾아야 한다.
        매핑표로 이름을 바꿔 놓고 그 이름으로 공급가표를 뒤지면 하나도 안 맞는다. */
+    /* 규칙표로 추가 정보 넣기 — 상품명은 '바꾸기 전' 값으로 찾는다 */
+    if (extraTbl) {
+      const prod = sProdCol ? getV(sws, r, sProdCol) : "";
+      const hit = matchRule(extraTbl, {
+        product: prod,
+        option: sOptCol ? getV(sws, r, sOptCol) : "",
+        brand: sBrandCol ? getV(sws, r, sBrandCol) : "",
+      });
+      if (hit) {
+        extraTbl.fields.forEach(name => {
+          const v = hit.vals[name];
+          if (v !== undefined && v !== null && v !== "") tws.getRow(outRow).getCell(extraTblCols[name]).value = v;
+        });
+        extraHit++;
+      } else {
+        const nm = String(prod || "").trim();
+        if (nm) missExtra.set(nm, (missExtra.get(nm) || 0) + 1);
+      }
+    }
     if (priceBookIn && wantFields.length) {
       const pr = {
         brand: sBrandCol ? getV(sws, r, sBrandCol) : "",
@@ -864,10 +921,14 @@ function convert(orderWb, tplWb, opts) {
     .map(([name, n]) => ({ name, count: n }));
   return {
     count, sheet: tws.name, byMall, noDate,
-    renamed, nameMissing: nameMap ? top(missName) : [],
+    renamed, nameMissing: (nameMap || renameTbl) ? top(missName) : [],
     priceCount: priceHit, priceMissing: priceBookIn ? top(missPrice) : [],
     priceOn: !!(priceBookIn && wantFields.length),
     extraFields: priceBookIn ? wantFields.map(k => EXTRA[k].title) : [],
+    /* 규칙표로 붙인 추가 정보 */
+    tableOn: !!extraTbl,
+    tableFields: extraTbl ? extraTbl.fields : [],
+    tableCount: extraHit, tableMissing: extraTbl ? top(missExtra) : [],
   };
 }
 
@@ -1529,6 +1590,123 @@ function readNameMap(wb, opts) {
   return { map: { exact, keys }, list, dup, sheets: used };
 }
 
+/* ===================================================================
+   업체별 규칙표 — '값 변경해서 양식에 넣기' · '추가 정보 넣기' (2026-08-18)
+
+   실제로 쓰는 파일 모양 (브랜드 발주서 값변경_추가정보넣기.xlsx):
+     시트이름 : {업체}_값변경해서 양식에 넣기   /   {업체}_추가정보넣기
+     1행      : 매핑조건 | 매핑조건 | 매핑조건 | 추가정보   (구분)
+     2행      : 상품명   | 옵션     | 브랜드   | 공급가(원)  (항목 이름)
+     3행~     : 마녀스프 | 5팩+토마토치킨 | 플라이밀 | 20300
+
+   · 매핑조건은 '주문의 그 항목에 이 말이 들어 있으면' 으로 본다 (포함).
+     '-' 나 빈칸은 조건 없음.
+   · 조건이 여러 줄 맞으면 '더 구체적인 줄'(맞은 글자가 긴 줄)을 쓴다.
+   · 값 변경 시트는 결과가 상품명 자체, 추가 정보 시트는 결과가 '새 열' 이다.
+   =================================================================== */
+const RULE_COND = "매핑조건";
+const RULE_OUT_RENAME = /상품명추출|변환|값변경/;
+const RULE_OUT_EXTRA = /추가정보/;
+const RULE_FIELD = { 상품명: "PRODUCT", 상품: "PRODUCT", 단품명: "OPTION", 옵션: "OPTION", 브랜드: "BRAND" };
+const ruleKey = v => String(v === null || v === undefined ? "" : v)
+  .replace(/\s+/g, "").replace(/[()（）[\]]/g, "").toLowerCase();
+const isNoCond = v => { const s = String(v === null || v === undefined ? "" : v).trim(); return !s || s === "-"; };
+
+/* 시트 한 장을 규칙으로 읽는다. kind: "rename" | "extra" */
+function readRuleSheet(ws, kind) {
+  const d = dims(ws);
+  let hr = 0;
+  for (let r = 1; r <= Math.min(d.rows, 6) && !hr; r++) {
+    for (let c = 1; c <= d.cols; c++) if (normHeader(getV(ws, r, c)) === RULE_COND) { hr = r; break; }
+  }
+  if (!hr) return null;
+  const condCols = [], outCols = [];
+  for (let c = 1; c <= d.cols; c++) {
+    const sec = normHeader(getV(ws, hr, c));
+    const name = String(getV(ws, hr + 1, c) || "").trim();
+    if (sec === RULE_COND) {
+      /* 2행 글자에서 어느 항목인지 읽는다. 못 읽으면 상품명으로 본다
+         ('쇼핑몰 발주서 상품명에 포함된 단어' 같은 설명문도 상품명으로 잡힌다) */
+      let field = "PRODUCT";
+      for (const k in RULE_FIELD) if (name.includes(k)) { field = RULE_FIELD[k]; break; }
+      condCols.push({ col: c, field, name: name || "상품명" });
+    } else if ((kind === "rename" ? RULE_OUT_RENAME : RULE_OUT_EXTRA).test(sec)) {
+      outCols.push({ col: c, name: name || (kind === "rename" ? "상품명" : "추가정보") });
+    }
+  }
+  if (!condCols.length || !outCols.length) return null;
+
+  const rules = [];
+  for (let r = hr + 2; r <= d.rows; r++) {
+    const cond = [];
+    condCols.forEach(cc => {
+      const v = getV(ws, r, cc.col);
+      if (!isNoCond(v)) cond.push({ field: cc.field, want: ruleKey(v), raw: String(v).trim() });
+    });
+    const vals = {};
+    let any = false;
+    outCols.forEach(oc => {
+      const v = getV(ws, r, oc.col);
+      if (!isBlank(v)) { vals[oc.name] = v; any = true; }
+    });
+    if (!cond.length || !any) continue;
+    rules.push({ cond, vals, weight: cond.reduce((a, c2) => a + c2.want.length, 0) });
+  }
+  if (!rules.length) return null;
+  return { fields: outCols.map(o => o.name), rules, sheet: ws.name, kind };
+}
+
+/* 주문 한 줄에 맞는 규칙 찾기 — 조건이 다 맞아야 하고, 여럿이면 더 구체적인 것 */
+function matchRule(table, row) {
+  if (!table || !table.rules) return null;
+  let best = null, bestW = -1;
+  const got = {
+    PRODUCT: ruleKey(row.product), OPTION: ruleKey(row.option), BRAND: ruleKey(row.brand),
+  };
+  for (const rule of table.rules) {
+    let ok = true;
+    for (const c of rule.cond) {
+      const g = got[c.field] || "";
+      if (!g || !g.includes(c.want)) { ok = false; break; }
+    }
+    if (ok && rule.weight > bestW) { best = rule; bestW = rule.weight; }
+  }
+  return best;
+}
+
+/* 파일 한 개에서 그 업체의 '값 변경' · '추가 정보' 규칙을 뽑는다.
+   시트 이름 앞머리가 업체명이다 — 없으면 그 종류의 첫 시트를 쓴다. */
+function readVendorRules(wb, opts) {
+  opts = opts || {};
+  const want = ruleKey(opts.vendor || "");
+  const out = { rename: null, extra: null };
+  const pick = (kind, re) => {
+    const cands = (wb.worksheets || []).filter(ws => re.test(String(ws.name || "")));
+    if (!cands.length) return null;
+    const hasPrefix = ws => String(ws.name || "").indexOf("_") > 0;
+    const mine = want ? cands.filter(ws => {
+      const head = ruleKey(String(ws.name).split("_")[0]);
+      return head && (head === want || want.includes(head) || head.includes(want));
+    }) : [];
+    /* ★ 업체 이름이 안 맞으면 다른 업체 시트를 대신 쓰지 않는다.
+       마이옵티멀에 플로 규칙이 붙어 상품명이 통째로 엉뚱하게 바뀔 뻔했다.
+       단, 시트에 업체 이름이 안 붙어 있으면(한 업체짜리 파일) 그대로 쓴다. */
+    let use = mine;
+    if (!use.length) {
+      if (want && cands.some(hasPrefix)) return null;
+      use = cands;
+    }
+    for (const ws of use) {
+      const t = readRuleSheet(ws, kind);
+      if (t) return t;
+    }
+    return null;
+  };
+  out.rename = pick("rename", /값\s*변경/);
+  out.extra = pick("extra", /추가\s*정보/);
+  return out;
+}
+
 /* 옛 형태(평평한 객체)도 그대로 읽는다 — 이미 올려둔 매핑표가 있다 */
 function normNameMap(m) {
   if (!m) return null;
@@ -1990,6 +2168,7 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   mergeOrders, mallKey, dateLikeColumns, brandFromName, brandFromKnown, resolveBrand, aliasKey, convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, carrierKey, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, isOldXlsBuffer, todayStr, fmtDate,
   normPriceText, toPriceNumber, priceKeyParts, priceRowKey, buildPriceBook, matchPrice,
   priceRowsFromRaw, priceBookFromRaw, readNameMap, applyNameMap, nameMapKey, normNameMap,
+  readVendorRules, readRuleSheet, matchRule,
   rankPriceCandidates, settle, settleCheck,
   settleSheetHead, settleSheetRow, isPriceHeader, isInternalHeader, vendorSheetColumns, carryNote };
 });
