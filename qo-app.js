@@ -888,7 +888,15 @@ function drvNeedLogin() {
   b.onclick = () => {                    // 직접 클릭 → 팝업 차단 안 됨(중간에 await 없음)
     $("drv-msg").textContent = "로그인 창을 여는 중…";
     GMAIL.signIn("select_account")
-      .then(() => { $("drv-msg").textContent = ""; updateGmailWho(); drvStart(); })
+      .then(async () => {
+        $("drv-msg").textContent = "";
+        /* ★ 로그인이 끝나면 그 자리에서 계정을 확정한다.
+           안 하면 CONFIG.account 가 빈 채로 남아 ① 기억해 둔 폴더가 이 계정 것과
+           맞지 않아 매번 최상위부터 열리고, ② 저장소도 계정 자리로 못 옮겨 가
+           예전에 저장해 둔 업체 양식이 안 보인다. */
+        try { await syncAccount(); } catch (e) {}
+        updateGmailWho(); drvStart();
+      })
       .catch(e => {
         const m = e.message || "";
         $("drv-msg").textContent = /popup/i.test(m)
