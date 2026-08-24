@@ -187,8 +187,16 @@ const DB = (() => {
         if ((curF && curF.length) || (curK && curK.length)) return 0;   // ②
         const old = await readAll(fromName);
         if (!old || (!old.forms.length && !old.kv.length)) return 0;
-        for (const f of old.forms) await tx("forms", "readwrite", s => s.put(f));
-        for (const e of old.kv) await tx("kv", "readwrite", s => s.put(e));
+        /* ★ 옮겨 담는 동안 자동 업로드를 멈춘다.
+           쓸 때마다 SYNC.pushSoon() 이 걸리는데(DB.onChange), 이사는 켤 때
+           syncDown 보다 먼저 돈다. 멈추지 않으면 '드라이브에 있는 더 새로운 백업' 을
+           방금 옮겨온 옛 자료로 덮어쓴다. 복원(qo-sync.js)이 쓰는 방법과 같다.
+           ※ finally 로 반드시 되돌린다 — 중간에 실패하면 그 세션 내내 업로드가 멈춘다. */
+        suspended = true;
+        try {
+          for (const f of old.forms) await tx("forms", "readwrite", s => s.put(f));
+          for (const e of old.kv) await tx("kv", "readwrite", s => s.put(e));
+        } finally { suspended = false; }
         return old.forms.length + old.kv.length;
       } catch (e) { return 0; }
     },
@@ -4063,7 +4071,11 @@ function applyLockCompany() {
   try { await DB.reopen(); } catch (e) {}
   /* 켤 때마다 확인한다 — 이미 옮겼거나 업체가 다르면 DB.inherit 이 아무것도 안 한다.
      한 번 실패했더라도 다음에 켤 때 다시 붙잡을 수 있게 해 두는 것이다. */
-  try { await DB.inherit(preAcctDb); } catch (e) {}
+  /* 옮겼으면 반드시 알린다 — 조용히 넘어가면 '왜 갑자기 보이지' 를 알 수 없다 */
+  try {
+    const n = await DB.inherit(preAcctDb);
+    if (n) msg("msg-o", "ok", `이전에 저장해 둔 자료 ${n}건을 이 계정 저장소로 옮겼어요.`);
+  } catch (e) {}
   try { if (window.CS && CS.reload) await CS.reload(); } catch (e) {}
   try { if (window.ST && ST.reload) await ST.reload(); } catch (e) {}
   try { await loadForms(); }
