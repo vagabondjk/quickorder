@@ -169,6 +169,37 @@ const GMAIL = (() => {
        앞 계정 칸에 남는다 — 다음에 열 때 남의 드라이브가 보이는 원인이었다. */
   function persistToken() { if (accessToken) saveToken(); }
   function dropStored() { clearToken(); }   // 메모리는 그대로, 저장된 것만 지운다
+  /* ★★ 저장 자리(업체·계정)를 바꿀 때, 이 기기의 로그인 흔적을 통째로 새 자리로 옮긴다.
+     저장소 이름에는 '로그인한 구글 계정' 이 들어가는데, 토큰은 그 계정이 누구인지
+     알아내기 전에 저장된다. 그래서 계정이 밝혀지는 순간 키가 바뀌어 저장해 둔 것이
+     옛 자리에 갇혔다 — 다음에 열면 '로그인하세요' 가 다시 떴다.
+     ★ 토큰(TKEY)만 옮기면 안 된다:
+       · 승인이력(GKEY)이 빠지면 token() 이 consent 로 빠져 동의창이 다시 뜬다.
+       · 계정힌트(HKEY)가 빠지면 계정 선택 화면이 다시 뜬다.
+     구글 토큰은 한 시간이면 만료되므로, 셋을 같이 옮기지 않으면 한 시간마다
+     로그인 창을 다시 보게 된다. 그게 '자꾸 로그인하라고 함' 의 정체다. */
+  function relocate(change) {
+    const live = signedIn();          // 자리를 옮기기 전에 판단해야 한다
+    let t = null, g = null, h = null;
+    try {
+      t = localStorage.getItem(TKEY());
+      g = localStorage.getItem(GKEY());
+      h = localStorage.getItem(HKEY());
+      // 옛 자리에는 남기지 않는다 — 남의 계정 토큰이 그 자리에 놓여 있으면 안 된다
+      localStorage.removeItem(TKEY());
+      localStorage.removeItem(GKEY());
+      localStorage.removeItem(HKEY());
+    } catch (e) {}
+    const moved = change();           // 여기서 CONFIG 의 저장소 이름이 바뀐다
+    try {
+      if (t != null) localStorage.setItem(TKEY(), t);
+      if (g != null) localStorage.setItem(GKEY(), g);
+      if (h != null) localStorage.setItem(HKEY(), h);
+    } catch (e) {}
+    // 방금 로그인해서 아직 저장 전이면 메모리 것을 새 자리에 심는다
+    if (live) saveToken(); else reloadToken();
+    return moved;
+  }
   /* 이 기기에서 이 계정을 잊는다 (구글 서버의 승인은 건드리지 않는다).
      signOut 은 revoke 까지 해서 그 계정 전체를 끊어버린다 — 잘못 물린 토큰을
      떼어낼 때는 이쪽을 쓴다. */
@@ -608,7 +639,7 @@ const GMAIL = (() => {
     return (await r.json()).id;
   }
 
-  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, switchAccount, persistToken, dropStored, forget, reloadToken, projectNo, driveExportCsv, sheetRead, sheetWrite, sheetTabs, sheetEnsureTab, sheetCreate, driveShareAnyone, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
+  return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, switchAccount, persistToken, dropStored, relocate, forget, reloadToken, projectNo, driveExportCsv, sheetRead, sheetWrite, sheetTabs, sheetEnsureTab, sheetCreate, driveShareAnyone, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,
            searchAddresses, driveFind, driveDownload, driveUpload, granted,
            driveIdFromLink, driveFileInfo, driveSearch, driveFetchExcel, driveListFolder, driveListShared, driveAncestors, driveUpdateFile, needLogin };
 })();

@@ -2175,13 +2175,30 @@ function todayStr() {
 }
 function fmtDate(ymd) { return ymd ? `${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.slice(6,8)}` : ""; }
 
+/* ★★ 저장소를 옮겨 담아도 되는가 (qo-app.js 의 DB.inherit 이 이걸 물어본다).
+   저장소 이름은  quickorder + 배포본 + 업체(_c…) + 계정(_u…)  순으로 붙는다.
+   구글 계정이 처음 붙으면 이름이 길어지면서 텅 빈 저장소가 열리는데, 그때
+   앞 저장소에서 한 번 옮겨 담아야 예전 업체 양식이 계속 보인다.
+
+   허용 조건은 딱 하나 — 늘어난 부분이 '계정 조각 하나' 일 것.
+   즉 배포본도 업체도 완전히 같고 계정만 붙은 경우다.
+   앞부분이 같은지만 보면(startsWith) 업체 조각(_c…)이 통째로 끼어드는 경우까지
+   통과해서, 랩노마드 자료가 다른 업체 저장소로 들어간다. 그 사고를 여기서 막는다.
+   ※ 이 판정을 화면 코드(qo-app.js)에 두지 않고 여기 둔 이유는 테스트로 지키기 위해서다.
+     같은 종류의 유출이 이미 세 번 났다. */
+function canInheritStore(from, to) {
+  if (!from || !to || from === to) return false;
+  if (to.indexOf(from) !== 0) return false;
+  return /^_u[0-9a-z]+$/.test(to.slice(from.length));
+}
+
 return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   cv, getV, isBlank, dims, canonField, findHeaderRow, buildOrderFieldMap, phoneColumns,
   pickOrderSheet, findBrandColumn, listBrands, extractDate, isCollectHeader,
   toDateValue, isDateHeader, hasDateFormat, hasTimeFormat,
   findDateColumns, defaultDateColumn, orderDateInfo, formatPhone, stripHyphen,
   valueTransformForHeader, nameFromFilename, normKey,
-  mergeOrders, mallKey, dateLikeColumns, brandFromName, brandFromKnown, resolveBrand, aliasKey, convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, carrierKey, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, isOldXlsBuffer, todayStr, fmtDate,
+  mergeOrders, mallKey, dateLikeColumns, brandFromName, brandFromKnown, resolveBrand, aliasKey, convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, carrierKey, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, isOldXlsBuffer, todayStr, fmtDate, canInheritStore,
   normPriceText, toPriceNumber, priceKeyParts, priceRowKey, buildPriceBook, matchPrice,
   priceRowsFromRaw, priceBookFromRaw, readNameMap, applyNameMap, nameMapKey, normNameMap,
   readVendorRules, readRuleSheet, readAllRuleSheets, matchRule,

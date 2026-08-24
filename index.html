@@ -517,6 +517,9 @@
       <div id="date-wrap" style="display:none;margin-top:14px">
         <div class="pvhead">
           <div><b>발주 날짜 선택</b> <span id="dt-info"></span></div>
+          <!-- 어느 날짜 열로 셀지. 기본은 주문일시, 수집일자 기준도 고를 수 있다.
+               고른 기준은 미리보기·건수·검산·변환에 모두 같이 적용된다. -->
+          <select id="dt-basis" style="display:none;flex:none;font-size:12px;max-width:46%"></select>
         </div>
         <div class="chips" id="dt-chips"></div>
         <div class="pvfoot" id="dt-foot"></div>

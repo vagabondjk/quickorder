@@ -125,6 +125,35 @@ const DB = (() => {
   }
   let afterWrite = () => {}, suspended = false;
   const fire = () => { if (!suspended) { try { afterWrite(); } catch (e) {} } };
+  /* 다른 이름의 저장소를 '새로 만들지 않고' 읽는다. 없으면 null.
+     ※ indexedDB.open 은 없는 이름이면 새로 만들어 버린다. 새로 만들어졌으면 그 자리에서
+       지운다 — 쓰지도 않을 빈 저장소를 남기면 다음에 '있는 줄' 알고 헛읽는다. */
+  function readAll(name) {
+    return new Promise(res => {
+      let created = false, rq;
+      try { rq = indexedDB.open(name, 1); } catch (e) { return res(null); }
+      rq.onupgradeneeded = e => {
+        created = true;
+        const d = e.target.result;
+        if (!d.objectStoreNames.contains("forms")) d.createObjectStore("forms", { keyPath: "name" });
+        if (!d.objectStoreNames.contains("kv")) d.createObjectStore("kv", { keyPath: "k" });
+      };
+      rq.onerror = () => res(null);
+      rq.onsuccess = e => {
+        const d = e.target.result;
+        if (created) { try { d.close(); indexedDB.deleteDatabase(name); } catch (e2) {} return res(null); }
+        let forms = [], kv = [], left = 2;
+        const done = () => { if (--left === 0) { try { d.close(); } catch (e2) {} res({ forms, kv }); } };
+        try {
+          const t = d.transaction(["forms", "kv"], "readonly");
+          const a = t.objectStore("forms").getAll();
+          a.onsuccess = () => { forms = a.result || []; done(); }; a.onerror = done;
+          const b = t.objectStore("kv").getAll();
+          b.onsuccess = () => { kv = b.result || []; done(); }; b.onerror = done;
+        } catch (e2) { try { d.close(); } catch (e3) {} res(null); }
+      };
+    });
+  }
   return {
     listForms: () => tx("forms", "readonly", s => s.getAll()),
     putForm: async f => { const r = await tx("forms", "readwrite", s => s.put(f)); fire(); return r; },
@@ -136,6 +165,33 @@ const DB = (() => {
     /* 로그인 계정이 바뀌면 저장소 이름도 바뀐다 → 열려 있던 것을 닫고 다시 연다.
        이걸 안 하면 계정을 바꿔도 앞 회사 데이터를 계속 보게 된다. */
     reopen() { try { if (db) db.close(); } catch (e) {} db = null; return open(); },
+    /* ★★ 구글 계정이 처음 붙는 순간 저장소 이름이 바뀐다 (quickorder → quickorder_u…).
+       새 이름은 텅 빈 저장소라, 랩노마드가 예전에 저장해 둔 업체 양식·공급가표가
+       통째로 안 보였다. 드라이브 백업이 있으면 곧 되돌아오지만, 백업이 없거나
+       오래됐으면 그냥 사라진 것으로 보인다 — 실제로 '되던 게 안 된다' 의 정체다.
+       그래서 새 저장소가 '완전히 비어 있을 때만' 앞 저장소에서 한 번 옮겨 담는다.
+
+       ★ 안전장치 두 개 — 이게 없으면 회사 간 자료가 새는 바로 그 사고가 난다:
+         ① 늘어난 부분이 '계정 조각 하나' 일 때만 옮긴다. 저장소 이름은
+            quickorder + 배포본 + 업체(_c…) + 계정(_u…) 순으로 붙는데,
+            차이가 정확히 _u… 하나여야 통과시킨다. 즉 배포본도 업체도 완전히 같고
+            계정만 붙은 경우다. 앞부분만 같은지 보면(startsWith) 업체 조각(_c…)이
+            통째로 끼어드는 경우까지 통과해 랩노마드 자료가 다른 업체로 샌다.
+         ② 지금 저장소에 뭐라도 들어 있으면 손대지 않는다.
+       ※ 원본은 지우지 않는다 — 잘못됐을 때 되돌릴 데가 있어야 한다. */
+    async inherit(fromName) {
+      try {
+        if (!QO.canInheritStore(fromName, CONFIG.dbName)) return 0;       // ① (판정은 qo-logic.js)
+        const curF = await tx("forms", "readonly", s => s.getAll());
+        const curK = await tx("kv", "readonly", s => s.getAll());
+        if ((curF && curF.length) || (curK && curK.length)) return 0;   // ②
+        const old = await readAll(fromName);
+        if (!old || (!old.forms.length && !old.kv.length)) return 0;
+        for (const f of old.forms) await tx("forms", "readwrite", s => s.put(f));
+        for (const e of old.kv) await tx("kv", "readwrite", s => s.put(e));
+        return old.forms.length + old.kv.length;
+      } catch (e) { return 0; }
+    },
   };
 })();
 
@@ -606,7 +662,10 @@ async function setOrderFiles(srcs, icon) {
 
 /* 합친 파일 이름 목록 접기 — 몰이 14곳이면 이름만으로 화면 반쪽을 먹는다.
    ★ 접어도 '몇 개 파일 · 몇 건' 은 남긴다. 그게 없으면 안 올라간 줄 안다. */
-const OFOLD = () => CONFIG.ls("qo_fold_ordernames");
+/* ★ 화면 상태는 '업체' 까지만 가른다(lsCompany). 구글 계정까지 붙이면 안 된다 —
+   이 값은 앱이 켜지는 순간(계정을 알기 전) 읽고, 저장은 계정이 밝혀진 뒤에 한다.
+   그래서 계정을 붙이면 읽는 키와 쓰는 키가 달라져 설정이 매번 초기화된다. */
+const OFOLD = () => CONFIG.lsCompany("qo_fold_ordernames");
 const foldedOrder = () => { try { return localStorage.getItem(OFOLD()) === "1"; } catch (e) { return false; } };
 function applyOrderFold() {
   const btn = $("order-fold"), el = $("order-name");
@@ -810,8 +869,11 @@ async function openDrivePicker(opts) {
   $("drv-msg").textContent = ""; $("drv-q").value = ""; $("drv-link").value = "";
   $("drv-list").innerHTML = "";
   $("drvmodal").classList.add("on");
-  // 로그인 안 돼 있으면: 조용한 갱신(팝업 없음) 시도 → 실패하면 '로그인' 버튼을 보여준다.
-  // (자동으로 팝업을 띄우면 브라우저가 "Failed to open popup window"로 막아버림)
+  /* 로그인이 안 돼 있으면 '로그인' 버튼을 보여준다 — 여기서 자동으로 띄우면 안 된다.
+     ① 브라우저가 "Failed to open popup window" 로 막고,
+     ② 위의 await(ensureAccountMatches) 때문에 이미 '사용자 클릭' 맥락에서 벗어나 있다.
+     대신 버튼을 눌렀을 때 조용히 지나가도록 승인이력·계정힌트를 지키는 게 핵심이다
+     (GMAIL.relocate 참고). 그게 빠져서 한 시간마다 동의창이 다시 떴다. */
   if (GMAIL.needLogin()) { drvNeedLogin(); return; }   // 자동 팝업 금지 → 버튼으로 유도
   drvStart();
 }
@@ -1082,16 +1144,45 @@ $("drive-rep").onclick = () => openDrivePicker({
 });
 
 /* --- 날짜 --- */
-/* ★ '기준: 주문일시' 고르는 칸은 없앴다 (2026-08-18).
-   합칠 때 모든 쇼핑몰의 날짜를 '주문일시' 하나로 맞추기 때문이다 —
-   주문일 열이 없는 몰은 무엇을 쓸지 물어보고 그 답을 기억한다.
-   그러고도 기준을 또 고르게 하면, 몰마다 다른 날짜로 세어 건수가 안 맞는다. */
+/* 기준 열은 '주문일시' 가 기본이다. 합칠 때 모든 쇼핑몰의 날짜를 주문일시 하나로
+   맞추기 때문이다 — 주문일 열이 없는 몰은 무엇을 쓸지 물어보고 그 답을 기억한다.
+   ★ 2026-08-24: 수집일자 기준으로도 고를 수 있게 되돌렸다.
+     한때 이 칸을 없앴던 이유는 '몰마다 다른 날짜로 세어 건수가 안 맞는다' 였는데,
+     그건 몰별로 기준이 갈릴 때의 이야기다. 여기서 고르는 기준은 전체에 하나로
+     적용되고, 미리보기·건수·검산·변환이 전부 S.dateHeader 하나만 보고 움직이므로
+     어긋나지 않는다. (고른 기준은 검산 결과에도 그대로 찍힌다 — dateHeaderUsed) */
+const DBASIS = () => CONFIG.lsCompany("qo_date_basis");
+function drawDateBasis(di) {
+  const sel = $("dt-basis");
+  if (!sel) return;
+  const list = (di.candidates || []).filter(Boolean);
+  if (list.length < 2) { sel.style.display = "none"; return; }   // 고를 게 하나면 칸을 안 보인다
+  sel.style.display = "";
+  sel.innerHTML = "";
+  list.forEach(h => {
+    const o = document.createElement("option");
+    o.value = h; o.textContent = h + " 기준";
+    sel.appendChild(o);
+  });
+  sel.value = di.header || list[0];
+  sel.onchange = async () => {
+    S.dateBasis = sel.value;
+    try { localStorage.setItem(DBASIS(), S.dateBasis); } catch (e) {}
+    S.dateSel = [];                    // 기준이 바뀌면 날짜 목록 자체가 달라진다
+    await loadDates(S.dateBasis);
+  };
+}
 async function loadDates(header) {
   $("date-wrap").style.display = "block";
   $("dt-info").textContent = "· 읽는 중…";
+  if (S.dateBasis === undefined) {
+    try { S.dateBasis = localStorage.getItem(DBASIS()) || ""; } catch (e) { S.dateBasis = ""; }
+  }
   const wb = await QO.loadWorkbook(S.orderBuf.slice(0));
-  const di = QO.orderDateInfo(wb, header || FIELD_ORDER_DATE);
+  /* 고른 기준이 이 파일에 없으면 orderDateInfo 가 기본 열로 되돌린다 — 조용히 빈 목록이 되지 않는다 */
+  const di = QO.orderDateInfo(wb, header || S.dateBasis || FIELD_ORDER_DATE);
   S.dateHeader = di.header;
+  drawDateBasis(di);
 
   const list = Object.entries(di.counts).sort((a, b) => b[0].localeCompare(a[0]))
     .map(([d, n]) => ({ date: d, label: QO.fmtDate(d), count: n }));
@@ -1722,7 +1813,7 @@ const FOLDS = {};
 function bindFold(btnId, bodyId, key, defFolded, noteId, summary) {
   const btn = $(btnId), body = $(bodyId);
   if (!btn || !body) return;
-  const K = () => CONFIG.ls(key);
+  const K = () => CONFIG.lsCompany(key);   // 계정 붙이면 켤 때 읽는 키와 어긋난다 (OFOLD 주석 참고)
   const read = () => { try { const v = localStorage.getItem(K()); return v === null ? !!defFolded : v === "1"; } catch (e) { return !!defFolded; } };
   const apply = () => {
     const off = read();
@@ -1764,7 +1855,7 @@ const refreshFolds = () => Object.values(FOLDS).forEach(fn => { try { fn(); } ca
 
 /* 양식 목록 접기 — 업체가 늘면 이 카드만으로 화면이 꽉 찬다.
    접어둔 상태는 기억한다 (업체별로 따로). */
-const VFOLD = () => CONFIG.ls("qo_fold_forms");
+const VFOLD = () => CONFIG.lsCompany("qo_fold_forms");
 const foldedForms = () => { try { return localStorage.getItem(VFOLD()) === "1"; } catch (e) { return false; } };
 function applyFormFold() {
   const box = $("vlist"), btn = $("vfold"), cnt = $("vcount"), note = $("vsummary");
@@ -2880,11 +2971,11 @@ async function drawSettings() {
   /* 업체마다 입력칸이 둘씩 붙어 화면을 다 잡아먹었다. 자주 고치는 값이 아니라 접어 둔다.
      (한 번 펴두면 그 상태를 기억한다 — 손볼 일이 있는 날엔 계속 펴져 있게) */
   const sec = document.createElement("details");
-  sec.open = localStorage.getItem(CONFIG.ls("qo_open_vmail")) === "1";
+  sec.open = localStorage.getItem(CONFIG.lsCompany("qo_open_vmail")) === "1";
   sec.innerHTML = `<summary style="font-size:12px;font-weight:700;color:var(--muted);cursor:pointer;
     padding:4px 0;list-style:revert">업체 이메일 <span style="color:var(--faint);font-weight:600">(${names.length})</span></summary>`;
   sec.addEventListener("toggle", () => {
-    try { localStorage.setItem(CONFIG.ls("qo_open_vmail"), sec.open ? "1" : "0"); } catch (e) {}
+    try { localStorage.setItem(CONFIG.lsCompany("qo_open_vmail"), sec.open ? "1" : "0"); } catch (e) {}
   });
   box.appendChild(sec);
   box = sec;                                   // 아래 업체 카드들은 이 안에 담는다
@@ -2966,12 +3057,11 @@ async function switchGoogleAccount(btn) {
     await GMAIL.switchAccount();
     let email = "";
     try { email = ((await GMAIL.profile()).emailAddress || "").toLowerCase(); } catch (e) {}
-    /* ★ 순서가 중요하다. 로그인은 '앞 계정' 자리에서 끝나므로,
-       ① 그 자리에 잘못 저장된 토큰을 지우고 ② 저장소를 새 계정 것으로 바꾼 뒤
-       ③ 토큰을 새 자리에 다시 써넣는다. 안 그러면 다음에 열 때 앞 계정 드라이브가 보인다. */
-    try { GMAIL.dropStored(); } catch (e) {}
+    /* 로그인은 '앞 계정' 자리에서 끝난다. useAccountStore 가 저장소를 새 계정 것으로
+       바꾸면서 토큰·승인이력·힌트를 그 자리로 함께 옮긴다(GMAIL.relocate).
+       예전에는 여기서 지우고 다시 쓰는 일을 손으로 했는데, 승인이력과 힌트가 빠져
+       한 시간 뒤 토큰이 만료되면 동의창이 다시 떴다. */
     if (email) await useAccountStore(email, { quiet: true });
-    try { GMAIL.persistToken(); } catch (e) {}
     updateGmailWho();
     msg("msg-o", "ok", email ? `👤 ${email} 계정으로 바꿨어요.` : "구글 계정을 바꿨어요.");
   } catch (e) {
@@ -3313,8 +3403,11 @@ async function setOrderFromBuf(buf, name, icon) {
 /* =================================================================
    새 발주·송장 알림 (앱이 열려 있을 때 주기적으로 확인 → 알림)
    ================================================================= */
-const notifyEnabled = () => { try { return localStorage.getItem(CONFIG.ls("qo_notifyOn")) === "1"; } catch (e) { return false; } };
-const setNotifyEnabled = v => { try { localStorage.setItem(CONFIG.ls("qo_notifyOn"), v ? "1" : "0"); } catch (e) {} };
+/* ★ 알림 켬/끔은 앱이 켜지는 순간(=구글 계정을 알기 전) 읽어서 폴링을 시작한다.
+   그래서 계정까지 붙은 키로 저장하면, 켜 두어도 다음에 열 때 꺼진 것으로 읽혀
+   알림이 영영 안 왔다. 업체 단위(lsCompany)로 맞춘다. */
+const notifyEnabled = () => { try { return localStorage.getItem(CONFIG.lsCompany("qo_notifyOn")) === "1"; } catch (e) { return false; } };
+const setNotifyEnabled = v => { try { localStorage.setItem(CONFIG.lsCompany("qo_notifyOn"), v ? "1" : "0"); } catch (e) {} };
 const NOTIFY_MS = 3 * 60 * 1000;   // 3분마다
 let notifyTimer = null;
 
@@ -3423,11 +3516,17 @@ function drawSyncStatus() {
    한 브라우저를 두 회사가 나눠 쓰면, 앞 회사가 쓰던 구글 계정으로 저장소를 열어 버린다. */
 const ACCT_KEY = () => CONFIG.lsCompany("qo_last_account");
 /* 저장소 이름이 바뀌었을 때 화면까지 다시 그린다 (업체가 바뀌거나 계정이 바뀔 때) */
-async function reopenStore(note) {
+async function reopenStore(note, inheritFrom) {
   /* ★ 동기화가 기억해 둔 백업 파일 ID 도 같이 버린다.
      저장소만 갈아타고 이걸 놔두면, 새 회사 데이터를 앞 회사 백업 파일에 올린다. */
   try { SYNC.reset(); } catch (e) {}
   await DB.reopen();
+  /* 계정이 붙어 이름이 길어진 것뿐이면, 앞 저장소 내용을 한 번 옮겨 담는다.
+     (업체가 다르면 DB.inherit 이 스스로 거절한다 — 거기 주석 참고) */
+  if (inheritFrom) {
+    const n = await DB.inherit(inheritFrom);
+    if (n) msg("msg-o", "ok", `이전에 저장해 둔 자료 ${n}건을 이 계정 저장소로 옮겼어요.`);
+  }
   await loadForms();
   try { if (window.CS) await CS.reload(); } catch (e) {}
   try { if (window.ST) await ST.reload(); } catch (e) {}
@@ -3436,10 +3535,16 @@ async function reopenStore(note) {
 async function useAccountStore(email, opts) {
   if (!email) return false;
   try { localStorage.setItem(ACCT_KEY(), email); } catch (e) {}
-  const changed = CONFIG.useAccount(email);
+  /* ★ 저장소 이름이 바뀌면 구글 로그인 흔적의 보관 자리도 같이 바뀐다.
+     그냥 바꾸면 토큰·승인이력·계정힌트가 옛 자리에 갇혀, 다음에 열 때
+     '구글 로그인하세요' 가 다시 뜬다. 옮기면서 바꾼다. */
+  const from = CONFIG.dbName;   // [스냅샷 허용] 옮겨 담을 앞 저장소 이름 — 바뀌기 전에 잡아 여기서 다 쓴다
+  const changed = (typeof GMAIL !== "undefined" && GMAIL.relocate)
+    ? GMAIL.relocate(() => CONFIG.useAccount(email))
+    : CONFIG.useAccount(email);
   if (!changed) return false;
   await reopenStore((opts && opts.quiet) ? "" :
-    `👤 ${email} 계정으로 바꿨어요. 이 계정의 자료를 불러옵니다.`);
+    `👤 ${email} 계정으로 바꿨어요. 이 계정의 자료를 불러옵니다.`, from);
   return true;
 }
 /* 로그인이 확인되면 계정을 확인해 저장소를 맞춘다 */
@@ -3934,13 +4039,23 @@ function applyLockCompany() {
   applyLockCompany();                       // 이미 로그인돼 있으면 이 값이 곧 정답이다
   try { if (typeof LOCK !== "undefined") await LOCK.ready; } catch (e) {}
   applyLockCompany();                       // 방금 로그인했다면 여기서 확정된다
-  try { const last = localStorage.getItem(ACCT_KEY()); if (last) CONFIG.useAccount(last); } catch (e) {}
-  try { GMAIL.reloadToken(); } catch (e) {}   // 앞사람 토큰이 메모리에 남아 있지 않게
+  /* 마지막에 쓰던 계정으로 저장소를 맞춘다.
+     ★ 옮기면서 바꾼다(relocate) — 예전 버전이 계정 없는 자리에 저장해 둔 토큰을
+       여기서 새 자리로 데려온다. 안 그러면 업데이트 직후 한 번 더 로그인해야 한다. */
+  const preAcctDb = CONFIG.dbName;   // [스냅샷 허용] 계정 조각이 붙기 전 이름 — 아래 이사에만 쓴다
+  try {
+    const last = localStorage.getItem(ACCT_KEY());
+    if (last) GMAIL.relocate(() => CONFIG.useAccount(last));
+    else GMAIL.reloadToken();                 // 앞사람 토큰이 메모리에 남아 있지 않게
+  } catch (e) { try { GMAIL.reloadToken(); } catch (e2) {} }
   try { SYNC.reset(); } catch (e) {}          // 앞사람 백업 파일 ID 도 버린다
   /* ★ 저장소 연결도 다시 연다.
      qo-cs.js 같은 모듈이 로드되면서 이미 DB 를 열어 둔다. 그 연결은 로그인 전 이름으로
      열린 것이라, 이름만 바꿔서는 소용이 없다 — 읽고 쓰는 곳은 여전히 앞 회사 저장소다. */
   try { await DB.reopen(); } catch (e) {}
+  /* 켤 때마다 확인한다 — 이미 옮겼거나 업체가 다르면 DB.inherit 이 아무것도 안 한다.
+     한 번 실패했더라도 다음에 켤 때 다시 붙잡을 수 있게 해 두는 것이다. */
+  try { await DB.inherit(preAcctDb); } catch (e) {}
   try { if (window.CS && CS.reload) await CS.reload(); } catch (e) {}
   try { if (window.ST && ST.reload) await ST.reload(); } catch (e) {}
   try { await loadForms(); }
