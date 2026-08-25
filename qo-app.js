@@ -700,7 +700,16 @@ async function rebuildMerged() {
   if (!parts || !parts.length) return;
   const m = QO.mergeOrders(parts, {
     aliases: await orderAliases(), knownBrands: knownBrandList(), dateFrom: await orderDateCols(),
+    /* ★ 이미 송장번호가 찍힌 주문(=출고 완료)은 발주 대상이 아니다. 여기서만 켠다 —
+       정산은 출고된 건을 정산해야 하므로 절대 이 옵션을 주면 안 된다. */
+    skipInvoiced: true,
   });
+  /* 전부 출고 완료라 한 줄도 안 남는 경우가 있다. '못 찾았다' 로 뭉뚱그리면
+     파일을 잘못 골랐나 싶어 헤매게 된다 — 왜 비었는지 그대로 말한다. */
+  if (!m.rows && m.invoiced) {
+    throw new Error(`고른 파일의 주문 ${m.invoiced}건이 전부 송장번호가 있는 출고 완료 건이라\n`
+      + "새로 발주할 주문이 없습니다.");
+  }
   if (!m.rows) throw new Error("고른 파일에서 주문 줄을 찾지 못했습니다.");
   S.merged = m;
   const buf = await QO.saveWorkbook(m.wb);
@@ -723,6 +732,25 @@ async function rebuildMerged() {
     fnote.innerHTML = filled.length
       ? `ℹ 주문일시가 비어 있던 주문을 같은 줄의 다른 날짜로 채웠습니다 — `
         + filled.map(([k, v]) => `<b>${esc(k)} ${v}건</b>`).join(" · ")
+      : "";
+  }
+  /* ★ 이미 송장번호가 있어 뺀 주문을 밝힌다. 빼는 것이야말로 조용히 넘어가면 안 된다 —
+     '왜 건수가 줄었지' 를 알 수 없고, 진짜로 빠뜨린 건지 구분이 안 된다.
+     한 몰이 통째로 빠졌으면 '전체 N건 제외' 로 적는다. 그냥 사라지면 파일이
+     안 읽힌 줄 안다. */
+  const inote = $("order-invoiced");
+  if (inote) {
+    const list = Object.entries(m.invoicedByMall || {});
+    inote.style.display = m.invoiced ? "" : "none";
+    inote.className = "msg show" + (m.invoiced ? " warn" : "");
+    inote.innerHTML = m.invoiced
+      ? `ℹ 이미 송장번호가 있는 <b>${m.invoiced}건</b>은 출고 완료로 보고 뺐습니다`
+        + (list.length
+          ? ` — ` + list.map(([mall, n]) => {
+              const all = (m.mallTotal || {})[mall] || 0;
+              return `<b>${esc(mall)} ${n === all ? `전체 ${n}건` : `${n}건`}</b>`;
+            }).join(" · ")
+          : "")
       : "";
   }
   /* 방금 무엇이 늘었는지 먼저 말한다 — '더하기' 인 걸 알 수 있게 */
@@ -2137,7 +2165,7 @@ async function clearOrderFile() {
   const fi = $("f-order"); if (fi) fi.value = "";
   /* 파일을 내렸으면 그 파일로 만든 화면도 같이 내린다.
      ★ '내용 확인'(prev-wrap)이 남아 있어서, 해제했는데도 주문이 그대로 있는 것처럼 보였다. */
-  ["date-wrap", "prev-wrap", "result-o", "order-datefill"].forEach(id => {
+  ["date-wrap", "prev-wrap", "result-o", "order-datefill", "order-invoiced"].forEach(id => {
     const el = $(id); if (el) el.style.display = "none";
   });
   const dc = $("dt-chips"); if (dc) dc.innerHTML = "";
@@ -3676,20 +3704,21 @@ ${id}`));
     const codes = await Promise.all(list.map(c => LOCK.approvalCode(c.name)));
     box.innerHTML = list.map((c, i) => {
       const on = c.on !== false;
-      return `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;
-        border:1px solid var(--line);border-radius:10px;margin-bottom:6px;
-        background:var(--card2);opacity:${on ? 1 : .55}">
-        <div style="flex:1;min-width:0">
-          <b style="font-size:13.5px;word-break:break-all">${esc(c.name)}</b>
-          ${on ? "" : '<span style="font-size:11px;font-weight:800;color:var(--danger);margin-left:6px">사용 중지</span>'}
-          <div style="font-size:17px;font-weight:800;letter-spacing:2px;color:var(--brand);margin-top:2px">${codes[i]}
-</div>
-          ${c.email ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${esc(c.email)}${c.tel ? " · " + esc(c.tel) : ""}</div>` : ""}
+      /* 줄 모양은 .mstrow 로 옮겼다 (index.html). 휴대폰에서 버튼 4개가 가로로
+         고정돼 업체명 칸이 9px 로 눌리던 문제 때문이다 — 거기 주석 참고. */
+      return `<div class="mstrow${on ? "" : " off"}">
+        <div class="who">
+          <b>${esc(c.name)}</b>
+          ${on ? "" : '<span class="tag" style="color:var(--danger)">사용 중지</span>'}
+          <div class="code">${codes[i]}</div>
+          ${c.email ? `<div class="meta">${esc(c.email)}${c.tel ? " · " + esc(c.tel) : ""}</div>` : ""}
         </div>
-        <button class="minibtn mstonoff" data-i="${i}" style="flex:none;${on ? "" : "color:var(--danger);border-color:var(--danger)"}">${on ? "사용 중" : "중지됨"}</button>
-        <button class="minibtn mstcopy" data-i="${i}" style="flex:none">번호 복사</button>
-        <button class="minibtn mstmsg" data-i="${i}" style="flex:none">안내문</button>
-        <button class="minibtn mstdel" data-i="${i}" style="flex:none;color:var(--danger)">삭제</button></div>`;
+        <div class="acts">
+          <button class="minibtn mstonoff" data-i="${i}"${on ? "" : ' style="color:var(--danger);border-color:var(--danger)"'}>${on ? "사용 중" : "중지됨"}</button>
+          <button class="minibtn mstcopy" data-i="${i}">번호 복사</button>
+          <button class="minibtn mstmsg" data-i="${i}">안내문</button>
+          <button class="minibtn mstdel" data-i="${i}" style="color:var(--danger)">삭제</button>
+        </div></div>`;
     }).join("");
     box.querySelectorAll(".mstonoff").forEach(b => b.onclick = async () => {
       const i = Number(b.dataset.i);
@@ -3841,16 +3870,18 @@ ${id}`));
     }
     box.innerHTML = fresh.map((r, i) => {
       const done = list.some(c => c.name === r.name);
-      return `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;
-        border:1.5px solid ${done ? "var(--line)" : "var(--brand)"};border-radius:10px;margin-bottom:6px;
-        background:${done ? "var(--card2)" : "var(--brand-soft)"}">
-        <div style="flex:1;min-width:0">
-          <b style="font-size:13.5px">${esc(r.name)}</b>
-          ${done ? '<span style="font-size:10.5px;font-weight:800;color:var(--ok);margin-left:6px">승인됨</span>' : ""}
-          <div style="font-size:11.5px;color:var(--muted);margin-top:2px">${esc(r.email || "메일 없음")}${r.tel ? " · " + esc(r.tel) : ""}${r.at ? " · " + esc(String(r.at).slice(0, 16)) : ""}</div>
+      /* 승인 업체 줄과 같은 .mstrow 를 쓴다 — 좁은 화면에서 버튼이 아랫줄로 접힌다.
+         '승인 + 안내문 발송' 은 글자가 길어서 특히 눌렸다. */
+      return `<div class="mstrow${done ? "" : " new"}">
+        <div class="who">
+          <b>${esc(r.name)}</b>
+          ${done ? '<span class="tag" style="color:var(--ok)">승인됨</span>' : ""}
+          <div class="meta">${esc(r.email || "메일 없음")}${r.tel ? " · " + esc(r.tel) : ""}${r.at ? " · " + esc(String(r.at).slice(0, 16)) : ""}</div>
         </div>
-        ${done ? "" : `<button class="minibtn reqok" data-i="${i}" style="flex:none;color:var(--brand);border-color:var(--brand);font-weight:800">승인</button>`}
-        <button class="minibtn reqsend" data-i="${i}" style="flex:none">${done ? "안내문 발송" : "승인 + 안내문 발송"}</button></div>`;
+        <div class="acts">
+          ${done ? "" : `<button class="minibtn reqok" data-i="${i}" style="color:var(--brand);border-color:var(--brand);font-weight:800">승인</button>`}
+          <button class="minibtn reqsend" data-i="${i}">${done ? "안내문 발송" : "승인 + 안내문 발송"}</button>
+        </div></div>`;
     }).join("");
     const add = async r => {
       if (list.some(c => c.name === r.name)) return;

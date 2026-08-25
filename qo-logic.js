@@ -524,6 +524,9 @@ function mergeOrders(sources, opts) {
   const dateFrom = opts.dateFrom || {};      // { 몰이름: '쓸 날짜 열 헤더' }
   const dateless = [];                       // 주문일 열이 없는 몰 (화면에서 물어본다)
   const dateFilled = {};                     // 빈 주문일시를 무엇으로 메꿨는지 {수집일자: 102}
+  /* 이미 송장번호가 찍혀 있어 뺀 주문 (= 출고까지 끝난 건). 몇 건을 왜 뺐는지 밝힌다 */
+  const invoicedByMall = {}, mallTotal = {};
+  let invoiced = 0;
   const rows = [], fields = new Set();
   let brandSeen = false;
   (sources || []).forEach(src => {
@@ -569,6 +572,22 @@ function mergeOrders(sources, opts) {
         if (!isBlank(b)) rec.__brand = b;
       }
       if (!any) continue;
+      mallTotal[mall] = (mallTotal[mall] || 0) + 1;
+      /* ★★ 이미 송장번호가 찍힌 주문은 출고까지 끝난 건이다 (2026-08-24).
+         드라이브의 통합 파일은 출고될 때마다 송장번호가 채워져 쌓이기 때문에,
+         그대로 발주서로 옮기면 업체가 **같은 건을 한 번 더 보낸다.**
+
+         ★ 반드시 opts.skipInvoiced 를 준 곳에서만 동작한다.
+           정산은 '출고된 건' 을 정산하는 것이라, 이 걸러내기가 정산 쪽으로 새면
+           지급액이 통째로 틀어진다. 지금은 발주 탭에서만 켠다.
+         ★ '비어 있지 않다' 가 아니라 '진짜 송장번호처럼 생겼나' 를 본다.
+           업체가 송장 칸에 '휴가라 8/6에 입력하겠습니다' 같은 문장을 적어 두는 일이
+           있는데, 그건 아직 출고 전이라 빼면 안 된다. */
+      if (opts.skipInvoiced && looksLikeInvoice(rec.INVOICE)) {
+        invoiced++;
+        invoicedByMall[mall] = (invoicedByMall[mall] || 0) + 1;
+        continue;
+      }
       /* ★ 주문일시 칸이 '줄 단위로' 비어 있는 경우 (2026-08-18).
          열은 있는데 어떤 줄만 비어 있으면, 날짜로 거를 때 그 줄만 조용히 빠진다.
          랩노마드 8월 통합 파일에서 102건이 이렇게 빠졌다.
@@ -651,6 +670,11 @@ function mergeOrders(sources, opts) {
     unknownRows: rows.filter(r => !r.__brand).length,
     dateless,        // 주문일 열이 없는 몰 — 화면에서 어느 열을 쓸지 물어본다
     dateFilled,      // 줄 단위로 비어 있던 주문일시를 다른 날짜로 메꾼 건수
+    invoiced,        // 이미 송장번호가 있어 뺀 주문 수 (출고 완료)
+    invoicedByMall,  // 몰별로 몇 건을 뺐는지
+    /* 몰별로 읽은 전체 줄 수. 한 몰이 통째로 빠졌을 때 '전체 N건 제외' 라고
+       말해 주려면 이게 있어야 한다 — 안 그러면 파일이 안 읽힌 줄 안다. */
+    mallTotal,
   };
 }
 
