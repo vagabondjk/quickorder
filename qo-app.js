@@ -3643,14 +3643,23 @@ const MST = (() => {
      옛 데이터를 읽을 때 그 자리에서 객체로 올려준다 (이미 쓰고 있는 사람이 있다). */
   const norm = x => (typeof x === "string" ? { name: x, on: true } : Object.assign({ on: true }, x));
   let revoked = [];                      // 목록에서 지운 업체 (이름만 남긴다)
+  /* 지운 시각 {업체명: ts} — 다른 기기 백업에서 지운 업체가 되살아나지 않게.
+     업체 양식의 formsDeleted 와 같은 방식이다. */
+  let deleted = {};
   async function load() {
     list = ((await DB.get("masterCompanies", [])) || []).map(norm);
     revoked = (await DB.get("masterRevoked", [])) || [];
+    deleted = (await DB.get("masterDeleted", {})) || {};
   }
   async function save() {
     await DB.set("masterCompanies", list);
     await DB.set("masterRevoked", revoked);
+    await DB.set("masterDeleted", deleted);
   }
+  /* ★ 목록을 손댈 때마다 그 줄에 시각을 찍는다.
+     기기 두 대의 목록을 합칠 때 '어느 쪽이 최신인가' 를 이 값으로 가린다.
+     안 찍으면 at 이 '만든 시각' 에 머물러, 나중에 켠 쪽이 옛 상태로 되돌린다. */
+  const touch = c => { if (c) c.at = Date.now(); return c; };
   /* 업체 목록을 공용 명단(roster.json) 형태로 만든다.
      ★ 지운 업체는 목록에서만 빼고 명단에는 '사용:false' 로 남긴다.
        명단에서 통째로 빼버리면 '없는 이름' 이 되어 그냥 통과한다 —
@@ -3723,6 +3732,7 @@ ${id}`));
     box.querySelectorAll(".mstonoff").forEach(b => b.onclick = async () => {
       const i = Number(b.dataset.i);
       list[i].on = list[i].on === false;
+      touch(list[i]);                    // 합칠 때 이쪽이 최신임을 알 수 있게
       await save(); draw();
       await pushRoster();          // 누르는 즉시 시트에 반영 — 따로 [적용] 을 안 눌러도 되게
     });
@@ -3749,6 +3759,7 @@ ${id}`));
 앞으로 로그인할 수 없습니다.`)) return;
       list.splice(i, 1);
       if (!revoked.includes(name)) revoked.push(name);
+      deleted[name] = Date.now();        // 다른 기기 백업에서 되살아나지 않게
       await save(); await draw();
       await pushRoster();                       // 시트에 바로 반영 — 눌렀는데 안 막히면 소용없다
     });
@@ -3780,7 +3791,7 @@ ${id}`));
     try {
       await ensureGmail();
       await GMAIL.send({ to: c.email, subject: `[퀵오더] ${c.name} 로그인 안내`, body: guideText(c.name, code) });
-      c.sentAt = Date.now(); await save(); draw();
+      c.sentAt = Date.now(); touch(c); await save(); draw();
       say(`✔ ${c.email} 로 보냈습니다.`);
     } catch (e) { say("⚠ 보내지 못했어요 — " + (e.message || e)); }
   }
@@ -3886,6 +3897,7 @@ ${id}`));
     const add = async r => {
       if (list.some(c => c.name === r.name)) return;
       revoked = revoked.filter(x => x !== r.name);
+      delete deleted[r.name];            // 다시 승인했으니 '지웠음' 표시를 푼다
       list.push({ name: r.name, on: true, email: r.email || "", tel: r.tel || "", at: Date.now() });
       await save(); await draw();
       await pushRoster();                               // 승인하자마자 시트에 반영
@@ -4002,6 +4014,7 @@ ${id}`));
       if (!n) { $("mst-name").focus(); return; }
       if (list.some(c => c.name === n)) { $("mst-msg").textContent = "이미 목록에 있어요."; return; }
       revoked = revoked.filter(x => x !== n);          // 지웠다가 다시 승인하면 차단을 푼다
+      delete deleted[n];                               // '지웠음' 표시도 같이 푼다
       list.push({ name: n, on: true, at: Date.now() });
       await save(); $("mst-name").value = ""; await draw();
       await pushRoster();                               // 추가하자마자 시트에 반영

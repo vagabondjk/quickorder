@@ -23,6 +23,9 @@ const SYNC = (() => {
     // 지운 업체 양식 표시 — 이게 빠지면 다른 기기의 백업이 지운 양식을 되살린다
     // 상품명 → 업체 연결표. 빠지면 기기를 바꿨을 때 지정해 둔 것이 통째로 사라진다
     "orderAliases", "orderDateCols",
+    /* v2.4.1 — 승인 업체 목록. 이게 빠져 있어서 PC 에 3곳, 휴대폰에 1곳처럼
+       기기마다 다른 목록을 들고 있었다 (2026-08-24 신고). 아래 병합 규칙과 한 쌍이다 */
+    "masterCompanies", "masterDeleted",
     "formsDeleted", "masterRevoked", "signupSheetId", "rosterSheetId", "settlePins",
     "pbSenders", "pbKeywords", "pbExclude", "paySenders", "payKeywords", "payExclude",
     "priceBook", "priceAliases", "priceAliasInfo", "settleBrandVendor", "settleVendors", "settleCarry",
@@ -129,6 +132,40 @@ const SYNC = (() => {
             if (!cur || (it.updatedAt || 0) >= (cur.updatedAt || 0)) byId.set(it.id, it);
           }
           await DB.set("csItems", [...byId.values()]);
+          continue;
+        }
+        /* ★★ 승인 업체 목록 — 이름 단위 병합 (2026-08-24).
+           배열이라 아래 기본 규칙대로면 통째로 교체된다. 그러면 휴대폰에 1곳만
+           남아 있던 상태가 PC 의 3곳을 그대로 덮어쓴다 — 고치려던 게 지우는 셈이다.
+           그래서 이름을 키로 합치고, 같은 이름은 마지막에 손댄 쪽(at)을 남긴다.
+           ★ 지운 업체가 다른 기기 백업에서 되살아나지 않게 삭제 시각(masterDeleted)을
+             함께 본다. 업체 양식의 formsDeleted 와 같은 방식이다. */
+        if (k === "masterCompanies" && Array.isArray(remote)) {
+          const asObj = x => (typeof x === "string" ? { name: x, on: true } : Object.assign({ on: true }, x));
+          const local = ((await DB.get("masterCompanies", [])) || []).map(asObj);
+          // 삭제 표시는 이 기기 것과 백업 것을 합쳐서 본다 (어느 쪽에서 지웠든 존중)
+          const tomb = Object.assign({}, (await DB.get("masterDeleted", {})) || {}, (obj.kv || {}).masterDeleted || {});
+          const byName = new Map();
+          const put = c => {
+            if (!c || !c.name) return;
+            const cur = byName.get(c.name);
+            if (!cur || (Number(c.at) || 0) >= (Number(cur.at) || 0)) byName.set(c.name, c);
+          };
+          local.forEach(put);
+          remote.map(asObj).forEach(put);
+          // 지운 뒤로 손댄 적이 없으면 되살리지 않는다 (다시 승인했으면 at 이 더 크다)
+          const out = [...byName.values()].filter(c => {
+            const at = Number(tomb[c.name]) || 0;
+            return !at || (Number(c.at) || 0) > at;
+          });
+          await DB.set("masterCompanies", out);
+          continue;
+        }
+        /* 지운 승인 업체 표시 — 더 늦게 지운 쪽을 남긴다 (formsDeleted 와 같은 규칙) */
+        if (k === "masterDeleted" && remote && typeof remote === "object" && !Array.isArray(remote)) {
+          const out = Object.assign({}, (await DB.get("masterDeleted", {})) || {});
+          for (const n in remote) if ((Number(remote[n]) || 0) > (Number(out[n]) || 0)) out[n] = remote[n];
+          await DB.set("masterDeleted", out);
           continue;
         }
         // 지운 양식 표시는 '더 늦게 지운 쪽'을 남긴다.
