@@ -2931,20 +2931,11 @@ function doLogout() {
 }
 if ($("set-logout")) $("set-logout").onclick = doLogout;
 if ($("btn-logout")) $("btn-logout").onclick = doLogout;
-if ($("btn-sync")) $("btn-sync").onclick = () => { const b = $("sync-now"); if (b) b.click(); };
-$("sync-now").onclick = async function () {
-  this.disabled = true;
-  try {
-    await ensureGmail();                 // 로그인 보장(드라이브 권한 포함)
-    const r = await SYNC.syncDown();      // 원격이 최신이면 내려받고
-    if (r.changed) {
-      await loadForms(); drawSettings();
-      try { if (window.CS) await CS.reload(); } catch (e) {}
-    }
-    await SYNC.syncUpNow();               // 이 기기 상태도 올려서 최신 유지
-  } catch (e) { S.syncState = "error"; S.syncDetail = e.message; drawSyncStatus(); }
-  this.disabled = false;
-};
+/* ★ '동기화' 버튼은 없앴다 (2026-08-24).
+   사람이 눌러야 맞춰지는 것은 동기화가 아니다 — 누르는 걸 잊으면 기기마다
+   다른 자료를 보게 되고, 실제로 그래서 승인 업체가 PC 3곳 / 휴대폰 1곳이 됐다.
+   이제 아래 autoPull() 이 알아서 돈다. 설정의 상태 줄은 남겨 뒀다 —
+   버튼이 없어진 만큼, 동기화가 깨졌을 때 그걸 알 수 있는 곳이 거기뿐이다. */
 $("setmodal").onclick = e => { if (e.target === $("setmodal")) $("setmodal").classList.remove("on"); };
 $("set-add").onclick = async () => {
   const name = prompt("업체명"); if (!name) return;
@@ -3540,17 +3531,8 @@ function drawSyncStatus() {
   if (st === "syncing") t = "🔄 " + (S.syncDetail || "동기화 중…");
   else if (st === "error") t = "⚠ 동기화 오류: " + (S.syncDetail || "");
   else if (st === "offline") t = "구글 로그인하면 자동 동기화됩니다";
-  else t = "✓ 동기화됨 · 마지막 " + fmtAgo(SYNC.lastTime());
+  else t = "✓ 자동으로 맞춰지고 있습니다 · 마지막 " + fmtAgo(SYNC.lastTime());
   el.textContent = t;
-  /* 업체 양식 카드에도 같은 상태를 보여준다 — 모바일에서 '왜 안 넘어왔지' 를
-     설정까지 열어보지 않고 바로 알 수 있어야 한다. */
-  /* 헤더 동기화 버튼도 상태를 보여준다 — 눌러도 되는지, 도는 중인지 알 수 있게 */
-  const b = $("btn-sync");
-  if (b) {
-    b.disabled = st === "syncing";
-    b.style.opacity = st === "syncing" ? ".6" : "";
-    b.title = st === "offline" ? "구글 로그인하면 다른 기기와 자동으로 맞춰집니다" : t;
-  }
 }
 // 로그인돼 있으면 시작 시 내려받기 → 바뀌었으면 화면 갱신
 /* 로그인한 구글 계정으로 저장소를 갈아탄다.
@@ -3612,7 +3594,56 @@ async function syncOnStart() {
     else if (r.hadRemote === false && S.forms.length) { await SYNC.syncUpNow(); }
   } catch (e) {}
   drawSyncStatus();
+  startAutoPull();                            // 이제부터 알아서 맞춘다
 }
+
+/* ── 실시간 동기화 (2026-08-24) ────────────────────────────────────────
+   올리기는 원래부터 자동이었다 (DB.onChange → SYNC.pushSoon, 2.5초 미룸).
+   빠져 있던 건 '받기' 다 — 다른 기기에서 바꾼 것이 앱을 다시 켜야만 넘어왔다.
+   그래서 '동기화' 버튼을 눌러야 했고, 누르는 걸 잊으면 기기마다 다른 자료를 봤다.
+
+     ① 앱으로 돌아올 때마다 즉시 확인 — PC 에서 고치고 휴대폰을 여는 게 실제 상황이다
+     ② 열어둔 동안 30초마다 확인
+
+   확인은 수정시각만 보는 싼 호출이다(SYNC.syncPull). 바뀌었을 때만 실제로 내려받는다 —
+   백업 전체에는 업체 양식이 base64 로 들어 있어 수 MB 라 그냥 받으면 안 된다.
+   화면이 숨겨져 있으면 아예 돌지 않는다. 한 번에 한 기기만 보고 있기 때문이다. */
+const PULL_MS = 30 * 1000;
+let pullTimer = null, pulling = false, pullFails = 0, pullSkip = 0;
+async function autoPull() {
+  if (pulling) return;                                   // 겹쳐 돌지 않게
+  if (document.visibilityState !== "visible") return;
+  if (typeof SYNC === "undefined" || !SYNC.enabled()) return;   // 로그인 전엔 네트워크를 건드리지 않는다
+  pulling = true;
+  try {
+    const r = await SYNC.syncPull();
+    if (r && r.error) { pullFails = Math.min(pullFails + 1, 9); pullSkip = pullFails; }
+    else {
+      pullFails = 0; pullSkip = 0;
+      if (r && r.changed) await afterPull();
+    }
+  } catch (e) { pullFails = Math.min(pullFails + 1, 9); pullSkip = pullFails; }
+  finally { pulling = false; drawSyncStatus(); }
+}
+/* 받아온 내용을 화면에 반영한다 (앱을 켤 때 하는 것과 같다) */
+async function afterPull() {
+  try { await loadForms(); } catch (e) {}
+  try { if ($("setmodal").classList.contains("on")) drawSettings(); } catch (e) {}
+  try { if (window.CS && CS.reload) await CS.reload(); } catch (e) {}
+  try { if (window.ST && ST.reload) await ST.reload(); } catch (e) {}
+  /* 마스터 화면을 열어둔 채로 다른 기기에서 업체를 승인하는 일이 실제로 있다.
+     ※ MST 는 이 파일 안의 const 라 window 를 통해서는 안 잡힌다 (mastersync.test.js [9] 참고) */
+  try { if (typeof MST !== "undefined" && MST.refresh) await MST.refresh(); } catch (e) {}
+}
+/* 실패가 이어지면 건너뛴다 — 30초마다 같은 실패를 두드리지 않게 (최대 약 5분 간격) */
+function pullTick() { if (pullSkip > 0) { pullSkip--; return; } autoPull(); }
+function startAutoPull() {
+  if (pullTimer) return;
+  pullTimer = setInterval(pullTick, PULL_MS);
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") { pullSkip = 0; autoPull(); }
+});
 
 /* =====================================================================
    마스터 메뉴 — 승인 업체 관리
@@ -4049,7 +4080,18 @@ ${id}`));
         "roster.json 을 내려받았습니다.\n이 파일을 앱과 같은 폴더(배포)에 올리면 '중지됨' 업체의 로그인이 실제로 막힙니다.";
     });
   }
-  return { bind: wire, open, show, adminOnly };
+  /* 다른 기기에서 승인·중지한 것이 내려왔을 때 열려 있는 목록을 다시 그린다.
+     안 그리면 화면은 옛 목록인 채로 남아, 방금 승인한 업체가 안 보인다. */
+  async function refresh() {
+    try {
+      const openNow = document.body.classList.contains("adminonly")
+        || ($("mstmodal") && $("mstmodal").classList.contains("on"));
+      if (!openNow) return;
+      if (!await isMasterNow()) return;
+      await load(); await draw();
+    } catch (e) {}
+  }
+  return { bind: wire, open, show, adminOnly, refresh };
 })();
 /* ★ 로그인 화면이 끝난 다음에 확인해야 한다.
    페이지가 뜨는 순간 확인하면, 그 자리에서 마스터로 로그인해도 이미 확인이 끝나 있어서

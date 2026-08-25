@@ -41,11 +41,24 @@ const SYNC = (() => {
      실제로 쓰는 파일은 앞 회사 것이 된다. reset() 이 그 일을 한다. */
   let fileId = null;
   let fileFor = "";        // 그 ID 가 어느 백업 파일 것인지
+  /* 마지막으로 '내가 알고 있는' 백업의 수정시각.
+     자동 동기화가 이 값과 드라이브의 값을 비교해, 다를 때만 실제로 내려받는다.
+     ★ 내가 올린 뒤에도 반드시 갱신해야 한다. 안 그러면 내 업로드를 남의 변경으로
+       착각해서 매번 백업 전체(업체 양식이 base64 로 들어 있어 수 MB)를 다시 받는다. */
+  let remoteStamp = "";
+  /* ★ 내려받기와 올리기가 겹치면 안 된다.
+     syncDown 은 'updatedAt > 내 기록' 을 확인한 뒤에 실제 병합을 한다. 그 사이에
+     자동 업로드가 끼어들어 기록을 바꾸면, 방금 올린 내 상태 위에 옛 백업을 덮어쓴다.
+     둘 다 이 줄에 세워 한 번에 하나씩만 돌게 한다. */
+  let chain = Promise.resolve();
+  const serial = fn => (chain = chain.then(fn, fn));
   let pushTimer = null;
   let onStatus = () => {};
-  function reset() { fileId = null; fileFor = ""; clearTimeout(pushTimer); pushTimer = null; }
+  /* 업체·계정이 바뀌면 앞 백업에 대해 알던 것을 전부 버린다.
+     수정시각도 같이 버려야 한다 — 남겨두면 새 백업을 '안 바뀌었다' 고 넘겨버린다. */
+  function reset() { fileId = null; fileFor = ""; remoteStamp = ""; clearTimeout(pushTimer); pushTimer = null; }
   /* 파일명이 달라졌으면(= 업체가 바뀌었으면) 캐시를 버린다 */
-  function guard() { const f = FILE(); if (f !== fileFor) { fileId = null; fileFor = f; } return f; }
+  function guard() { const f = FILE(); if (f !== fileFor) { fileId = null; fileFor = f; remoteStamp = ""; } return f; }
 
   const getStamp = () => { try { return Number(localStorage.getItem(STAMP_KEY())) || 0; } catch (e) { return 0; } };
   const setStamp = t => { try { localStorage.setItem(STAMP_KEY(), String(t)); } catch (e) {} };
@@ -199,8 +212,10 @@ const SYNC = (() => {
     return { needPush: extraLocal };   // 이 기기에만 있던 게 있으면 클라우드에도 올려 합침
   }
 
-  /* 내려받기: 원격이 더 최신이면 적용. 반환 {changed} */
-  async function syncDown() {
+  /* 내려받기: 원격이 더 최신이면 적용. 반환 {changed}
+     ※ 바깥에서 부르는 syncDown 은 아래에서 serial() 로 감싼다 — 올리기와 겹치면
+       방금 올린 상태 위에 옛 백업을 덮어쓴다. */
+  async function downNow() {
     if (!GMAIL.signedIn()) { status("offline"); return { changed: false, skipped: true }; }
     status("syncing", "내려받는 중…");
     try {
@@ -212,27 +227,59 @@ const SYNC = (() => {
       if ((obj.updatedAt || 0) > getStamp()) {
         const r = await applyBundle(obj);
         // 이 기기에만 있던 양식이 있으면 클라우드에도 올려 양쪽을 합집합으로 맞춘다
-        if (r && r.needPush) { try { await syncUpNow(); } catch (e) {} }
+        if (r && r.needPush) { try { await upNow(); } catch (e) {} }
+        else await noteStamp();          // 방금 받은 것이 최신임을 기록 (다음 확인에서 건너뛰게)
         status("ok");
         return { changed: true, hadRemote: true };
       }
+      await noteStamp();
       markTime(); status("ok");
       return { changed: false, hadRemote: true };
     } catch (e) { status("error", e.message); return { changed: false, error: e.message }; }
   }
 
   /* 올리기 (즉시) */
-  async function syncUpNow() {
+  async function upNow() {
     if (!GMAIL.signedIn()) { status("offline"); return; }
     status("syncing", "올리는 중…");
     try {
       const name = guard();
       const bundle = await buildBundle();
       const txt = JSON.stringify(bundle);
-      fileId = await GMAIL.driveUpload(name, txt, fileId);
+      const up = await GMAIL.driveUpload(name, txt, fileId);
+      /* 예전 버전은 id 문자열만 돌려줬다. 둘 다 받아들인다 — 배포가 엇갈려도 안 깨지게 */
+      if (up && typeof up === "object") { fileId = up.id; remoteStamp = up.modifiedTime || ""; }
+      else { fileId = up; remoteStamp = ""; }
       setStamp(bundle.updatedAt); markTime();
       status("ok");
     } catch (e) { status("error", e.message); }
+  }
+
+  /* 지금 드라이브에 있는 백업의 수정시각을 기억해 둔다 */
+  async function noteStamp() {
+    try {
+      if (!fileId) return;
+      const info = await GMAIL.driveFileInfo(fileId);
+      remoteStamp = (info && info.modifiedTime) || "";
+    } catch (e) {}
+  }
+
+  /* ★ 자동 동기화가 쓰는 '싼 확인'.
+     백업 전체에는 업체 양식이 base64 로 다 들어 있어 수 MB 다. 그걸 30초마다
+     내려받을 수는 없다. 그래서 수정시각(작은 JSON 한 번)만 먼저 보고,
+     내가 아는 것과 다를 때에만 실제로 내려받는다.
+     내가 올린 직후에는 remoteStamp 가 이미 그 값이라 그냥 지나간다. */
+  async function pullIfChanged() {
+    if (!GMAIL.signedIn()) return { changed: false, skipped: true };
+    try {
+      const name = guard();
+      if (!fileId) fileId = await GMAIL.driveFind(name);
+      if (!fileId) return { changed: false, hadRemote: false };
+      const info = await GMAIL.driveFileInfo(fileId);
+      const mt = (info && info.modifiedTime) || "";
+      if (mt && remoteStamp && mt === remoteStamp) return { changed: false, hadRemote: true };
+      return await downNow();
+    } catch (e) { status("error", e.message); return { changed: false, error: e.message }; }
   }
 
   /* 데이터 변경 시 debounce 업로드 */
@@ -242,11 +289,22 @@ const SYNC = (() => {
     pushTimer = setTimeout(() => { syncUpNow(); }, 2500);
   }
 
+  /* 바깥으로 나가는 셋은 전부 같은 줄에 세운다 (위 chain 주석 참고) */
+  const syncDown = () => serial(downNow);
+  const syncUpNow = () => serial(upNow);
+  const syncPull = () => serial(pullIfChanged);
+
   return {
-    syncDown, syncUpNow, pushSoon, reset,
+    syncDown, syncUpNow, syncPull, pushSoon, reset,
     backupName: () => FILE(),   // 설정 화면에서 '지금 어느 백업을 쓰는지' 보여준다
     _apply: applyBundle,        // 검증용 — 드라이브 없이 백업 병합을 돌려볼 수 있게
     onStatus(fn) { onStatus = fn; },
     lastTime, enabled: () => GMAIL.signedIn(),
   };
 })();
+/* ★ const 로 선언한 값은 window 의 속성이 되지 않는다.
+   그래서 다른 파일의 `if (window.SYNC)` 가 늘 거짓이었고, 거기 걸린 일이 통째로
+   안 돌았다 — 업체 양식을 지웠을 때 '바로 백업에 반영' 하는 것(qo-app.js dropForm)이
+   그랬다. qo-cs.js·qo-settle.js 는 원래부터 이렇게 공개하고 있었는데 여기만 빠져 있었다.
+   ※ 테스트는 이 파일을 브라우저 밖(샌드박스)에서 돌린다 — window 가 없을 수 있다. */
+if (typeof window !== "undefined") window.SYNC = SYNC;

@@ -620,23 +620,29 @@ const GMAIL = (() => {
     return await r.json();
   }
 
+  /* ★ 돌려주는 값은 { id, modifiedTime } 이다 (예전엔 id 문자열만).
+     수정시각이 필요한 이유: 자동 동기화가 '백업이 바뀌었나' 를 수정시각으로 싸게 판단하는데,
+     내가 올린 것도 시각이 바뀌므로 그대로 두면 내 업로드를 남의 변경으로 착각해
+     매번 백업 전체(업체 양식이 base64 로 다 들어 있어 수 MB)를 다시 내려받는다. */
   async function driveUpload(name, content, fileId) {
     const t = await token();
     if (fileId) {
-      const r = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&fields=id`,
+      const r = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&fields=id,modifiedTime`,
         { method: "PATCH", headers: { Authorization: "Bearer " + t, "Content-Type": "application/json" }, body: content });
       if (r.status === 404) return driveUpload(name, content, null);   // 원본이 지워졌으면 새로 생성
       if (!r.ok) throw driveErr(r.status, await r.text());
-      return (await r.json()).id;
+      const d = await r.json();
+      return { id: d.id, modifiedTime: d.modifiedTime || "" };
     }
     const boundary = "qoBd" + Math.random().toString(36).slice(2);
     const meta = JSON.stringify({ name, parents: ["appDataFolder"] });
     const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n` +
                  `--${boundary}\r\nContent-Type: application/json\r\n\r\n${content}\r\n--${boundary}--`;
-    const r = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",
+    const r = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,modifiedTime",
       { method: "POST", headers: { Authorization: "Bearer " + t, "Content-Type": "multipart/related; boundary=" + boundary }, body });
     if (!r.ok) throw driveErr(r.status, await r.text());
-    return (await r.json()).id;
+    const d = await r.json();
+    return { id: d.id, modifiedTime: d.modifiedTime || "" };
   }
 
   return { init, ensureInit, waitReady, gsiLoaded, ready, signedIn, hasToken, token, signIn, signOut, switchAccount, persistToken, dropStored, relocate, forget, reloadToken, projectNo, driveExportCsv, sheetRead, sheetWrite, sheetTabs, sheetEnsureTab, sheetCreate, driveShareAnyone, _sinceQuery: sinceQuery, listMails, listTextMails, getAttachment, send, profile,

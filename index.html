@@ -68,7 +68,7 @@
   }
   /* 마스터로 들어오면 퀵오더 기능은 감추고 관리 화면만 남긴다 (백오피스) */
   body.adminonly .tabs, body.adminonly .pane, body.adminonly .foot,
-  body.adminonly #btn-sync, body.adminonly #btn-settings,
+  body.adminonly #btn-settings,
   body.adminonly #mstmodal, body.adminonly #busy { display:none !important }
   body.adminonly #admin-root .sheet{max-height:none;border-radius:16px;padding:18px 16px;
     border:1px solid var(--line);box-shadow:0 2px 10px rgba(20,30,60,.05)}
@@ -494,7 +494,6 @@
     <button class="whobadge" id="who-badge" type="button"></button>
     <span class="hspring"></span>
     <div class="headbtns">
-      <button class="chip" id="btn-sync" title="이 기기와 웹을 한 번에 맞춥니다">☁ 동기화</button>
       <button class="chip" id="btn-settings">설정</button>
       <button class="chip" id="btn-logout">로그아웃</button>
     </div>
@@ -1023,12 +1022,15 @@
     <div class="sheetbody">
     <div class="mlist" id="setlist"></div>
     <div class="syncbox">
+      <!-- '지금 동기화' 버튼은 없앴다 — 눌러야 맞춰지는 건 동기화가 아니다.
+           이 줄은 기능이 아니라 상태 표시다. 버튼이 없어진 만큼, 동기화가 깨졌을 때
+           그걸 알 수 있는 곳이 여기뿐이라 남겨 뒀다. -->
       <div class="syncrow">
         <b>☁ 기기 간 동기화</b>
-        <button class="minibtn" id="sync-now">지금 동기화</button>
       </div>
       <div class="synctxt" id="sync-status">구글 로그인하면 자동 동기화됩니다</div>
-      <div class="synchint">같은 구글 계정으로 로그인한 다른 기기에도 그대로 나타납니다.</div>
+      <div class="synchint">따로 누를 것 없이 알아서 맞춰집니다.
+        같은 구글 계정으로 로그인한 다른 기기에도 그대로 나타납니다.</div>
     </div>
     <!-- 검색조건은 한 번 정하면 거의 안 건드리는 값이라, 카드마다 두지 않고 여기 모았다 -->
     <div class="syncbox">
