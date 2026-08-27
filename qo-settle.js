@@ -141,12 +141,16 @@ const ST = (() => {
   }
   /* 이번 정산의 미출고 목록을 남겨둔다 (다음 달에 이월 여부를 알려주기 위해).
      화면에 쓰는 기준값(carry)은 그대로 둬서, 같은 세션에서 다시 계산해도 비교 대상이 흔들리지 않는다. */
-  async function saveCarry(unshipped) {
+  async function saveCarry(unshipped, period) {
     const list = unshipped.filter(r => s(r.orderNo)).map(r => ({
       orderNo: s(r.orderNo), brand: r.brand || "", product: (r.product || "").slice(0, 60),
       qty: r.qty || 0, date: r.date || "",
     }));
-    await DB.set("settleCarry", { at: Date.now(), list });
+    /* ★ 어느 기간 정산에서 나온 목록인지 같이 적는다.
+       이게 없으면 8월을 정산한 뒤 7월을 정산할 때, 8월에 밀려 있던 주문번호를
+       7월 파일에서 찾다가 '이 파일에 아예 없다' 고 헛경고가 뜬다 — 7월엔 당연히 없다. */
+    const p = period || {};
+    await DB.set("settleCarry", { at: Date.now(), list, from: p.from || "", to: p.to || "", label: p.label || "" });
   }
   async function saveBrandFix() { await DB.set("settleBrandVendor", brandFix); }
   /* 공급가표 풀어내는 코드는 qo-logic 한 곳에만 둔다 (QO.priceBookFromRaw).
@@ -815,9 +819,11 @@ const ST = (() => {
       usedBook: vendors.some(v => v.rows.some(r => r.mode === "book")),
     };
     result.payFix = fix;
-    result.check = reconcile(rows, shipped, unshipped, vendors, unpriced);
     result.unshipped = unshipped;
+    /* ★ 기간을 검수보다 먼저 정한다 — 검수가 '이 파일이 어느 기간 것인지' 를 봐야
+       지난 정산의 미출고 목록과 비교해도 되는지 판단할 수 있다 (reconcile 참고) */
     result.period = periodOf(shipped.length ? shipped : rows);
+    result.check = reconcile(rows, shipped, unshipped, vendors, unpriced);
     drawResult();
     drawMd();          // MD 카드에 계산된 리워드 금액을 채워 넣는다
     drawPayState();
@@ -1237,8 +1243,19 @@ const ST = (() => {
            "출고되면 다음 정산에 포함됩니다");
 
     /* 이월 추적 — 지난 정산에서 미출고였던 건이 이번에 출고됐는지.
-       (7월 주문인데 8월에 출고된 건은 8월 정산으로 넘어와야 한다) */
-    if (carry.list.length) {
+       (7월 주문인데 8월에 출고된 건은 8월 정산으로 넘어와야 한다)
+
+       ★★ 이 파일보다 '앞선' 정산의 목록하고만 비교한다 (2026-08-24).
+         예전엔 기간을 안 따지고 무조건 대조했다. 그래서 8월을 먼저 정산한 뒤
+         7월을 정산하면, 8월에 밀려 있던 주문번호를 7월 파일에서 찾다가
+         '이 파일에 아예 없어요' 라고 경고했다 — 7월 파일에 없는 게 당연한데도.
+         실제로 7월 파일엔 송장 빈 건이 하나도 없어서 미출고가 생길 수조차 없는데
+         4건 경고가 떴다는 신고가 있었다.
+       ※ 기간이 안 적힌 옛 목록은 비교하지 않는다. 어디서 온 건지 모르는 채로
+         경고하는 것보다, 한 번 더 정산해서 기간이 붙은 뒤부터 보는 게 낫다. */
+    const per = result.period || {};
+    if (carry.list.length && QO.carryComparable(carry, per)) {
+      const carryWhen = carry.label || carry.to.slice(0, 4) + "-" + carry.to.slice(4, 6);
       const nowNos = {};
       rows.forEach(r => { const k = s(r.orderNo); if (k) nowNos[k] = r; });
       const shipNos = {};
@@ -1246,16 +1263,16 @@ const ST = (() => {
       const 이월됨 = carry.list.filter(c => shipNos[c.orderNo]);
       const 아직 = carry.list.filter(c => !nowNos[c.orderNo]);
       const 여전히미출고 = carry.list.filter(c => nowNos[c.orderNo] && !shipNos[c.orderNo]);
-      const when = carry.at ? new Date(carry.at).toISOString().slice(0, 10) : "";
+      /* 어느 정산에서 넘어온 것인지 반드시 밝힌다 — 이게 없어서 '뭔 소리냐' 가 됐다 */
       if (이월됨.length)
         issues.push({ level: "info",
-          why: `지난 정산(${when})에서 미출고였던 ${이월됨.length}건이 이번에 출고돼 포함됐어요`,
+          why: `${carryWhen} 정산에서 미출고였던 ${이월됨.length}건이 이번에 출고돼 포함됐어요`,
           detail: "이월 처리된 건입니다 — 지난달에 중복 지급하지 않았는지 확인하세요" });
       if (아직.length)
-        warn(`지난 정산의 미출고 ${아직.length}건이 이번 파일에 아예 없어요`,
+        warn(`${carryWhen} 정산의 미출고 ${아직.length}건이 이번 파일에 아예 없어요`,
              `주문번호 ${아직.slice(0, 5).map(c => c.orderNo).join(", ")}${아직.length > 5 ? " 외 " + (아직.length - 5) + "건" : ""} — 아직 출고 전인지 확인하세요`);
       if (여전히미출고.length)
-        warn(`지난 정산의 미출고 ${여전히미출고.length}건이 이번에도 송장이 없어요`, "출고가 계속 밀리고 있습니다");
+        warn(`${carryWhen} 정산의 미출고 ${여전히미출고.length}건이 이번에도 송장이 없어요`, "출고가 계속 밀리고 있습니다");
     }
     // 출고된 건은 하나도 빠짐없이 담겨야 한다
     if (shipCount !== outCount)
@@ -2238,7 +2255,7 @@ const ST = (() => {
       try {
         calc();
         // 이번 미출고 목록을 남겨 다음 달에 이월 여부를 알려준다
-        if (result) saveCarry(result.unshipped || []).catch(() => {});
+        if (result) saveCarry(result.unshipped || [], result.period).catch(() => {});
         msg("msg-s", "ok", "✔ 뽑았습니다. 아래에서 업체별 정산내역을 확인하세요.");
       }
       catch (e) { msg("msg-s", "err", "⚠ " + e.message); }

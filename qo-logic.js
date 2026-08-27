@@ -2054,6 +2054,23 @@ function vendorSheetColumns(colLists) {
 /* 이월 건 표기 — 주문한 달과 수집(출고)된 달이 다르면 비고에 적는다.
    주문일이 7/31 이어도 발주마감 뒤 주문이면 수집이 8/1 이라 8월 정산으로 넘어온다.
    업체가 정산서를 볼 때 '왜 7월 주문이 8월 정산에 있지?' 하지 않도록 이유를 남긴다. */
+/* ★★ 지난 정산의 미출고 목록(carry)을 이번 파일과 대조해도 되는가.
+   대조해도 되는 경우는 하나뿐이다 — 이번 파일이 그 목록보다 '뒤' 기간일 때.
+
+   예전엔 기간을 안 따지고 무조건 대조했다. 그래서 8월을 먼저 정산한 뒤 7월을
+   정산하면, 8월에 밀려 있던 주문번호를 7월 파일에서 찾다가
+   '이 파일에 아예 없어요' 라고 경고했다 — 7월 파일에 없는 게 당연한데도.
+   (2026-08-24 신고: 7월 파일엔 송장 빈 건이 하나도 없어 미출고가 생길 수조차
+    없는데 4건 경고가 떴다)
+
+   ※ 기간이 안 적힌 옛 목록은 대조하지 않는다. 어디서 온 건지 모르는 채로
+     경고하는 것보다, 다음 정산에서 기간이 붙은 뒤부터 보는 게 낫다. */
+function carryComparable(carry, period) {
+  const a = carry && carry.to, b = period && period.to;
+  if (!a || !b) return false;
+  return String(b) > String(a);
+}
+
 function carryNote(row) {
   const o = extractDate(row && row.orderDate);
   const d = extractDate(row && row.date);
@@ -2227,5 +2244,5 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   priceRowsFromRaw, priceBookFromRaw, readNameMap, applyNameMap, nameMapKey, normNameMap,
   readVendorRules, readRuleSheet, readAllRuleSheets, matchRule,
   rankPriceCandidates, settle, settleCheck,
-  settleSheetHead, settleSheetRow, isPriceHeader, isInternalHeader, vendorSheetColumns, carryNote };
+  settleSheetHead, settleSheetRow, isPriceHeader, isInternalHeader, vendorSheetColumns, carryNote, carryComparable };
 });
