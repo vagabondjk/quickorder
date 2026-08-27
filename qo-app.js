@@ -554,7 +554,7 @@ function bindMailtplBtn(btn, kind, vendor, extraVars) {
 })();
 
 /* ---------------- 탭 ---------------- */
-const TABS = ["o", "i", "c", "s"];
+const TABS = ["o", "i", "c", "s", "h"];
 TABS.forEach(t => { const b = $("tab-" + t); if (b) b.onclick = () => switchTab(t); });
 /* ③CS·교환반품 / ④정산 — 실제 데이터로 검증하기 전까지 화면에서 감춘다.
    켤 때는 아래 값을 true 로만 바꾸면 된다 (코드는 그대로 살아 있음). */
@@ -586,6 +586,7 @@ function switchTab(t) {
   // 탭이 처음 열릴 때 해당 모듈이 목록을 그린다 (모듈이 없으면 무시)
   try { if (t === "c" && window.CS) CS.onShow(); } catch (e) {}
   try { if (t === "s" && window.ST) ST.onShow(); } catch (e) {}
+  try { if (t === "h" && window.HS) HS.onShow(); } catch (e) {}
 }
 
 /* =================================================================
@@ -3631,6 +3632,7 @@ async function afterPull() {
   try { if ($("setmodal").classList.contains("on")) drawSettings(); } catch (e) {}
   try { if (window.CS && CS.reload) await CS.reload(); } catch (e) {}
   try { if (window.ST && ST.reload) await ST.reload(); } catch (e) {}
+  try { if (window.HS && HS.reload) await HS.reload(); } catch (e) {}
   /* 마스터 화면을 열어둔 채로 다른 기기에서 업체를 승인하는 일이 실제로 있다.
      ※ MST 는 이 파일 안의 const 라 window 를 통해서는 안 잡힌다 (mastersync.test.js [9] 참고) */
   try { if (typeof MST !== "undefined" && MST.refresh) await MST.refresh(); } catch (e) {}

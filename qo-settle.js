@@ -137,7 +137,46 @@ const ST = (() => {
     // 지난 정산에서 '송장 없어 뺀' 목록. 이번에 출고됐으면 이월 건으로 알려준다.
     carry = await DB.get("settleCarry", { at: 0, list: [] }) || { at: 0, list: [] };
     if (!carry.list) carry.list = [];
+    confirms = (await DB.get("settleConfirms", {})) || {};
     rebuildBook();
+  }
+
+  /* =================================================================
+     정산 확정 — 그때 계산된 숫자를 그대로 박제한다.
+     나중에 공급가표·CS 차감이 바뀌어도 확정한 달의 금액은 달라지지 않는다.
+     (숫자 만드는 곳은 QO.confirmRecord — 거기 주석 참고)
+     ================================================================= */
+  let confirms = {};
+  const confirmOf = (tag, vendor) => confirms[QO.confirmKey(tag, vendor)] || null;
+  async function saveConfirms() { await DB.set("settleConfirms", confirms); }
+
+  /* 확정 한 건 저장. 이미 있으면 옛 금액과 새 금액을 보여주고 물어본다 —
+     돈 기록을 말없이 덮어쓰면 안 된다. */
+  async function confirmOne(vendor, src, label) {
+    if (!result) return false;
+    const per = result.period || {};
+    if (!per.tag) { alert("이 파일에서 정산 기간을 읽지 못했습니다.\n날짜 열이 제대로 잡혔는지 확인해주세요."); return false; }
+    /* ★ 검산에 오류가 있으면 확정하지 않는다. 틀린 숫자를 박제하면 되돌릴 방법이 없다. */
+    if (result.check && result.check.ok === false) {
+      alert("검수를 통과하지 못한 정산은 확정할 수 없습니다.\n위의 빨간 상자를 먼저 해결해주세요.");
+      return false;
+    }
+    const rec = QO.confirmRecord(per, vendor, src, {
+      checkOk: !(result.check && result.check.ok === false), at: Date.now(),
+    });
+    const old = confirms[rec.key];
+    const money = n => Math.round(n || 0).toLocaleString("ko-KR") + "원";
+    const shown = vendor === QO.CONFIRM_USER ? rec.netMargin : rec.final;
+    const oldShown = old ? (vendor === QO.CONFIRM_USER ? old.netMargin : old.final) : 0;
+    const what = vendor === QO.CONFIRM_USER ? "이익" : "지급액";
+    if (old && !confirm(`${per.label} · ${label} 은 이미 확정돼 있습니다.\n\n`
+      + `지금 저장된 ${what}: ${money(oldShown)}\n새로 덮어쓸 ${what}: ${money(shown)}\n\n덮어쓸까요?`)) return false;
+    if (!old && rec.unpriced
+      && !confirm(`${label} 은 단가를 못 찾은 ${rec.unpriced}건이 0원으로 들어 있습니다.\n`
+        + `그대로 확정하면 그만큼 빠진 금액으로 기록됩니다.\n\n그래도 확정할까요?`)) return false;
+    confirms[rec.key] = rec;
+    await saveConfirms();
+    return true;
   }
   /* 이번 정산의 미출고 목록을 남겨둔다 (다음 달에 이월 여부를 알려주기 위해).
      화면에 쓰는 기준값(carry)은 그대로 둬서, 같은 세션에서 다시 계산해도 비교 대상이 흔들리지 않는다. */
@@ -1411,6 +1450,7 @@ const ST = (() => {
 
     // 업체별 요약 줄은 뺐다 (2026-08-04) — 바로 아래 업체 카드에 같은 숫자가 또 나온다
     $("st-sumbox").innerHTML = "";
+    showUserFix();
 
     const box = $("st-vendors");
     box.innerHTML = "";
@@ -1430,9 +1470,32 @@ const ST = (() => {
         <div class="setrow" style="margin-top:6px"><span style="flex:1;font-size:11px;color:var(--faint)"></span>
           <button class="minibtn share">📤 카톡·공유</button><button class="minibtn pvbtn">미리보기</button><button class="minibtn dl">엑셀 받기</button></div>
         <div class="setrow" style="margin-top:4px"><span class="fnlbl" style="flex:1;font-size:11px;color:var(--faint)"></span>
-          <button class="minibtn tpl">${mailtplLabel("settle", v.vendor)}</button><button class="minibtn fn">✏️ 파일명 수정</button></div>`;
+          <button class="minibtn tpl">${mailtplLabel("settle", v.vendor)}</button><button class="minibtn fn">✏️ 파일명 수정</button></div>
+        <!-- 확정하면 이 달 지급액이 ⑤ 정산내역에 그대로 박제된다 -->
+        <div class="setrow" style="margin-top:4px">
+          <span class="fixnote" style="flex:1;font-size:11px;font-weight:700;color:var(--ok)"></span>
+          <button class="minibtn fix" style="flex:none;color:var(--brand);border-color:var(--brand);font-weight:800">✔ 이 업체 정산 확정</button></div>`;
       box.appendChild(row);
       bindMailtplBtn(row.querySelector(".tpl"), "settle", v.vendor, mailVars(v));
+      /* 이 업체 정산 확정 — 확정해 둔 게 있으면 언제 얼마로 확정했는지 같이 보여준다.
+         안 보이면 같은 달을 두 번 지급하는 사고가 난다. */
+      const fixBtn = row.querySelector(".fix"), fixNote = row.querySelector(".fixnote");
+      const showFix = () => {
+        const per = (result && result.period) || {};
+        const done = confirmOf(per.tag, v.vendor);
+        fixNote.textContent = done
+          ? `✔ ${done.label || per.label || ""} 확정됨 · ${Math.round(done.final).toLocaleString("ko-KR")}원`
+          : "";
+        fixBtn.textContent = done ? "확정 다시" : "✔ 이 업체 정산 확정";
+      };
+      showFix();
+      fixBtn.onclick = async () => {
+        const per = (result && result.period) || {};
+        if (await confirmOne(v.vendor, Object.assign({}, v, { count: v.rows.length }), v.vendor)) {
+          showFix();
+          msg("msg-s", "ok", `✔ ${per.label || ""} ${v.vendor} 정산을 확정했습니다 — ⑤ 정산내역에서 볼 수 있어요.`);
+        }
+      };
       const inp = row.querySelector("input");
       const ek = emailKey(v.vendor);            // ① 발주 탭에 저장된 업체 이메일을 같이 쓴다
       const known = (S.vendorEmails || {})[ek] || "";
@@ -2112,6 +2175,21 @@ const ST = (() => {
     msg("msg-s", "ok", `✔ CS ${all.length}건을 정산 반영 완료로 표시했습니다.`);
   }
 
+  /* 유저(우리 회사) 정산 확정 상태 — 업체별 확정과는 따로 저장된다.
+     우리 매출·이익은 업체 지급액을 더한 것과 다른 값이라(수수료·리워드), 따로 박제한다. */
+  function showUserFix() {
+    const note = $("st-userfix-note"), btn = $("st-userfix");
+    if (!note || !btn) return;
+    const per = (result && result.period) || {};
+    const done = confirmOf(per.tag, QO.CONFIRM_USER);
+    note.innerHTML = done
+      ? `✔ <b style="color:var(--ok)">${esc(done.label || per.label || "")} 확정됨</b> · 매출 ${
+          Math.round(done.amount).toLocaleString("ko-KR")}원 · 이익 ${
+          Math.round(done.netMargin).toLocaleString("ko-KR")}원`
+      : `확정하면 이 달 매출·이익이 ⑤ 정산내역에 그대로 남습니다`;
+    btn.textContent = done ? "확정 다시" : "✔ 우리 정산 확정";
+  }
+
   function refresh() { $("run-s").disabled = !files.length; }
 
   /* =================================================================
@@ -2262,6 +2340,17 @@ const ST = (() => {
       finally { b.classList.remove("loading"); b.disabled = false; }
     };
     $("st-mark").onclick = () => markSettled();
+    /* 우리 회사 정산 확정 — 업체별 확정과 독립이다. 하나를 눌렀다고 나머지가
+       같이 확정되지 않는다 (업체마다 지급 시점이 다르다). */
+    if ($("st-userfix")) $("st-userfix").onclick = async () => {
+      if (!result) { alert("먼저 정산을 뽑아주세요."); return; }
+      const per = result.period || {};
+      const src = Object.assign({}, result.total, { count: result.total.count });
+      if (await confirmOne(QO.CONFIRM_USER, src, "우리 회사 정산")) {
+        showUserFix();
+        msg("msg-s", "ok", `✔ ${per.label || ""} 우리 정산을 확정했습니다 — ⑤ 정산내역에서 볼 수 있어요.`);
+      }
+    };
     $("st-export-all").onclick = async () => {
       if (!result) return;
       try {
@@ -2304,3 +2393,133 @@ const ST = (() => {
            _pbx: (raw) => { pbRaw = raw; return priceBookExcel(); } };
 })();
 window.ST = ST;
+
+/* =====================================================================
+   ⑤ 월별 정산내역 — 확정한 정산만 쌓인다.
+
+   ★ 여기 숫자는 '확정 당시 그대로' 다. 나중에 공급가표·CS 차감을 고쳐도
+     지난달 지급액은 달라지지 않는다. 그게 확정의 뜻이다.
+   ★ 누적 합계는 저장하지 않고 볼 때마다 기록에서 다시 낸다 (QO.confirmSum).
+     합계를 따로 저장하면 원본과 어긋나기 시작하고, 어긋난 걸 알 방법이 없다.
+
+   말이 헷갈리지 않게 이 화면에서 쓰는 낱말을 못박아 둔다:
+     · 매출   = 우리가 쇼핑몰에 넘긴 값 (통합파일 '원가' × 수량). 고객 결제금액이 아니다.
+     · 이익   = 매출 - 업체 지급액 - 몰 수수료 - MD 리워드 (netMargin)
+     · 지급액 = 업체에 실제로 나간 돈. CS 차감까지 뺀 값 (final)
+   ===================================================================== */
+const HS = (() => {
+  let view = "user", recs = [];
+  const won = n => Math.round(n || 0).toLocaleString("ko-KR") + "원";
+  const d10 = ms => (ms ? new Date(ms).toISOString().slice(0, 10) : "");
+
+  async function load() {
+    const map = (await DB.get("settleConfirms", {})) || {};
+    recs = QO.confirmList(map);
+  }
+
+  const users = () => recs.filter(r => r.vendor === QO.CONFIRM_USER);
+  const vends = () => recs.filter(r => r.vendor !== QO.CONFIRM_USER);
+
+  function fillSelects() {
+    const src = view === "user" ? users() : vends();
+    const mSel = $("hs-month"), vSel = $("hs-vendor");
+    const months = [...new Set(src.map(r => r.tag).filter(Boolean))];
+    const keepM = mSel.value;
+    mSel.innerHTML = `<option value="">전체 기간 (${months.length}개월)</option>`
+      + months.map(t => {
+          const one = src.find(r => r.tag === t);
+          return `<option value="${esc(t)}">${esc((one && one.label) || t)}</option>`;
+        }).join("");
+    if (months.includes(keepM)) mSel.value = keepM;
+
+    vSel.style.display = view === "vendor" ? "" : "none";
+    if (view === "vendor") {
+      const vs = [...new Set(vends().map(r => r.vendor))].sort((a, b) => a.localeCompare(b, "ko"));
+      const keepV = vSel.value;
+      vSel.innerHTML = `<option value="">업체 전체 (${vs.length}곳)</option>`
+        + vs.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+      if (vs.includes(keepV)) vSel.value = keepV;
+    }
+  }
+
+  function picked() {
+    const m = $("hs-month").value, v = $("hs-vendor").value;
+    let list = view === "user" ? users() : vends();
+    if (m) list = list.filter(r => r.tag === m);
+    if (view === "vendor" && v) list = list.filter(r => r.vendor === v);
+    return list;
+  }
+
+  function draw() {
+    const list = picked();
+    const t = QO.confirmSum(list);
+    const box = $("hs-total"), tbl = $("hs-table");
+
+    /* ★ 표(hs-table)는 절대 지우지 않는다. 안내 문구는 옆에 따로 둔 hs-empty 에 넣는다.
+       예전엔 표가 든 상자에 문구를 써넣어서 표가 통째로 날아갔고,
+       다음에 그릴 때 표를 못 찾아 멈췄다. */
+    const empty = $("hs-empty"), tbox = $("hs-box");
+    if (!box || !tbl) return;
+    if (!list.length) {
+      box.innerHTML = ""; tbl.innerHTML = ""; $("hs-foot").textContent = "";
+      if (tbox) tbox.style.display = "none";
+      if (empty) {
+        empty.style.display = "";
+        empty.innerHTML = recs.length
+          ? '<div class="empty">고른 조건에 맞는 정산이 없습니다.</div>'
+          : '<div class="empty">아직 확정한 정산이 없습니다.<br>④ 정산에서 계산한 뒤 [확정] 을 누르면 여기에 쌓입니다.</div>';
+      }
+      return;
+    }
+    if (empty) empty.style.display = "none";
+    if (tbox) tbox.style.display = "";
+
+    if (view === "user") {
+      const rate = t.amount ? (t.netMargin / t.amount * 100) : 0;
+      box.innerHTML =
+        `<div class="totline big"><span>매출 합계</span><span>${won(t.amount)}</span></div>` +
+        `<div class="totline big"><span>이익 합계</span><span>${won(t.netMargin)}</span></div>` +
+        `<div class="totline"><span>이익률</span><span>${rate.toFixed(1)}%</span></div>` +
+        `<div class="totline"><span>업체 지급 합계</span><span>${won(t.final)}</span></div>` +
+        (t.fee ? `<div class="totline"><span>몰 수수료</span><span>-${won(t.fee)}</span></div>` : "") +
+        (t.reward ? `<div class="totline"><span>MD 리워드</span><span>-${won(t.reward)}</span></div>` : "");
+      tbl.innerHTML =
+        `<tr><th>정산월</th><th>건수</th><th>매출</th><th>업체 지급</th><th>이익</th><th>확정일</th></tr>` +
+        list.map(r => `<tr><td><b>${esc(r.label || r.tag)}</b></td><td>${r.count}건</td>` +
+          `<td>${won(r.amount)}</td><td>${won(r.final)}</td>` +
+          `<td><b>${won(r.netMargin)}</b></td><td>${esc(d10(r.at))}</td></tr>`).join("");
+    } else {
+      box.innerHTML =
+        `<div class="totline big"><span>업체 지급 합계</span><span>${won(t.final)}</span></div>` +
+        `<div class="totline"><span>건수</span><span>${t.count}건</span></div>` +
+        (t.ded ? `<div class="totline"><span>CS 차감</span><span>-${won(t.ded)}</span></div>` : "");
+      tbl.innerHTML =
+        `<tr><th>정산월</th><th>업체</th><th>건수</th><th>공급가</th><th>차감</th><th>지급액</th><th>확정일</th></tr>` +
+        list.map(r => `<tr><td>${esc(r.label || r.tag)}</td><td><b>${esc(r.vendor)}</b></td>` +
+          `<td>${r.count}건</td><td>${won(r.pay)}</td>` +
+          `<td>${r.ded ? "-" + won(r.ded) : "-"}</td><td><b>${won(r.final)}</b></td>` +
+          `<td>${esc(d10(r.at))}</td></tr>`).join("");
+    }
+    const bad = list.filter(r => r.unpriced);
+    $("hs-foot").innerHTML = `${list.length}건 · ${t.months}개월`
+      + (bad.length ? ` · <b style="color:var(--danger)">확정 당시 단가 미확정이 있던 정산 ${bad.length}건</b>` : "");
+  }
+
+  async function onShow() { await load(); fillSelects(); draw(); }
+
+  function bind() {
+    const tabs = $("hs-tabs");
+    if (tabs) tabs.querySelectorAll(".brow").forEach(el => {
+      el.onclick = () => {
+        view = el.dataset.v;
+        tabs.querySelectorAll(".brow").forEach(x => x.classList.toggle("on", x === el));
+        fillSelects(); draw();
+      };
+    });
+    ["hs-month", "hs-vendor"].forEach(id => { const s = $(id); if (s) s.onchange = draw; });
+  }
+  try { bind(); } catch (e) {}
+
+  return { onShow, reload: onShow, _recs: () => recs };
+})();
+window.HS = HS;

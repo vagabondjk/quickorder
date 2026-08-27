@@ -26,6 +26,8 @@ const SYNC = (() => {
     /* v2.4.1 — 승인 업체 목록. 이게 빠져 있어서 PC 에 3곳, 휴대폰에 1곳처럼
        기기마다 다른 목록을 들고 있었다 (2026-08-24 신고). 아래 병합 규칙과 한 쌍이다 */
     "masterCompanies", "masterDeleted",
+    /* v2.5.0 — 월별 정산 확정 기록. 돈 기록이라 기기마다 달라지면 안 된다 */
+    "settleConfirms",
     "formsDeleted", "masterRevoked", "signupSheetId", "rosterSheetId", "settlePins",
     "pbSenders", "pbKeywords", "pbExclude", "paySenders", "payKeywords", "payExclude",
     "priceBook", "priceAliases", "priceAliasInfo", "settleBrandVendor", "settleVendors", "settleCarry",
@@ -172,6 +174,20 @@ const SYNC = (() => {
             return !at || (Number(c.at) || 0) > at;
           });
           await DB.set("masterCompanies", out);
+          continue;
+        }
+        /* ★★ 월별 정산 확정 기록 — 건 단위 병합 (2026-08-24).
+           달·업체별로 한 건씩 들어 있는데, 통째로 교체하면 PC 에서 확정한 7월 기록이
+           휴대폰이 올린 백업에 지워진다. 돈 기록이라 사라지면 안 된다.
+           같은 달·같은 업체를 양쪽에서 확정했으면 나중에 확정한 쪽을 남긴다. */
+        if (k === "settleConfirms" && remote && typeof remote === "object" && !Array.isArray(remote)) {
+          const out = Object.assign({}, (await DB.get("settleConfirms", {})) || {});
+          for (const key in remote) {
+            const a = out[key], b = remote[key];
+            if (!b) continue;
+            if (!a || (Number(b.at) || 0) >= (Number(a.at) || 0)) out[key] = b;
+          }
+          await DB.set("settleConfirms", out);
           continue;
         }
         /* 지운 승인 업체 표시 — 더 늦게 지운 쪽을 남긴다 (formsDeleted 와 같은 규칙) */

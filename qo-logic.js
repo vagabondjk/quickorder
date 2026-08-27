@@ -2054,6 +2054,68 @@ function vendorSheetColumns(colLists) {
 /* 이월 건 표기 — 주문한 달과 수집(출고)된 달이 다르면 비고에 적는다.
    주문일이 7/31 이어도 발주마감 뒤 주문이면 수집이 8/1 이라 8월 정산으로 넘어온다.
    업체가 정산서를 볼 때 '왜 7월 주문이 8월 정산에 있지?' 하지 않도록 이유를 남긴다. */
+/* =====================================================================
+   정산 확정 기록 (월별 정산내역)
+
+   ★★ 확정은 '그때 계산된 숫자를 그대로 박제하는 것' 이다.
+     나중에 공급가표를 고치거나 CS 차감이 바뀌어도 이미 확정한 달의 지급액은
+     절대 달라지면 안 된다. 그래서 계산 결과를 참조하지 않고 숫자만 복사해 둔다.
+   ※ 줄 단위 내역(v.rows)은 담지 않는다 — 업체 하나에 수백 줄이라 드라이브 백업이
+     감당 못 한다. 줄 단위 기록은 그때 내보낸 정산서 엑셀이 원본이다.
+   ===================================================================== */
+const CONFIRM_USER = "__user__";     // 유저(우리 회사) 확정 — 업체 하나가 아니라 전체
+
+function confirmKey(tag, vendor) { return String(tag || "") + "|" + String(vendor || ""); }
+
+/* 확정 기록 한 건 만들기. src 는 업체 객체(result.vendors[i]) 또는 result.total */
+function confirmRecord(period, vendor, src, opts) {
+  const p = period || {}, s = src || {}, o = opts || {};
+  const n = v => Math.round(Number(v) || 0);
+  const pick = (a, b) => (a === undefined || a === null ? b : a);
+  return {
+    key: confirmKey(p.tag, vendor),
+    tag: p.tag || "", from: p.from || "", to: p.to || "", label: p.label || "",
+    vendor: String(vendor || ""),
+    count: Number(s.count) || (s.rows ? s.rows.length : 0) || 0,
+    amount: n(s.amount),                       // 우리 매출 (원가 × 수량)
+    mallAmount: n(s.mallAmount),               // 참고: 고객 결제금액
+    pay: n(s.pay),                             // 차감 전 공급가 합계
+    final: n(pick(s.final, s.pay)),            // ★ 업체에 실제로 나간 돈 (차감 후)
+    margin: n(s.margin),                       // 매출 - 지급액
+    netMargin: n(pick(s.netMargin, s.margin)), // ★ 수수료·리워드까지 뺀 이익
+    ded: n(s.ded), fee: n(s.fee), reward: n(s.reward),
+    unpriced: Number(s.unpriced) || 0,         // 확정 당시 단가를 못 찾은 건수
+    unpricedAmount: n(s.unpricedAmount),
+    checkOk: o.checkOk !== false,              // 확정 당시 검산을 통과했는지
+    at: Number(o.at) || 0,
+  };
+}
+
+/* 저장된 기록을 화면에 뿌릴 순서로 편다 — 최근 달 먼저, 같은 달이면 업체 이름순 */
+function confirmList(map) {
+  const out = [];
+  for (const k in (map || {})) if (map[k]) out.push(map[k]);
+  return out.sort((a, b) => {
+    if (a.tag !== b.tag) return a.tag < b.tag ? 1 : -1;
+    return String(a.vendor).localeCompare(String(b.vendor), "ko");
+  });
+}
+
+/* ★ 누적 합계는 저장하지 않는다. 볼 때마다 기록에서 다시 낸다 —
+   합계를 따로 저장해 두면 원본과 어긋나기 시작하고, 어긋난 걸 알아챌 방법이 없다. */
+function confirmSum(records) {
+  const t = { count: 0, amount: 0, mallAmount: 0, pay: 0, final: 0,
+              margin: 0, netMargin: 0, ded: 0, fee: 0, reward: 0, unpriced: 0, unpricedAmount: 0, months: 0 };
+  const tags = new Set();
+  (records || []).forEach(r => {
+    if (!r) return;
+    tags.add(r.tag);
+    for (const k in t) if (k !== "months") t[k] += Number(r[k]) || 0;
+  });
+  t.months = tags.size;
+  return t;
+}
+
 /* ★★ 지난 정산의 미출고 목록(carry)을 이번 파일과 대조해도 되는가.
    대조해도 되는 경우는 하나뿐이다 — 이번 파일이 그 목록보다 '뒤' 기간일 때.
 
@@ -2244,5 +2306,6 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   priceRowsFromRaw, priceBookFromRaw, readNameMap, applyNameMap, nameMapKey, normNameMap,
   readVendorRules, readRuleSheet, readAllRuleSheets, matchRule,
   rankPriceCandidates, settle, settleCheck,
-  settleSheetHead, settleSheetRow, isPriceHeader, isInternalHeader, vendorSheetColumns, carryNote, carryComparable };
+  settleSheetHead, settleSheetRow, isPriceHeader, isInternalHeader, vendorSheetColumns, carryNote, carryComparable,
+  CONFIRM_USER, confirmKey, confirmRecord, confirmList, confirmSum };
 });
