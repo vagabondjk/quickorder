@@ -899,7 +899,8 @@ const ST = (() => {
         (ded[v] = ded[v] || { amount: 0, rows: [] });
         ded[v].amount += amount;
         ded[v].rows.push({ date: it.date || "", type: "반품", orderNo: it.orderNo,
-          product: it.product || r.product || "", content: it.content || `${out.sheet} 시트`, cost: amount });
+          product: it.product || r.product || "", qty: useQty,
+          content: it.content || `${out.sheet} 시트`, cost: amount });
         out.amount += amount; out.matched++;
       });
     });
@@ -2107,12 +2108,16 @@ const ST = (() => {
       const w = ws.addRow([`※ 단가가 아직 확정되지 않은 ${v.unpriced}건은 이번 정산금액에서 빠져 있습니다. 단가 확정 후 정산해 드리겠습니다.`]);
       w.font = { bold: true, color: { argb: "FF8A6D00" } };
     }
+    /* ★ 차감 내역은 별도 시트로 뺐다 (2026-08-24).
+       주문 표 아래에 붙여두면 업체가 주문 목록을 훑다가 지나쳐 버린다.
+       여기에는 '이런 게 빠졌다' 는 안내 한 줄만 남기고, 자세한 건 시트로 넘긴다. */
     if (v.dedRows && v.dedRows.length) {
       ws.addRow([]);
-      ws.addRow(["[교환·반품 차감 내역]"]).font = { bold: true };
-      ws.addRow(["접수일", "유형", "주문번호", "상품명", "내용", "비용"]).font = { bold: true };
-      v.dedRows.forEach(x => ws.addRow([x.date, x.type, x.orderNo, x.product,
-        String(x.content || "").slice(0, 120), Math.round(Number(x.cost) || 0)]));
+      const back = v.dedRows.filter(x => String(x.type || "").includes("반품")).length;
+      const w = ws.addRow([`※ 반품 등으로 정산에서 제외된 ${v.dedRows.length}건`
+        + (back ? ` (반품 ${back}건)` : "")
+        + ` · 합계 ${Math.round(v.ded || 0).toLocaleString("ko-KR")}원 은 '${DED_SHEET}' 시트에 있습니다.`]);
+      w.font = { bold: true, color: { argb: "FFCC0000" } };
     }
     src.forEach((h, i) => {
       const w = /상품명|주소|메시지|메세지/.test(h) ? 34 : /수취인|주문자|이름/.test(h) ? 12 : 14;
@@ -2128,6 +2133,45 @@ const ST = (() => {
       row.getCell(4).alignment = { horizontal: "right", vertical: "middle" };
       row.getCell(5).alignment = { horizontal: "right", vertical: "middle" };
     });
+    return ws;
+  }
+
+  /* ★ 반품 등으로 정산에서 뺀 건 — 업체 정산서의 별도 시트 (2026-08-24).
+     · 주문 표 아래에 붙여두면 업체가 훑다가 지나친다. 시트를 따로 둔다.
+     · 업체가 자기 기록과 바로 대조할 수 있도록 주문번호·상품명·수량을 적고,
+       '왜 빠졌는지'(유형·사유)와 '얼마가 빠졌는지'(차감액)를 나란히 둔다.
+     · 합계 줄을 반드시 넣는다 — 정산서 위쪽의 '교환·반품 차감' 금액과 눈으로
+       맞아떨어져야 업체가 납득한다.
+     ※ 업체용 파일이므로 우리 매출·마진은 넣지 않는다 (상위 CLAUDE.md 규칙). */
+  const DED_SHEET = "정산제외(반품)";
+  function dedSheet(wb, v) {
+    const rows = (v && v.dedRows) || [];
+    if (!rows.length) return null;
+    const safe = n => String(n).replace(/[\\\/\?\*\[\]:]/g, "_").slice(0, 28) || "정산";
+    /* 업체용 파일은 늘 한 업체짜리라 이름이 겹칠 일이 없지만, 겹치면 ExcelJS 가
+       예외를 던져 파일이 통째로 안 만들어진다. 그때는 업체명을 붙여 피한다. */
+    let nm = DED_SHEET;
+    if (wb.getWorksheet(nm)) nm = (safe(v.vendor) + "_" + DED_SHEET).slice(0, 31);
+    const ws = wb.addWorksheet(nm);
+    ws.addRow([`${safe(v.vendor)} — 정산에서 제외된 건`]).font = { bold: true, size: 13 };
+    ws.addRow([stampLine()]).font = { color: { argb: "FF888888" } };
+    ws.addRow([]);
+    const head = ws.addRow(["접수일", "유형", "주문번호", "상품명", "수량", "사유", "차감액"]);
+    head.font = { bold: true };
+    head.eachCell(c => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F3F7" } }; });
+    rows.forEach(x => {
+      const r = ws.addRow([x.date || "", x.type || "", x.orderNo || "", x.product || "",
+        Number(x.qty) || "", String(x.content || "").slice(0, 120), Math.round(Number(x.cost) || 0)]);
+      r.getCell(7).numFmt = "#,##0";
+    });
+    const tot = ws.addRow(["", "", "", "", "", "합계", Math.round(Number(v.ded) || 0)]);
+    tot.font = { bold: true };
+    tot.getCell(7).numFmt = "#,##0";
+    tot.getCell(6).alignment = { horizontal: "right" };
+    ws.addRow([]);
+    ws.addRow(["※ 위 금액은 이번 정산금액에서 이미 빠져 있습니다."])
+      .font = { bold: true, color: { argb: "FFCC0000" } };
+    [13, 10, 18, 34, 8, 30, 14].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
     return ws;
   }
 
@@ -2255,7 +2299,7 @@ const ST = (() => {
         alignSheet(ws, nCol, 6, hr);          // 6열까지는 내용, 7열부터 금액
       }
     } else {
-      for (const v of vendors) vendorSheet(wb, v);
+      for (const v of vendors) { vendorSheet(wb, v); dedSheet(wb, v); }
     }
     return await wb.xlsx.writeBuffer();
   }
@@ -2545,7 +2589,7 @@ const ST = (() => {
   }
   return { onShow, reload, drawFilter: drawFilterLine, markSettled, calc, result: () => result, periodRange,
            /* 검증용 — 업체용 정산서(합계 수식·머리말)를 화면 없이 만들어 볼 수 있게 열어둔다 */
-           _make: (r, v) => { result = r; const wb = new ExcelJS.Workbook(); vendorSheet(wb, v); return wb; },
+           _make: (r, v) => { result = r; const wb = new ExcelJS.Workbook(); vendorSheet(wb, v); dedSheet(wb, v); return wb; },
            // 실제 calc() 와 같은 순서로 돌린다 (수수료 → 리워드 → 최종 마진)
            _rewards: (rules, vendors) => { rewards = rules; calcMallFees(vendors); return calcRewards(vendors); },
            _money: moneyLines,
