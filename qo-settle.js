@@ -484,19 +484,72 @@ const ST = (() => {
   /* =================================================================
      정산 파일 가져오기
      ================================================================= */
+  /* ── 정산 파일 안의 교환반품 시트 ──────────────────────────────────
+     통합파일에 교환반품 시트가 같이 들어오는 경우가 있다. 거기 '반품' 건은
+     업체에 지급하면 안 되므로 차감한다.
+     ★ 줄을 그냥 빼지 않고 '차감' 으로 태운다. 빼버리면 업체 정산서에 767건이
+       찍히는데 업체 기록엔 768건이라 이유 없는 차이가 생긴다. 차감으로 태우면
+       "교환·반품 차감 -N원" 줄이 정산서에 남아 업체가 확인할 수 있다.
+     ★ 시트 이름만 보고 정하지 않는다 — 주문번호 열이 있어야 쓸 수 있다. */
+  const RET_FIELDS = [
+    { k: "date", n: "접수일", kw: ["접수일", "등록일", "신청일", "일자", "날짜", "일시"] },
+    { k: "orderNo", n: "주문번호", kw: ["주문번호", "오더번호", "주문no", "order"], req: true },
+    { k: "product", n: "상품명", kw: ["상품명", "제품명", "품목명", "상품", "제품"] },
+    { k: "option", n: "옵션", kw: ["옵션", "옵션명", "선택옵션", "규격"] },
+    { k: "qty", n: "수량", kw: ["수량", "개수", "반품수량"] },
+    { k: "type", n: "유형", kw: ["유형", "구분", "처리구분", "클레임", "종류", "상태", "처리상태"] },
+    { k: "content", n: "사유", kw: ["사유", "내용", "비고", "메모", "요청내용"] },
+  ];
+  const RET_NAME = /교환|반품|취소|클레임|반송|환불|cs/i;
+  function findReturnSheet(sheets, mainName) {
+    for (const sh of (sheets || [])) {
+      if (!sh || sh.name === mainName) continue;
+      if (!RET_NAME.test(String(sh.name || ""))) continue;
+      if (!sh.columns || !sh.columns.length || !sh.rows || !sh.rows.length) continue;
+      const m = MAP.autoMap(sh.columns, RET_FIELDS);
+      if (m.orderNo === undefined) {           // 주문번호가 없으면 대조할 방법이 없다
+        return { name: sh.name, usable: false, why: "주문번호 열을 찾지 못했습니다", count: sh.rows.length };
+      }
+      const hasType = m.type !== undefined;
+      const cell = (row, k) => (m[k] === undefined ? "" : row[m[k]]);
+      const items = sh.rows.map(row => {
+        const txt = [cell(row, "type"), cell(row, "content")].filter(Boolean).join(" ");
+        return {
+          orderNo: s(cell(row, "orderNo")), product: s(cell(row, "product")),
+          option: s(cell(row, "option")), qty: Number(String(cell(row, "qty")).replace(/[^\d.-]/g, "")) || 0,
+          date: s(cell(row, "date")), content: s(cell(row, "content")),
+          raw: s(cell(row, "type")),
+          type: QO.claimType(txt),
+        };
+      }).filter(x => x.orderNo);
+      return { name: sh.name, usable: true, hasType, items, count: sh.rows.length };
+    }
+    return null;
+  }
+
   async function addFile(buf, name) {
     const wb = await QO.loadWorkbook(buf.slice(0));
+    /* 시트를 전부 읽어 둔다 — 무엇이 들어 있는지 화면에 그대로 보여준다.
+       previewAny 는 데이터가 제일 많은 시트 하나만 주기 때문에, 이걸 안 하면
+       교환반품 시트가 있어도 있는 줄조차 모른다. */
+    const sheets = QO.previewSheets(wb, 20000);
     const pv = QO.previewAny(wb, 20000);
     if (!pv.columns.length) throw new Error("표를 찾지 못했어요.");
+    const mainName = (sheets.find(sh => sh.rows && sh.rows.length === pv.rows.length) || {}).name || "";
+    const ret = findReturnSheet(sheets, mainName);
     const sig = MAP.signature(pv.columns);
     const saved = maps[sig];
     const auto = Object.assign(MAP.autoMap(pv.columns, FIELDS), saved || {});
     const put = async m => {
       maps[sig] = m; await DB.set("settleMaps", maps);
       files = files.filter(f => f.name !== name);
-      files.push({ name, cols: pv.columns, rows: pv.rows, map: m, sig });
+      files.push({ name, cols: pv.columns, rows: pv.rows, map: m, sig,
+        sheets: sheets.map(sh => ({ name: sh.name, n: (sh.rows || []).length })), ret });
       drawFiles(); drawPriceBook(); drawPay(); drawBrands(); drawMd(); refresh();
-      msg("msg-s", "ok", `✔ ${name} — ${pv.rows.length}행 불러왔어요.`);
+      const retTxt = !ret ? ""
+        : ret.usable ? ` · 교환반품 시트 '${ret.name}' 에서 반품 ${ret.items.filter(x => x.type === "반품").length}건 확인`
+                     : ` · '${ret.name}' 시트는 쓰지 못했어요 (${ret.why})`;
+      msg("msg-s", "ok", `✔ ${name} — ${pv.rows.length}행 불러왔어요.${retTxt}`);
     };
     if (saved && MAP.ok(auto, FIELDS)) { await put(auto); return; }
     MAP.open({
@@ -534,6 +587,14 @@ const ST = (() => {
         padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:var(--card2);margin-bottom:5px">
         <span style="flex:1;min-width:0;font-size:12.5px;line-height:1.45;word-break:break-all">📄 <b>${esc(f.name)}</b>
           <span style="color:var(--muted)"> · ${f.rows.length}행</span>
+          ${/* 파일에 어떤 시트가 들어 있는지 그대로 보여준다 — 교환반품 시트가 있는지
+                없는지를 눈으로 알 수 있어야 '왜 반품이 안 빠지지' 를 안 헤맨다 */
+            (f.sheets && f.sheets.length > 1) ? `<span style="display:block;color:var(--faint);font-size:11px;margin-top:3px">시트 ${
+              f.sheets.map(sh => esc(sh.name) + (sh.n ? ` ${sh.n}행` : "")).join(" · ")}</span>` : ""}
+          ${f.ret ? `<span style="display:block;font-size:11px;margin-top:3px;font-weight:700;color:${f.ret.usable ? "var(--ok)" : "var(--warn)"}">${
+              f.ret.usable
+                ? `↩ 교환반품 시트 '${esc(f.ret.name)}' — 반품 ${f.ret.items.filter(x => x.type === "반품").length}건`
+                : `↩ '${esc(f.ret.name)}' 시트를 쓰지 못함 (${esc(f.ret.why)})`}</span>` : ""}
           <span style="display:flex;gap:6px;margin-top:6px">
             <button class="minibtn stpv" data-i="${i}">미리보기</button>
             <button class="minibtn stdl" data-i="${i}">엑셀 받기</button></span></span>
@@ -778,6 +839,73 @@ const ST = (() => {
     }
     return out;
   }
+  /* ★★ 정산 파일 안 교환반품 시트의 '반품' 을 업체 차감으로 만든다.
+     · 반품만 뺀다. 교환은 업체가 대체품을 보냈으니 지급 대상이고, 취소는 애초에
+       송장이 없어 이미 빠져 있다. 건드리지 않은 것도 몇 건인지 세어 알려준다.
+     · 차감액은 그 줄의 '공급단가' 기준이다 — 업체에 안 주게 되는 돈이 그거다.
+       매출 기준으로 빼면 우리 마진만큼 더 빼게 된다.
+     · 수량이 적혀 있으면 그 수량만큼만 뺀다. 없으면 그 줄 전체를 뺀다.
+     · CS 탭에서 이미 차감한 주문번호는 두 번 빼지 않는다.
+     · 못 찾은 반품 건은 버리지 않고 돌려준다 — 화면과 검산에 띄운다. */
+  function returnDeduction(shipped, ded) {
+    const out = { on: false, sheet: "", 반품: 0, 교환: 0, 취소: 0, 기타: 0,
+                  amount: 0, matched: 0, unmatched: [], dupCs: 0, noType: false, unusable: "" };
+    const src = files.filter(f => f.ret);
+    if (!src.length) return out;
+    const bad = src.find(f => f.ret && !f.ret.usable);
+    if (bad) { out.sheet = bad.ret.name; out.unusable = bad.ret.why; }
+    const usable = src.filter(f => f.ret && f.ret.usable);
+    if (!usable.length) return out;
+    out.on = true;
+    out.sheet = usable.map(f => f.ret.name).join(", ");
+    out.noType = usable.every(f => !f.ret.hasType);
+
+    // 주문번호 → 정산 줄들
+    const byNo = {};
+    shipped.forEach(r => { const k = s(r.orderNo); if (k) (byNo[k] = byNo[k] || []).push(r); });
+    // CS 탭이 이미 차감한 주문번호 (두 번 빼지 않으려고)
+    const csNos = new Set();
+    Object.values(ded || {}).forEach(d => (d.rows || []).forEach(x => { const k = s(x.orderNo); if (k) csNos.add(k); }));
+
+    usable.forEach(f => {
+      f.ret.items.forEach(it => {
+        const t = it.type || "";
+        if (t === "교환") { out.교환++; return; }
+        if (t === "취소") { out.취소++; return; }
+        if (t !== "반품") { out.기타++; return; }   // 유형을 못 가린 줄은 손대지 않는다
+        out.반품++;
+        const cand = byNo[it.orderNo] || [];
+        if (!cand.length) { out.unmatched.push(it); return; }
+        if (csNos.has(it.orderNo)) { out.dupCs++; return; }
+        /* 한 주문에 여러 줄이면 상품명·옵션으로 좁힌다. 그래도 여럿이면 찍지 않고
+           맨 앞 줄만 뺀다 — 여러 줄을 통째로 빼면 안 준 돈이 더 커진다. */
+        let hit = cand;
+        if (cand.length > 1 && it.product) {
+          const nb = QO.normKey ? QO.normKey(it.product) : it.product;
+          const narrow = cand.filter(r => {
+            const p = QO.normKey ? QO.normKey(r.product) : r.product;
+            return p && nb && (p === nb || p.includes(nb) || nb.includes(p));
+          });
+          if (narrow.length) hit = narrow;
+        }
+        const r = hit[0];
+        const useQty = it.qty > 0 ? Math.min(it.qty, r.qty || it.qty) : (r.qty || 0);
+        const unit = Number(r.unitCost) || 0;
+        // 건당 배송비는 부분 반품에서 돌려받지 않는다 (주문 단위로 이미 나갔다)
+        const shipBack = r.shipMode === "개당" ? Math.round((Number(r.ship) || 0) * useQty) : 0;
+        const amount = Math.round(unit * useQty) + shipBack;
+        if (!amount) { out.unmatched.push(Object.assign({ why: "단가를 못 찾은 줄" }, it)); return; }
+        const v = vOf(r);
+        (ded[v] = ded[v] || { amount: 0, rows: [] });
+        ded[v].amount += amount;
+        ded[v].rows.push({ date: it.date || "", type: "반품", orderNo: it.orderNo,
+          product: it.product || r.product || "", content: it.content || `${out.sheet} 시트`, cost: amount });
+        out.amount += amount; out.matched++;
+      });
+    });
+    return out;
+  }
+
   function calc() {
     const rows = allRows();
     if (!rows.length) { result = null; return; }
@@ -824,6 +952,8 @@ const ST = (() => {
       if (!r.priced) { g.unpriced++; g.unpricedAmount += r.amount; }
       if (r.how === "앞부분일치" || r.how === "핵심어일치") g.loose++;
     }
+    /* 정산 파일 안 교환반품 시트의 '반품' 을 차감에 합친다 (CS 탭 차감과 같은 자리) */
+    const retInfo = returnDeduction(shipped, ded);
     for (const v in byVendor) {
       const d = ded[v];
       if (d) { byVendor[v].ded = d.amount; byVendor[v].dedRows = d.rows; }
@@ -858,6 +988,7 @@ const ST = (() => {
       usedBook: vendors.some(v => v.rows.some(r => r.mode === "book")),
     };
     result.payFix = fix;
+    result.ret = retInfo;              // 교환반품 시트에서 무엇을 뺐는지 (화면·검산에서 쓴다)
     result.unshipped = unshipped;
     /* ★ 기간을 검수보다 먼저 정한다 — 검수가 '이 파일이 어느 기간 것인지' 를 봐야
        지난 정산의 미출고 목록과 비교해도 되는지 판단할 수 있다 (reconcile 참고) */
@@ -1276,6 +1407,18 @@ const ST = (() => {
         `올린 파일 ${fileRows}줄 중 ${skipped.length}줄은 정산에 넣지 않았어요`,
         head + "\n" + show.join("\n"));
     }
+    /* 교환반품 시트에서 못 찾은 반품 건 — 버리면 안 된다.
+       업체에 줄 돈을 못 뺀 것이므로 그만큼 더 지급된다. */
+    const rt = result.ret || {};
+    if (rt.unmatched && rt.unmatched.length)
+      warn(`교환반품 시트의 반품 ${rt.unmatched.length}건을 정산 줄에서 찾지 못했어요`,
+           `주문번호 ${rt.unmatched.slice(0, 5).map(x => x.orderNo).join(", ")}`
+           + `${rt.unmatched.length > 5 ? " 외 " + (rt.unmatched.length - 5) + "건" : ""} — 그만큼 차감되지 않았습니다`);
+    if (rt.on && rt.noType)
+      warn(`교환반품 시트 '${rt.sheet}' 에 유형(교환/반품) 열이 없어요`,
+           "무엇이 반품인지 가릴 수 없어 아무것도 차감하지 않았습니다");
+    if (rt.unusable)
+      warn(`'${rt.sheet}' 시트를 교환반품 목록으로 쓰지 못했어요`, rt.unusable);
     // 송장이 없는 건은 아직 출고 전이라 빼는 게 정상이다 — 오류가 아니라 안내로 남긴다
     if (unshipped.length)
       warn(`송장이 없어 이번 정산에서 뺀 주문이 ${unshipped.length}건 (수량 ${unshipped.reduce((s, r) => s + (r.qty || 0), 0)}) 있어요`,
@@ -1444,6 +1587,7 @@ const ST = (() => {
       }, { big: true, payLabel: "업체 지급 합계" }) +
       `<div class="synchint" style="margin-top:6px">${t.count}건${
          result.noVendor ? ` · <b style="color:var(--danger)">업체 미지정 ${result.noVendor}건</b>` : ""}</div>` +
+      returnBoxHtml(result.ret) +
       checkBoxHtml(result.check) +
       (up.length ? unpricedBoxHtml(upKinds, kindKeys, up.length) : "");
     if (up.length) bindAliasPickers();
@@ -2175,6 +2319,25 @@ const ST = (() => {
     msg("msg-s", "ok", `✔ CS ${all.length}건을 정산 반영 완료로 표시했습니다.`);
   }
 
+  /* 교환반품 시트에서 무엇을 뺐고 무엇을 안 뺐는지 — 빼는 것이야말로 조용히 넘어가면 안 된다.
+     안 건드린 교환·취소 건수도 같이 적는다. 그걸 봐야 '교환도 빼달라' 를 말할 수 있다. */
+  function returnBoxHtml(rt) {
+    if (!rt || (!rt.on && !rt.unusable)) return "";
+    if (rt.unusable)
+      return `<div class="msg show warn" style="margin-top:10px">⚠ '${esc(rt.sheet)}' 시트를 교환반품 목록으로 쓰지 못했어요 — ${esc(rt.unusable)}</div>`;
+    const kept = [];
+    if (rt.교환) kept.push(`교환 ${rt.교환}건`);
+    if (rt.취소) kept.push(`취소 ${rt.취소}건`);
+    if (rt.기타) kept.push(`유형 불명 ${rt.기타}건`);
+    const lines = [];
+    lines.push(`↩ <b>${esc(rt.sheet)}</b> 시트에서 <b>반품 ${rt.matched}건 · ${won(rt.amount)}</b> 을 업체 지급에서 뺐습니다`);
+    if (kept.length) lines.push(`<span style="color:var(--muted)">그대로 둔 것: ${kept.join(" · ")} — 교환은 업체가 대체품을 보냈고, 취소는 송장이 없어 이미 빠져 있습니다</span>`);
+    if (rt.dupCs) lines.push(`<span style="color:var(--muted)">CS 탭에서 이미 뺀 ${rt.dupCs}건은 두 번 빼지 않았습니다</span>`);
+    if (rt.unmatched && rt.unmatched.length)
+      lines.push(`<b style="color:var(--danger)">정산 줄에서 못 찾은 반품 ${rt.unmatched.length}건은 차감되지 않았습니다</b>`);
+    return `<div class="msg show ${rt.unmatched && rt.unmatched.length ? "warn" : "ok"}" style="margin-top:10px;line-height:1.7">${lines.join("<br>")}</div>`;
+  }
+
   /* 유저(우리 회사) 정산 확정 상태 — 업체별 확정과는 따로 저장된다.
      우리 매출·이익은 업체 지급액을 더한 것과 다른 값이라(수수료·리워드), 따로 박제한다. */
   function showUserFix() {
@@ -2389,6 +2552,12 @@ const ST = (() => {
            /* 검증용 — 대금지급 내역 보정을 화면 없이 돌려본다 */
            _payfix: (pfs, rows) => { payFiles = pfs; return applyPayFix(rows); },
            takeMail,
+           /* 검증용 — 교환반품 시트 판별과 차감 계산을 직접 돌려볼 수 있게 */
+           _findRet: findReturnSheet,
+           _retDed: (fs2, shipped, ded) => {
+             const keep = files; files = fs2;
+             try { return returnDeduction(shipped, ded || {}); } finally { files = keep; }
+           },
            _tpl: priceBookTemplate,
            _pbx: (raw) => { pbRaw = raw; return priceBookExcel(); } };
 })();

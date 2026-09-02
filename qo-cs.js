@@ -144,15 +144,9 @@ const CS = (() => {
   function today() { return toYmd(new Date()); }
 
   /* ---------- 유형 추정 ---------- */
-  function guessType(text) {
-    const t = s(text);
-    if (/교환|바꿔|다른\s*색|다른\s*사이즈/.test(t)) return "교환";
-    if (/반품|환불|반송|회수/.test(t)) return "반품";
-    if (/취소/.test(t)) return "취소";
-    if (/배송|택배|송장|미도착|누락|파손|분실/.test(t)) return "배송";
-    if (/문의|질문|문의드/.test(t)) return "문의";
-    return "";
-  }
+  /* 판정 규칙은 qo-logic.js 한 곳에 둔다 — 정산 탭도 같은 규칙으로 반품을 가린다.
+     여기서 따로 쓰면 언젠가 갈라지고, 갈라지면 한쪽에서만 차감된다. */
+  function guessType(text) { return QO.claimType(s(text)); }
   function normType(v, fallbackText) {
     const t = s(v);
     for (const x of TYPES) if (t.includes(x)) return x;

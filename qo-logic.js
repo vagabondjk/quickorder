@@ -2054,6 +2054,21 @@ function vendorSheetColumns(colLists) {
 /* 이월 건 표기 — 주문한 달과 수집(출고)된 달이 다르면 비고에 적는다.
    주문일이 7/31 이어도 발주마감 뒤 주문이면 수집이 8/1 이라 8월 정산으로 넘어온다.
    업체가 정산서를 볼 때 '왜 7월 주문이 8월 정산에 있지?' 하지 않도록 이유를 남긴다. */
+/* 교환·반품 유형 판정 — CS 탭과 정산 탭이 같은 규칙을 써야 한다.
+   두 군데서 따로 정규식을 쓰면 언젠가 갈라지고, 갈라지면 한쪽에서만 차감된다.
+   ※ '교환' 을 '반품' 보다 먼저 본다. 두 낱말이 같이 있으면 교환으로 친다 —
+     교환은 업체가 대체품을 보냈으므로 지급 대상이다. */
+function claimType(text) {
+  const t = String(text === null || text === undefined ? "" : text).trim();
+  if (!t) return "";
+  if (/교환|바꿔|다른\s*색|다른\s*사이즈/.test(t)) return "교환";
+  if (/반품|환불|반송|회수/.test(t)) return "반품";
+  if (/취소/.test(t)) return "취소";
+  if (/배송|택배|송장|미도착|누락|파손|분실/.test(t)) return "배송";
+  if (/문의|질문|문의드/.test(t)) return "문의";
+  return "";
+}
+
 /* =====================================================================
    정산 확정 기록 (월별 정산내역)
 
@@ -2307,5 +2322,5 @@ return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   readVendorRules, readRuleSheet, readAllRuleSheets, matchRule,
   rankPriceCandidates, settle, settleCheck,
   settleSheetHead, settleSheetRow, isPriceHeader, isInternalHeader, vendorSheetColumns, carryNote, carryComparable,
-  CONFIRM_USER, confirmKey, confirmRecord, confirmList, confirmSum };
+  CONFIRM_USER, confirmKey, confirmRecord, confirmList, confirmSum, claimType };
 });
