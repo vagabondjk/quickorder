@@ -937,9 +937,14 @@ const ST = (() => {
         const v = vOf(r);
         (ded[v] = ded[v] || { amount: 0, rows: [] });
         ded[v].amount += amount;
+        /* ★ 원 주문 줄(r)을 같이 들고 간다 (2026-09-08).
+           업체 정산서 본문에는 주문번호 열이 없어서, 정산제외 시트에 주문번호만 적으면
+           업체가 '어느 주문의 반품인지' 찾을 길이 없었다. 원 줄을 알아야 수취인·운송장·
+           정산서 줄 번호를 적을 수 있다. r 은 calc() 마다 새로 만들어지므로 묵은 표시가 남지 않는다. */
+        r.retDed = (r.retDed || 0) + amount;
         ded[v].rows.push({ date: it.date || "", type: "반품", orderNo: it.orderNo,
-          product: it.product || r.product || "", qty: useQty,
-          content: it.content || `${out.sheet} 시트`, cost: amount });
+          product: it.product || r.product || "", option: it.option || r.option || "", qty: useQty,
+          content: it.content || `${out.sheet} 시트`, cost: amount, ref: r });
         out.amount += amount; out.matched++;
       });
     });
@@ -1996,8 +2001,10 @@ const ST = (() => {
     /* 줄마다의 특이사항 — 행사 단가로 계산됐는지, 이월 건인지.
        둘 다 '이 줄만 다른 이유'라 한 칸에 모아 적는다. */
     const anyPromo = v.rows.some(r => r.priceFrom);
-    const anyNote = anyPromo || anyCarry;
-    const ymd = d => { const t = String(d || "").replace(/\D/g, ""); 
+    // 반품으로 차감된 줄 — 본문 줄에도 표시해 '정산제외' 시트와 양쪽으로 이어지게 한다
+    const anyDed = v.rows.some(r => r.retDed);
+    const anyNote = anyPromo || anyCarry || anyDed;
+    const ymd = d => { const t = String(d || "").replace(/\D/g, "");
       return t.length === 8 ? `${t.slice(0,4)}-${t.slice(4,6)}-${t.slice(6,8)}` : String(d || ""); };
     const noteOf = r => {
       const bits = [];
@@ -2006,6 +2013,9 @@ const ST = (() => {
         bits.push(`행사공급가(${per})`);
       }
       const c = QO.carryNote(r); if (c) bits.push(c);
+      /* 정산금액 칸은 그대로 둔다 — 합계 수식과 공급가 합계 검산이 그 값에 기대고 있다.
+         차감은 아래 합계 줄과 별도 시트에서 빠지고, 여기서는 '어느 줄이 반품인지' 만 잇는다 */
+      if (r.retDed) bits.push(`반품 차감 -${Math.round(r.retDed).toLocaleString("ko-KR")}원 → '${DED_SHEET}' 시트`);
       return bits.join(" · ");
     };
     const head = src.concat([`${v.vendor}→${CO()} 공급가`])
@@ -2106,12 +2116,13 @@ const ST = (() => {
         if (dv) { line[i] = dv; dated.push(i); }
       });
       const row = ws.addRow(line);
+      r.__row = row.number;          // 정산제외 시트가 '정산서 몇 번째 줄인지' 가리키려고 기억한다
       dated.forEach(i => {
         const c = row.getCell(i + 1);
         c.style = Object.assign({}, c.style, { numFmt: "yyyy-mm-dd" });
       });
-      // 행사 단가로 계산된 줄은 특이사항을 빨갛게 (셀 서식은 새 객체로 — 공유하면 표 전체에 번진다)
-      if (anyNote && r.priceFrom) {
+      // 행사 단가·반품 차감 줄은 특이사항을 빨갛게 (셀 서식은 새 객체로 — 공유하면 표 전체에 번진다)
+      if (anyNote && (r.priceFrom || r.retDed)) {
         const c = row.getCell(promoCol);
         c.font = { bold: true, color: { argb: "FFCC0000" } };
         c.alignment = { horizontal: "center", vertical: "middle" };
@@ -2214,25 +2225,67 @@ const ST = (() => {
     let nm = DED_SHEET;
     if (wb.getWorksheet(nm)) nm = (safe(v.vendor) + "_" + DED_SHEET).slice(0, 31);
     const ws = wb.addWorksheet(nm);
-    ws.addRow([`${safe(v.vendor)} — 정산에서 제외된 건`]).font = { bold: true, size: 13 };
+    const mainName = safe(v.vendor);
+    ws.addRow([`${mainName} — 정산에서 제외된 건`]).font = { bold: true, size: 13 };
     ws.addRow([stampLine()]).font = { color: { argb: "FF888888" } };
+    /* ★ 업체가 원 주문을 찾을 수 있어야 한다 (2026-09-08).
+       정산서 본문에는 주문번호 열이 없어서(내부 열이라 뺀다) 주문번호만 적으면 대조가 안 됐다.
+       그래서 본문에 그대로 보이는 값 — 쇼핑몰·주문일·수취인·주문자·운송장번호 — 과
+       '정산서 몇 번째 줄' 을 같이 적는다. 줄 번호가 있으면 같은 주문번호가 여러 줄이어도 헷갈리지 않는다. */
+    ws.addRow([`※ '정산서 행' 은 '${mainName}' 시트의 줄 번호입니다. 그 줄의 특이사항에도 '반품 차감' 이 적혀 있습니다.`])
+      .font = { color: { argb: "FF888888" } };
     ws.addRow([]);
-    const head = ws.addRow(["접수일", "유형", "주문번호", "상품명", "수량", "사유", "차감액"]);
+    const HEAD = ["정산서 행", "접수일", "유형", "쇼핑몰", "주문일", "수취인", "주문자", "운송장번호",
+                  "주문번호", "상품명", "옵션", "수량", "사유", "차감액"];
+    const N = HEAD.length, AMT = N, LBL = N - 1;
+    const head = ws.addRow(HEAD);
     head.font = { bold: true };
     head.eachCell(c => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F3F7" } }; });
+    const t = x => String(x == null ? "" : x).trim();
+    /* 원 주문 줄에서 업체가 알아볼 값을 뽑는다. 헤더는 표준 항목 판정(canonField)으로 찾아
+       가격 열이 섞여 들어올 여지를 없앤다. '쇼핑몰명' 은 정확히 같은 이름을 먼저 본다 —
+       '쇼핑몰' 만 찾으면 '판매가(쇼핑몰)' 에 걸린다 (상위 CLAUDE.md 의 함정). */
+    const idOf = ref => {
+      const o = { mall: "", odate: "", recip: "", orderer: "", inv: "" };
+      if (!ref) return o;
+      o.mall = t(ref.mall); o.odate = t(ref.orderDate); o.inv = t(ref.invoice);
+      if (!ref.raw || !ref.srcCols) return o;
+      const cols = ref.srcCols.map(h => t(h));
+      const pick = canon => { const i = cols.findIndex(h => h && QO.canonField(h) === canon); return i >= 0 ? ref.raw[i] : ""; };
+      let mi = cols.indexOf("쇼핑몰명");
+      if (mi < 0) mi = cols.findIndex(h => /쇼핑몰|몰명/.test(h) && !/판매가|가격|금액|주문번호/.test(h));
+      if (mi >= 0 && t(ref.raw[mi])) o.mall = t(ref.raw[mi]);
+      // 날짜 열은 canonField 가 안 돌려준다(null) — 헤더 이름으로 찾는다. 드라이브 파일은 일련번호로 온다
+      const oi = cols.findIndex(h => /^주문일(시|자)?$/.test(h.replace(/\s/g, "")));
+      if (oi >= 0) o.odate = CS.toYmd(ref.raw[oi]) || o.odate;
+      o.recip = t(pick("RECIPIENT"));
+      o.orderer = t(pick("ORDERER"));
+      o.inv = t(pick("INVOICE")) || o.inv;
+      return o;
+    };
     rows.forEach(x => {
-      const r = ws.addRow([x.date || "", x.type || "", x.orderNo || "", x.product || "",
+      // CS 탭에서 온 줄은 원 줄을 안 들고 있다 → 주문번호로 찾아본다. 못 찾으면 빈 칸으로 둔다 (찍지 않는다)
+      const ref = x.ref || v.rows.find(r => s(r.orderNo) && s(r.orderNo) === s(x.orderNo)) || null;
+      const id = idOf(ref);
+      const r = ws.addRow([ref && ref.__row ? ref.__row : "", x.date || "", x.type || "",
+        id.mall, id.odate, id.recip, id.orderer, id.inv,
+        x.orderNo || "", x.product || (ref ? ref.product : "") || "", x.option || (ref ? ref.option : "") || "",
         Number(x.qty) || "", String(x.content || "").slice(0, 120), Math.round(Number(x.cost) || 0)]);
-      r.getCell(7).numFmt = "#,##0";
+      const c = r.getCell(AMT);
+      c.style = Object.assign({}, c.style, { numFmt: "#,##0" });
+      r.getCell(1).alignment = { horizontal: "center" };
     });
-    const tot = ws.addRow(["", "", "", "", "", "합계", Math.round(Number(v.ded) || 0)]);
+    const totCells = new Array(N).fill("");
+    totCells[LBL - 1] = "합계"; totCells[AMT - 1] = Math.round(Number(v.ded) || 0);
+    const tot = ws.addRow(totCells);
     tot.font = { bold: true };
-    tot.getCell(7).numFmt = "#,##0";
-    tot.getCell(6).alignment = { horizontal: "right" };
+    tot.getCell(AMT).style = Object.assign({}, tot.getCell(AMT).style, { numFmt: "#,##0" });
+    tot.getCell(LBL).alignment = { horizontal: "right" };
     ws.addRow([]);
     ws.addRow(["※ 위 금액은 이번 정산금액에서 이미 빠져 있습니다."])
       .font = { bold: true, color: { argb: "FFCC0000" } };
-    [13, 10, 18, 34, 8, 30, 14].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+    [9, 12, 8, 14, 12, 11, 11, 16, 16, 34, 16, 7, 26, 13].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+    ws.views = [{ state: "frozen", ySplit: head.number }];
     return ws;
   }
 
