@@ -503,7 +503,7 @@ const ST = (() => {
        판정 근거가 적혀 있다. 유형과 같이 읽어 교환/반품을 가린다 (2026-09-08) */
     { k: "status", n: "처리내역", kw: ["처리내역", "처리결과", "어드민처리", "처리"] },
     { k: "content", n: "사유", kw: ["사유", "내용", "비고", "메모", "요청내용"] },
-    // 입고일이 비어 있으면 아직 회수 중이다 — 빼되 따로 세어 보여준다
+    // 입고일이 비어 있으면 아직 회수 중이다 — 빼되 따로 세어 둔다 (화면에는 안 띄운다)
     { k: "received", n: "입고일", kw: ["입고일", "회수완료", "입고"] },
   ];
   const RET_NAME = /교환|반품|취소|클레임|반송|환불|cs/i;
@@ -1462,14 +1462,8 @@ const ST = (() => {
     if (rt.on && rt.noType)
       warn(`교환반품 시트 '${rt.sheet}' 에 유형(교환/반품) 열이 없어요`,
            "무엇이 반품인지 가릴 수 없어 아무것도 차감하지 않았습니다");
-    /* 유형 열 없이 '반품 장부' 로 보고 뺀 건은 반드시 알린다 — 근거 열을 같이 적는다.
-       돈이 빠지는 판단을 앱이 대신 했으니 사람이 확인할 수 있어야 한다 */
-    if (rt.on && rt.assumed)
-      warn(`교환반품 시트 '${rt.sheet}' 의 ${rt.assumed}건은 유형 열이 없어 시트 전체를 반품으로 봤어요`,
-           `근거 열: ${(rt.basis || []).join(" · ") || "시트 이름"} — 교환이 섞여 있다면 시트에 유형 열을 추가하세요`);
-    if (rt.on && rt.pending)
-      warn(`반품 ${rt.pending}건은 입고일이 비어 있어요 (아직 회수 중)`,
-           "이번 정산에서 뺐습니다. 입고 뒤에 정산하려면 그 줄을 시트에서 잠시 빼세요");
+    /* 유형 열 없이 반품 장부로 보고 뺀 건·입고일이 빈 건은 검산에 올리지 않는다 (2026-09-08).
+       실제 교환반품 시트는 유형 열 없이 전부 반품이라 정상 동작이고, 매번 '확인이 필요합니다' 가 떠서 뺐다. */
     if (rt.unusable)
       warn(`'${rt.sheet}' 시트를 교환반품 목록으로 쓰지 못했어요`, rt.unusable);
     // 송장이 없는 건은 아직 출고 전이라 빼는 게 정상이다 — 오류가 아니라 안내로 남긴다
@@ -2501,10 +2495,9 @@ const ST = (() => {
         ? `<div class="msg show warn" style="margin-top:10px">⚠ <b>${esc(rt.sheet)}</b> 시트에 ${rt.count}줄이 있지만 주문번호가 비어 있어 정산 줄과 대조하지 못했습니다 — 아무것도 차감하지 않았습니다</div>`
         : `<div class="msg show ok" style="margin-top:10px">↩ <b>${esc(rt.sheet)}</b> 시트 확인 — 반품 0건 (이 파일에는 반품이 없습니다)</div>`;
     lines.push(`↩ <b>${esc(rt.sheet)}</b> 시트에서 <b>반품 ${rt.matched}건 · ${won(rt.amount)}</b> 을 업체 지급에서 뺐습니다`);
-    if (rt.assumed)
-      lines.push(`<span style="color:var(--warn)">유형 열이 없어 <b>${rt.assumed}건</b>은 시트 전체를 반품으로 봤습니다 — 근거 열: ${esc((rt.basis || []).join(" · ") || "시트 이름")}</span>`);
-    if (rt.pending)
-      lines.push(`<span style="color:var(--muted)">반품 중 입고일이 비어 있는(회수 중) ${rt.pending}건이 있습니다 — 반품 장부에 있어 같이 뺍니다</span>`);
+    /* '유형 열이 없어 전부 반품으로 봤다' · '입고일이 비어 있다' 는 여기 적지 않는다 (2026-09-08).
+       실제 교환반품 시트는 유형 열 없이 전부 반품인 장부라 그게 정상이고, 매번 뜨면 경고가 아니라 소음이다.
+       (건수는 rt.assumed · rt.pending 에 남겨 둔다) */
     if (kept.length) lines.push(`<span style="color:var(--muted)">그대로 둔 것: ${kept.join(" · ")} — 교환은 업체가 대체품을 보냈고, 취소는 송장이 없어 이미 빠져 있습니다</span>`);
     if (rt.dupCs) lines.push(`<span style="color:var(--muted)">CS 탭에서 이미 뺀 ${rt.dupCs}건은 두 번 빼지 않았습니다</span>`);
     if (rt.unmatched && rt.unmatched.length)
