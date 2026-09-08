@@ -699,17 +699,23 @@ const orderDateCols = () => DB.get("orderDateCols", {});
 async function rebuildMerged() {
   const parts = S.orderParts;
   if (!parts || !parts.length) return;
-  const m = QO.mergeOrders(parts, {
-    aliases: await orderAliases(), knownBrands: knownBrandList(), dateFrom: await orderDateCols(),
-    /* ★ 이미 송장번호가 찍힌 주문(=출고 완료)은 발주 대상이 아니다. 여기서만 켠다 —
-       정산은 출고된 건을 정산해야 하므로 절대 이 옵션을 주면 안 된다. */
-    skipInvoiced: true,
-  });
-  /* 전부 출고 완료라 한 줄도 안 남는 경우가 있다. '못 찾았다' 로 뭉뚱그리면
-     파일을 잘못 골랐나 싶어 헤매게 된다 — 왜 비었는지 그대로 말한다. */
+  const mopts = { aliases: await orderAliases(), knownBrands: knownBrandList(), dateFrom: await orderDateCols() };
+  /* ★ 이미 송장번호가 찍힌 주문(=출고 완료)은 발주 대상이 아니다. 여기서만 켠다 —
+     정산은 출고된 건을 정산해야 하므로 절대 이 옵션을 주면 안 된다. */
+  let m = QO.mergeOrders(parts, Object.assign({ skipInvoiced: true }, mopts));
+  /* ★★ 걸러내기가 주문을 '전부' 없애면 걸러내지 않는다 (2026-09-08).
+     예전엔 여기서 '전부 출고 완료라 발주할 주문이 없다' 며 파일을 아예 안 열었다.
+     그런데 실제로는 송장이 빈 주문이 있는데도 이 문구가 떴다 — 송장 열이 잘못 잡히면
+     (다른 열이 송장으로 보이거나, 교환반품 시트가 주문 시트로 뽑히면) 모든 줄에
+     '송장이 있다' 고 판정돼 사람이 손쓸 방법이 없었다.
+     걸러내기는 '있으면 좋은' 기능이지 파일을 막을 권한은 없다. 전부 걸러지면
+     걸러내지 않은 채 그대로 열고, 무슨 열을 송장으로 봤는지 빨갛게 밝힌다 —
+     송장이 있는 건이 정말 전부라면 사람이 날짜로 거르거나 파일을 바꾸면 된다. */
+  let allInvoiced = 0;
   if (!m.rows && m.invoiced) {
-    throw new Error(`고른 파일의 주문 ${m.invoiced}건이 전부 송장번호가 있는 출고 완료 건이라\n`
-      + "새로 발주할 주문이 없습니다.");
+    allInvoiced = m.invoiced;
+    m = QO.mergeOrders(parts, Object.assign({ skipInvoiced: false }, mopts));
+    m.allInvoiced = allInvoiced;
   }
   if (!m.rows) throw new Error("고른 파일에서 주문 줄을 찾지 못했습니다.");
   S.merged = m;
@@ -742,17 +748,32 @@ async function rebuildMerged() {
   const inote = $("order-invoiced");
   if (inote) {
     const list = Object.entries(m.invoicedByMall || {});
-    inote.style.display = m.invoiced ? "" : "none";
-    inote.className = "msg show" + (m.invoiced ? " warn" : "");
-    inote.innerHTML = m.invoiced
-      ? `ℹ 이미 송장번호가 있는 <b>${m.invoiced}건</b>은 출고 완료로 보고 뺐습니다`
-        + (list.length
-          ? ` — ` + list.map(([mall, n]) => {
-              const all = (m.mallTotal || {})[mall] || 0;
-              return `<b>${esc(mall)} ${n === all ? `전체 ${n}건` : `${n}건`}</b>`;
-            }).join(" · ")
-          : "")
-      : "";
+    /* 무슨 열을 송장으로 봤는지 함께 적는다 — 열이 잘못 잡힌 걸 알아채는 유일한 단서다 */
+    const colOf = mall => {
+      const c = (m.invoiceCols || {})[mall];
+      return c ? `<span style="color:var(--muted)">(시트 '${esc(c.sheet)}' · 열 '${esc(c.header)}')</span>` : "";
+    };
+    if (m.allInvoiced) {
+      const cols = Object.entries(m.invoiceCols || {});
+      inote.style.display = "";
+      inote.className = "msg show err";
+      inote.innerHTML = `⚠ 송장번호가 있는 주문이 <b>${m.allInvoiced}건 — 전부</b>라서 <b>하나도 빼지 않고 그대로 불러왔습니다.</b>`
+        + `<span style="display:block;margin-top:4px">송장이 비어 있는 주문이 실제로 있다면 송장 열이 잘못 잡힌 것입니다. 송장으로 본 곳: `
+        + (cols.length ? cols.map(([mall, c]) => `<b>${esc(mall)}</b> → 시트 '${esc(c.sheet)}' · 열 '${esc(c.header)}'`).join(" · ") : "(없음)")
+        + `</span><span style="display:block;margin-top:4px;color:var(--muted)">정말 전부 출고된 파일이라면 아래에서 날짜로 거르거나 다른 파일을 고르세요.</span>`;
+    } else {
+      inote.style.display = m.invoiced ? "" : "none";
+      inote.className = "msg show" + (m.invoiced ? " warn" : "");
+      inote.innerHTML = m.invoiced
+        ? `ℹ 이미 송장번호가 있는 <b>${m.invoiced}건</b>은 출고 완료로 보고 뺐습니다`
+          + (list.length
+            ? ` — ` + list.map(([mall, n]) => {
+                const all = (m.mallTotal || {})[mall] || 0;
+                return `<b>${esc(mall)} ${n === all ? `전체 ${n}건` : `${n}건`}</b> ${colOf(mall)}`;
+              }).join(" · ")
+            : "")
+        : "";
+    }
   }
   /* 방금 무엇이 늘었는지 먼저 말한다 — '더하기' 인 걸 알 수 있게 */
   const a = S.orderAdded;

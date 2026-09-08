@@ -132,6 +132,11 @@ const CS = (() => {
     if (v instanceof Date) return isNaN(v.getTime()) ? "" : fromDate(v);
     const t = s(v);
     if (!t) return "";
+    /* ★ 엑셀 일련번호 — 숫자(46239.01) 또는 그 글자("46239.0104166667") (2026-09-08).
+       드라이브 스프레드시트를 내보낸 정산 파일은 날짜가 이렇게 온다. 아래 정규식은
+       이걸 '2026'을 못 찾아 그냥 앞 10글자를 돌려줬고, 정산기간이 '4623-90-10' 이 됐다. */
+    if (typeof v === "number" || QO.serialString(t) !== null)
+      return QO.fmtDate(QO.extractDate(typeof v === "number" ? v : QO.serialString(t)));
     // 2026-07-26 / 2026.7.26 / 20260726 — 달·일 범위까지 확인해야
     // "Sun Jul 26 2026 14:07" 같은 문자열에서 '2026-14-07'로 잘못 읽지 않는다.
     const m = t.match(/(20\d{2})[.\-/년\s]*(\d{1,2})[.\-/월\s]*(\d{1,2})/);

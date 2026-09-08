@@ -492,37 +492,66 @@ const ST = (() => {
        "교환·반품 차감 -N원" 줄이 정산서에 남아 업체가 확인할 수 있다.
      ★ 시트 이름만 보고 정하지 않는다 — 주문번호 열이 있어야 쓸 수 있다. */
   const RET_FIELDS = [
-    { k: "date", n: "접수일", kw: ["접수일", "등록일", "신청일", "일자", "날짜", "일시"] },
+    // '반품 요청일' 을 맨 앞에 — 실제 통합파일 교환반품 시트는 '반품 요청일 · 공장 반품 접수일 · 입고일' 순이다
+    { k: "date", n: "접수일", kw: ["요청일", "접수일", "등록일", "신청일", "일자", "날짜", "일시"] },
     { k: "orderNo", n: "주문번호", kw: ["주문번호", "오더번호", "주문no", "order"], req: true },
     { k: "product", n: "상품명", kw: ["상품명", "제품명", "품목명", "상품", "제품"] },
     { k: "option", n: "옵션", kw: ["옵션", "옵션명", "선택옵션", "규격"] },
     { k: "qty", n: "수량", kw: ["수량", "개수", "반품수량"] },
     { k: "type", n: "유형", kw: ["유형", "구분", "처리구분", "클레임", "종류", "상태", "처리상태"] },
+    /* '어드민처리내역' — 유형 열이 없는 시트에서는 여기에 '환불 완료'·'교환 발송' 같은
+       판정 근거가 적혀 있다. 유형과 같이 읽어 교환/반품을 가린다 (2026-09-08) */
+    { k: "status", n: "처리내역", kw: ["처리내역", "처리결과", "어드민처리", "처리"] },
     { k: "content", n: "사유", kw: ["사유", "내용", "비고", "메모", "요청내용"] },
+    // 입고일이 비어 있으면 아직 회수 중이다 — 빼되 따로 세어 보여준다
+    { k: "received", n: "입고일", kw: ["입고일", "회수완료", "입고"] },
   ];
   const RET_NAME = /교환|반품|취소|클레임|반송|환불|cs/i;
+  /* 이 열들이 있으면 '반품 장부' 다 — 줄마다 유형이 안 적혀 있어도 반품으로 본다.
+     실제 통합파일의 교환반품 시트가 그렇다: 유형 열은 없고
+     '반품 요청일 · 공장 반품 접수일 · 반품 배송비 · 회수택배사 · 회수송장 · 입고일' 이 있다. */
+  const RET_STRONG = /반품\s*요청|반품\s*접수|회수\s*송장|회수\s*택배|입고일|반품\s*배송비/;
   function findReturnSheet(sheets, mainName) {
     for (const sh of (sheets || [])) {
       if (!sh || sh.name === mainName) continue;
       if (!RET_NAME.test(String(sh.name || ""))) continue;
-      if (!sh.columns || !sh.columns.length || !sh.rows || !sh.rows.length) continue;
+      if (!sh.columns || !sh.columns.length) continue;
+      /* 줄이 하나도 없어도 '봤다' 고 돌려준다. 예전엔 건너뛰어서 화면에 아무 말이 없었고,
+         반품이 없는 달인지 시트를 못 읽은 건지 구분이 안 됐다 (2026-09-08) */
+      if (!sh.rows || !sh.rows.length)
+        return { name: sh.name, usable: true, hasType: true, empty: true, items: [], count: 0, assumed: 0, pending: 0 };
       const m = MAP.autoMap(sh.columns, RET_FIELDS);
       if (m.orderNo === undefined) {           // 주문번호가 없으면 대조할 방법이 없다
         return { name: sh.name, usable: false, why: "주문번호 열을 찾지 못했습니다", count: sh.rows.length };
       }
       const hasType = m.type !== undefined;
+      const strong = sh.columns.some(c => RET_STRONG.test(String(c || "")));
       const cell = (row, k) => (m[k] === undefined ? "" : row[m[k]]);
+      let assumed = 0, pending = 0;
       const items = sh.rows.map(row => {
-        const txt = [cell(row, "type"), cell(row, "content")].filter(Boolean).join(" ");
+        const txt = [cell(row, "type"), cell(row, "status"), cell(row, "content")].filter(Boolean).join(" ");
+        let type = QO.claimType(txt), guessed = false;
+        /* 유형 열이 없는 반품 장부 시트에서는 교환·취소로 읽힌 줄만 빼고 전부 반품으로 본다.
+           ★ '못 가린 줄만' 이 아니다 — 사유가 '파손'·'분실' 이면 claimType 이 '배송' 이라 하는데,
+             반품 장부의 사유는 '왜 돌아왔는지' 지 클레임 종류가 아니다. 그대로 두면 파손 반품이
+             조용히 지급된다. 몰래 하지 않는다 — assumed 로 세어 화면과 검산에 근거 열과 함께 띄운다 */
+        if (!hasType && strong && type !== "교환" && type !== "취소" && type !== "반품") {
+          type = "반품"; guessed = true; assumed++;
+        }
+        const received = s(cell(row, "received"));
+        if (type === "반품" && m.received !== undefined && !received) pending++;
         return {
           orderNo: s(cell(row, "orderNo")), product: s(cell(row, "product")),
           option: s(cell(row, "option")), qty: Number(String(cell(row, "qty")).replace(/[^\d.-]/g, "")) || 0,
-          date: s(cell(row, "date")), content: s(cell(row, "content")),
+          date: CS.toYmd(cell(row, "date")),    // 드라이브 파일은 날짜가 일련번호 글자로 온다
+          content: s(cell(row, "content")) || s(cell(row, "status")),
           raw: s(cell(row, "type")),
-          type: QO.claimType(txt),
+          type, guessed, received,
         };
       }).filter(x => x.orderNo);
-      return { name: sh.name, usable: true, hasType, items, count: sh.rows.length };
+      const basis = sh.columns.filter(c => RET_STRONG.test(String(c || ""))).map(c => String(c).trim());
+      return { name: sh.name, usable: true, hasType, strong, basis, items, count: sh.rows.length, assumed, pending,
+               hasReceived: m.received !== undefined };
     }
     return null;
   }
@@ -849,7 +878,8 @@ const ST = (() => {
      · 못 찾은 반품 건은 버리지 않고 돌려준다 — 화면과 검산에 띄운다. */
   function returnDeduction(shipped, ded) {
     const out = { on: false, sheet: "", 반품: 0, 교환: 0, 취소: 0, 기타: 0,
-                  amount: 0, matched: 0, unmatched: [], dupCs: 0, noType: false, unusable: "" };
+                  amount: 0, matched: 0, unmatched: [], dupCs: 0, noType: false, unusable: "",
+                  assumed: 0, pending: 0, basis: [], rows: 0 };
     const src = files.filter(f => f.ret);
     if (!src.length) return out;
     const bad = src.find(f => f.ret && !f.ret.usable);
@@ -858,7 +888,16 @@ const ST = (() => {
     if (!usable.length) return out;
     out.on = true;
     out.sheet = usable.map(f => f.ret.name).join(", ");
-    out.noType = usable.every(f => !f.ret.hasType);
+    out.rows = usable.reduce((n, f) => n + (f.ret.items || []).length, 0);   // 주문번호가 있는 줄
+    out.count = usable.reduce((n, f) => n + (f.ret.count || 0), 0);          // 시트의 전체 줄
+    /* '유형 열이 없어 아무것도 못 가렸다' 는 줄이 있는데 유형 열도 없고 반품 장부 근거도 없을 때만.
+       빈 시트(반품 없는 달)나 근거 열로 반품으로 본 시트는 여기 해당하지 않는다 */
+    out.noType = usable.some(f => (f.ret.items || []).length && !f.ret.hasType && !f.ret.strong);
+    usable.forEach(f => {
+      out.assumed += f.ret.assumed || 0;
+      out.pending += f.ret.pending || 0;
+      (f.ret.basis || []).forEach(b => { if (out.basis.indexOf(b) < 0) out.basis.push(b); });
+    });
 
     // 주문번호 → 정산 줄들
     const byNo = {};
@@ -1418,6 +1457,14 @@ const ST = (() => {
     if (rt.on && rt.noType)
       warn(`교환반품 시트 '${rt.sheet}' 에 유형(교환/반품) 열이 없어요`,
            "무엇이 반품인지 가릴 수 없어 아무것도 차감하지 않았습니다");
+    /* 유형 열 없이 '반품 장부' 로 보고 뺀 건은 반드시 알린다 — 근거 열을 같이 적는다.
+       돈이 빠지는 판단을 앱이 대신 했으니 사람이 확인할 수 있어야 한다 */
+    if (rt.on && rt.assumed)
+      warn(`교환반품 시트 '${rt.sheet}' 의 ${rt.assumed}건은 유형 열이 없어 시트 전체를 반품으로 봤어요`,
+           `근거 열: ${(rt.basis || []).join(" · ") || "시트 이름"} — 교환이 섞여 있다면 시트에 유형 열을 추가하세요`);
+    if (rt.on && rt.pending)
+      warn(`반품 ${rt.pending}건은 입고일이 비어 있어요 (아직 회수 중)`,
+           "이번 정산에서 뺐습니다. 입고 뒤에 정산하려면 그 줄을 시트에서 잠시 빼세요");
     if (rt.unusable)
       warn(`'${rt.sheet}' 시트를 교환반품 목록으로 쓰지 못했어요`, rt.unusable);
     // 송장이 없는 건은 아직 출고 전이라 빼는 게 정상이다 — 오류가 아니라 안내로 남긴다
@@ -1897,8 +1944,10 @@ const ST = (() => {
   function periodOf(rows) {
     const ds = [];
     (rows || []).forEach(r => {
-      const d = String(r.date || "").replace(/\D/g, "").slice(0, 8);
-      if (d.length === 8) ds.push(d);
+      /* extractDate 로 푼다 — 일련번호("46239.01")가 섞여 와도 숫자만 추려 '46239010' 을
+         날짜로 삼지 않는다. 연·월 범위까지 확인해 쓰레기 값은 기간 계산에서 뺀다 */
+      const d = QO.extractDate(r.date);
+      if (d && /^(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(d)) ds.push(d);
     });
     if (!ds.length) return { from: "", to: "", label: "", tag: "" };
     ds.sort();
@@ -2021,6 +2070,9 @@ const ST = (() => {
       return isFinite(n) ? n : null;
     };
     const qtyVals = [];
+    /* 날짜 열 — 원본이 일련번호(46239.01)로 오면 그대로 찍혀 업체가 못 읽는다.
+       진짜 날짜로 바꿔 넣고 셀 단위로 서식을 준다 (열 전체에 주면 다른 칸까지 번진다) */
+    const dateIdx = src.map((h, i) => (QO.isDateHeader(String(h || "")) ? i : -1)).filter(i => i >= 0);
 
     /* 주문일이 이른 것부터 적는다 — 업체가 자기 출고 순서대로 훑을 수 있게.
        원본 v.rows 는 합계·검산이 함께 쓰므로 복사본을 정렬한다.
@@ -2048,7 +2100,16 @@ const ST = (() => {
       if (perOrderShip) line.push(r.shipMode === "건당" ? Math.round(r.shipTotal || 0) : 0);
       line.push(Math.round(r.pay || 0));
       if (anyNote) line.push(noteOf(r));
+      const dated = [];
+      dateIdx.forEach(i => {
+        const dv = QO.dateOnlyCell(line[i]);
+        if (dv) { line[i] = dv; dated.push(i); }
+      });
       const row = ws.addRow(line);
+      dated.forEach(i => {
+        const c = row.getCell(i + 1);
+        c.style = Object.assign({}, c.style, { numFmt: "yyyy-mm-dd" });
+      });
       // 행사 단가로 계산된 줄은 특이사항을 빨갛게 (셀 서식은 새 객체로 — 공유하면 표 전체에 번진다)
       if (anyNote && r.priceFrom) {
         const c = row.getCell(promoCol);
@@ -2374,7 +2435,17 @@ const ST = (() => {
     if (rt.취소) kept.push(`취소 ${rt.취소}건`);
     if (rt.기타) kept.push(`유형 불명 ${rt.기타}건`);
     const lines = [];
+    /* 반품이 없는 달 — 시트는 봤고 뺄 게 없었다는 걸 분명히 적는다.
+       줄은 있는데 주문번호가 전부 비어 있으면 '없다' 가 아니라 '대조 못 했다' 다 */
+    if (!rt.rows)
+      return rt.count
+        ? `<div class="msg show warn" style="margin-top:10px">⚠ <b>${esc(rt.sheet)}</b> 시트에 ${rt.count}줄이 있지만 주문번호가 비어 있어 정산 줄과 대조하지 못했습니다 — 아무것도 차감하지 않았습니다</div>`
+        : `<div class="msg show ok" style="margin-top:10px">↩ <b>${esc(rt.sheet)}</b> 시트 확인 — 반품 0건 (이 파일에는 반품이 없습니다)</div>`;
     lines.push(`↩ <b>${esc(rt.sheet)}</b> 시트에서 <b>반품 ${rt.matched}건 · ${won(rt.amount)}</b> 을 업체 지급에서 뺐습니다`);
+    if (rt.assumed)
+      lines.push(`<span style="color:var(--warn)">유형 열이 없어 <b>${rt.assumed}건</b>은 시트 전체를 반품으로 봤습니다 — 근거 열: ${esc((rt.basis || []).join(" · ") || "시트 이름")}</span>`);
+    if (rt.pending)
+      lines.push(`<span style="color:var(--muted)">반품 중 입고일이 비어 있는(회수 중) ${rt.pending}건이 있습니다 — 반품 장부에 있어 같이 뺍니다</span>`);
     if (kept.length) lines.push(`<span style="color:var(--muted)">그대로 둔 것: ${kept.join(" · ")} — 교환은 업체가 대체품을 보냈고, 취소는 송장이 없어 이미 빠져 있습니다</span>`);
     if (rt.dupCs) lines.push(`<span style="color:var(--muted)">CS 탭에서 이미 뺀 ${rt.dupCs}건은 두 번 빼지 않았습니다</span>`);
     if (rt.unmatched && rt.unmatched.length)

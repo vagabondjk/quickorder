@@ -41,7 +41,10 @@ const ORDER_FIELDS = [
   ["ZIP",       ["우편번호"], []],
   ["ORDERER",   ["주문자명","주문자","구매자","보내는"], ["전화","연락처","mail","가상"]],
   ["CARRIER",   ["택배사"], []],
-  ["INVOICE",   ["운송장","송장"], []],
+  /* '송장출력여부'·'송장등록일' 같은 열이 송장번호로 잡히면 발주 탭에서
+     '전부 출고 완료' 로 보고 통째로 빠진다. 번호가 아닌 송장 열은 거른다 (2026-09-08).
+     ※ '번호' 는 넣으면 안 된다 — '송장번호' 자체가 걸린다. */
+  ["INVOICE",   ["운송장","송장"], ["등록","출력","일자","일시","여부","상태","수량"]],
 ];
 const COPY_FIELDS = ORDER_FIELDS.map(f => f[0]).filter(n => n !== "CARRIER" && n !== "INVOICE");
 const KEY_FIELDS = ["RECIPIENT","ADDR","PRODUCT","QTY","ORDERER","ZIP"];
@@ -256,8 +259,25 @@ function extractDate(v) {
     }
     return null;
   }
+  /* ★★ 일련번호가 '글자' 로 온 경우 — "46239.0104166667" (2026-09-08).
+     드라이브 스프레드시트를 xlsx 로 내보내면 날짜 칸이 이런 숫자로 읽히고,
+     previewSheets 는 모든 칸을 String() 으로 넘기므로 정산 쪽에서는 늘 글자로 온다.
+     이걸 그대로 숫자만 추리면 "46239010" → 정산서에 '4623-90-10' 이 찍혔다. */
+  const sn = serialString(v);
+  if (sn !== null) return extractDate(sn);
   const d = String(v).replace(/\D/g, "");
   return d.length >= 8 ? d.slice(0, 8) : null;
+}
+/* "46239" / "46239.0104" 처럼 엑셀 일련번호가 글자로 온 것인가. 맞으면 숫자로, 아니면 null.
+   다섯 자리만 본다 — 네 자리("2026")는 연도일 수 있고, 여섯 자리부터는 날짜 범위 밖이다.
+   ※ 1990-01-01(32874) 부터만 — 우편번호 "06236" 같은 다섯 자리를 1917년 날짜로 만들지 않는다.
+     extractDate 의 연도 걸름과 같은 선이라 두 함수가 어긋나지 않는다. */
+function serialString(v) {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  if (!/^\d{5}(\.\d+)?$/.test(t)) return null;
+  const n = Number(t);
+  return isFinite(n) && n >= 32874 && n < 60000 ? n : null;
 }
 /* ★★ 엑셀 셀에 넣을 '날짜만' 값을 만든다 (2026-08-18).
 
@@ -297,6 +317,8 @@ function toDateValue(v) {
     d.setHours(Math.floor(secs / 3600), Math.floor(secs / 60) % 60, secs % 60, 0);
     return isNaN(d.getTime()) ? null : d;
   }
+  const sn = serialString(v);              // "46239.01" — 글자로 온 일련번호 (extractDate 참고)
+  if (sn !== null) return toDateValue(sn);
   const g = String(v).replace(/\D/g, "");
   if (g.length < 8) return null;
   const y = +g.slice(0, 4), mo = +g.slice(4, 6), da = +g.slice(6, 8);
@@ -526,6 +548,9 @@ function mergeOrders(sources, opts) {
   const dateFilled = {};                     // 빈 주문일시를 무엇으로 메꿨는지 {수집일자: 102}
   /* 이미 송장번호가 찍혀 있어 뺀 주문 (= 출고까지 끝난 건). 몇 건을 왜 뺐는지 밝힌다 */
   const invoicedByMall = {}, mallTotal = {};
+  /* 몰별로 '어느 시트의 어느 열' 을 송장번호로 봤는지. 화면에서 이걸 밝혀야
+     열이 잘못 잡혔을 때(예: 교환반품 시트가 주문 시트로 뽑힘) 사람이 알아챈다 (2026-09-08) */
+  const invoiceCols = {};
   let invoiced = 0;
   const rows = [], fields = new Set();
   let brandSeen = false;
@@ -536,6 +561,10 @@ function mergeOrders(sources, opts) {
     const hr = findHeaderRow(ws);
     const map = buildOrderFieldMap(ws, hr, "source");
     const brandCol = findBrandColumn(ws, hr);
+    if (map.INVOICE) {
+      const h = getV(ws, hr, map.INVOICE);
+      invoiceCols[mall] = { sheet: ws.name, header: String(h == null ? "" : h).trim() };
+    }
     /* ★ 주문일은 필수다. 없으면 그 몰 주문은 날짜로 고를 때 통째로 빠진다.
        (이제너두는 '출고지시일' 만, 메가존은 '결제일시' 만 있었다 — 30건이 사라졌다)
        그래서 ① 사람이 정해준 열이 있으면 그걸 주문일로 쓰고
@@ -672,6 +701,7 @@ function mergeOrders(sources, opts) {
     dateFilled,      // 줄 단위로 비어 있던 주문일시를 다른 날짜로 메꾼 건수
     invoiced,        // 이미 송장번호가 있어 뺀 주문 수 (출고 완료)
     invoicedByMall,  // 몰별로 몇 건을 뺐는지
+    invoiceCols,     // 몰별로 송장번호로 본 시트·열 이름 {몰: {sheet, header}}
     /* 몰별로 읽은 전체 줄 수. 한 몰이 통째로 빠졌을 때 '전체 N건 제외' 라고
        말해 주려면 이게 있어야 한다 — 안 그러면 파일이 안 읽힌 줄 안다. */
     mallTotal,
@@ -2313,7 +2343,7 @@ function canInheritStore(from, to) {
 return { ORDER_FIELDS, COPY_FIELDS, KEY_FIELDS, FIELD_KR, BRAND_HEADER,
   cv, getV, isBlank, dims, canonField, findHeaderRow, buildOrderFieldMap, phoneColumns,
   pickOrderSheet, findBrandColumn, listBrands, extractDate, isCollectHeader,
-  toDateValue, isDateHeader, hasDateFormat, hasTimeFormat,
+  toDateValue, dateOnlyCell, serialString, isDateHeader, hasDateFormat, hasTimeFormat,
   findDateColumns, defaultDateColumn, orderDateInfo, formatPhone, stripHyphen,
   valueTransformForHeader, nameFromFilename, normKey,
   mergeOrders, mallKey, dateLikeColumns, brandFromName, brandFromKnown, resolveBrand, aliasKey, convert, collectInvoices, looksLikeInvoice, looksLikeCarrier, carrierKey, countOrders, preview, previewAny, previewSheets, loadWorkbook, saveWorkbook, isOldXlsBuffer, todayStr, fmtDate, canInheritStore,
