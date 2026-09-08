@@ -1594,7 +1594,7 @@ const ST = (() => {
         d.payFix.after - d.payFix.before, { small: true });
     if (d.unpricedAmount)
       h += L("└ 단가 못 찾은 건 (지급·마진에서 빠짐)", d.unpricedAmount, { small: true, color: "var(--danger)" });
-    if (d.ded) h += L("CS 차감 (교환·반품)", d.ded, { minus: true, color: "var(--danger)" });
+    if (d.ded) h += L("반품 차감", d.ded, { minus: true, color: "var(--danger)" });
     h += `<div class="totline"${big ? ' style="border-top:1px solid var(--line);margin-top:6px;padding-top:8px"' : ""}>` +
       `<b>${esc(o && o.payLabel || "업체 지급액")}</b><span style="color:var(--brand)">${won(d.pay)}</span></div>`;
     h += L(`${esc(CO())} 마진`, d.margin, { color: "var(--ok)", rate: rateOf(d.margin, d.amount) });
@@ -2015,12 +2015,12 @@ const ST = (() => {
       const c = QO.carryNote(r); if (c) bits.push(c);
       /* 정산금액 칸은 그대로 둔다 — 합계 수식과 공급가 합계 검산이 그 값에 기대고 있다.
          차감은 아래 합계 줄과 별도 시트에서 빠지고, 여기서는 '어느 줄이 반품인지' 만 잇는다 */
-      if (r.retDed) bits.push(`반품 차감 -${Math.round(r.retDed).toLocaleString("ko-KR")}원 → '${DED_SHEET}' 시트`);
+      if (r.retDed) bits.unshift(`반품 · 차감 -${Math.round(r.retDed).toLocaleString("ko-KR")}원 ('${DED_SHEET}' 시트)`);
       return bits.join(" · ");
     };
     const head = src.concat([`${v.vendor}→${CO()} 공급가`])
       .concat(perOrderShip ? ["배송비"] : []).concat(["정산금액"])
-      .concat(anyNote ? ["특이사항"] : []);
+      .concat(anyNote ? ["비고"] : []);
     const nCol = head.length;
     const moneyEnd = src.length + 1 + (perOrderShip ? 1 : 0) + 1;   // 정산금액 열
     const promoCol = moneyEnd + 1;                                  // 그 오른쪽이 '행사' 열
@@ -2032,7 +2032,7 @@ const ST = (() => {
     const tops = [["판매수량", totalQty, "0"]];
     tops.push(["공급가 합계", v.pay - perOrderShip, "#,##0"]);
     if (perOrderShip) tops.push(["배송비 합계", perOrderShip, "#,##0"]);
-    if (v.ded) tops.push(["교환·반품 차감", -v.ded, "#,##0"]);
+    if (v.ded) tops.push(["반품 차감", -v.ded, "#,##0"]);
     tops.push(["정산금액", v.final, "#,##0"]);
     if (v.payDay) tops.push(["입금일", v.payDay, "@"]);   // 금액이 아니라 글자 (서식 @ = 텍스트)
 
@@ -2121,7 +2121,12 @@ const ST = (() => {
         const c = row.getCell(i + 1);
         c.style = Object.assign({}, c.style, { numFmt: "yyyy-mm-dd" });
       });
-      // 행사 단가·반품 차감 줄은 특이사항을 빨갛게 (셀 서식은 새 객체로 — 공유하면 표 전체에 번진다)
+      /* 반품 줄은 줄 전체를 빨간 글씨로 — 업체가 목록을 훑다가 바로 알아보게 (2026-09-08).
+         셀마다 새 font 객체를 만든다 (공유 객체를 고치면 표 전체에 번진다) */
+      if (r.retDed) row.eachCell({ includeEmpty: true }, c => {
+        c.font = Object.assign({}, c.font, { color: { argb: "FFCC0000" } });
+      });
+      // 행사 단가·반품 줄은 비고를 굵고 빨갛게
       if (anyNote && (r.priceFrom || r.retDed)) {
         const c = row.getCell(promoCol);
         c.font = { bold: true, color: { argb: "FFCC0000" } };
@@ -2140,7 +2145,8 @@ const ST = (() => {
     };
     const cSupply = add("공급가 합계", v.pay - perOrderShip);
     const cShip = perOrderShip ? add("배송비 합계", perOrderShip) : null;
-    const cDed = v.ded ? add("CS 차감", -v.ded, "FFCC0000") : null;
+    // 업체가 보는 이름은 '반품 차감' — 'CS 차감' 은 우리 쪽 용어라 업체가 무슨 돈인지 모른다 (2026-09-08)
+    const cDed = v.ded ? add("반품 차감", -v.ded, "FFCC0000") : null;
     const cFinal = add("정산금액", v.final, "FF1A56DB");
 
     /* ---- 합계에 실제 엑셀 수식을 건다 ----
@@ -2172,7 +2178,7 @@ const ST = (() => {
       const link = (name, cell) => { if (cell && topCells[name]) topCells[name].value = { formula: cell.address, result: Math.round(cell.value.result != null ? cell.value.result : cell.value) }; };
       link("공급가 합계", cSupply);
       link("배송비 합계", cShip);
-      link("교환·반품 차감", cDed);
+      link("반품 차감", cDed);
       link("정산금액", cFinal);
     }
     if (v.unpriced) {
@@ -2196,7 +2202,7 @@ const ST = (() => {
       ws.getColumn(i + 1).width = w;
     });
     for (let n = src.length + 1; n <= moneyEnd; n++) { ws.getColumn(n).width = 14; ws.getColumn(n).numFmt = "#,##0"; }
-    if (anyNote) ws.getColumn(promoCol).width = 34;   // 특이사항은 글자라 서식을 걸지 않는다
+    if (anyNote) ws.getColumn(promoCol).width = 34;   // 비고는 글자라 서식을 걸지 않는다
     alignSheet(ws, moneyEnd, src.length, hr);
     if (anyNote) ws.getColumn(promoCol).alignment = { horizontal: "center", vertical: "middle" };
     // alignSheet 는 열 단위로 정렬을 덮어쓴다 → 상단 요약은 그 뒤에 다시 오른쪽으로
@@ -2212,7 +2218,7 @@ const ST = (() => {
      · 주문 표 아래에 붙여두면 업체가 훑다가 지나친다. 시트를 따로 둔다.
      · 업체가 자기 기록과 바로 대조할 수 있도록 주문번호·상품명·수량을 적고,
        '왜 빠졌는지'(유형·사유)와 '얼마가 빠졌는지'(차감액)를 나란히 둔다.
-     · 합계 줄을 반드시 넣는다 — 정산서 위쪽의 '교환·반품 차감' 금액과 눈으로
+     · 합계 줄을 반드시 넣는다 — 정산서 위쪽의 '반품 차감' 금액과 눈으로
        맞아떨어져야 업체가 납득한다.
      ※ 업체용 파일이므로 우리 매출·마진은 넣지 않는다 (상위 CLAUDE.md 규칙). */
   const DED_SHEET = "정산제외(반품)";
@@ -2232,7 +2238,7 @@ const ST = (() => {
        정산서 본문에는 주문번호 열이 없어서(내부 열이라 뺀다) 주문번호만 적으면 대조가 안 됐다.
        그래서 본문에 그대로 보이는 값 — 쇼핑몰·주문일·수취인·주문자·운송장번호 — 과
        '정산서 몇 번째 줄' 을 같이 적는다. 줄 번호가 있으면 같은 주문번호가 여러 줄이어도 헷갈리지 않는다. */
-    ws.addRow([`※ '정산서 행' 은 '${mainName}' 시트의 줄 번호입니다. 그 줄의 특이사항에도 '반품 차감' 이 적혀 있습니다.`])
+    ws.addRow([`※ '정산서 행' 은 '${mainName}' 시트의 줄 번호입니다. 그 줄은 빨간 글씨이고 비고에 '반품' 이 적혀 있습니다.`])
       .font = { color: { argb: "FF888888" } };
     ws.addRow([]);
     const HEAD = ["정산서 행", "접수일", "유형", "쇼핑몰", "주문일", "수취인", "주문자", "운송장번호",
@@ -2316,7 +2322,7 @@ const ST = (() => {
     };
     line("공급가", v => v.pay - (v.ship || 0));
     line("배송비", v => v.ship || 0);
-    if (vendors.some(v => v.ded)) line("교환·반품 차감", v => -(v.ded || 0), { color: "FFCC0000" });
+    if (vendors.some(v => v.ded)) line("반품 차감", v => -(v.ded || 0), { color: "FFCC0000" });
     line("업체 지급액", v => v.final, { bold: true, color: "FF1A56DB" });
     // 입금일은 금액이 아니라 글자라 line() 대신 직접 적는다
     if (vendors.some(v => v.payDay))
@@ -2406,7 +2412,7 @@ const ST = (() => {
         };
         add(`${CO()} 매출`, v.amount);
         add(`${CO()} 마진`, v.margin);
-        if (v.ded) add("교환·반품 차감", -v.ded, "FFCC0000");
+        if (v.ded) add("반품 차감", -v.ded, "FFCC0000");
         add("업체 지급액", v.final, "FF1A56DB");
         ws.columns.forEach((c, i) => { c.width = [12, 12, 20, 34, 18, 7, 13, 12, 13, 13][i] || 14; });
         for (let n = 7; n <= nCol; n++) ws.getColumn(n).numFmt = "#,##0";
@@ -2425,7 +2431,7 @@ const ST = (() => {
     const qty = v.rows.reduce((s2, r) => s2 + (r.qty || 0), 0);
     const summary = `· 건수: ${v.rows.length}건 (수량 ${qty}개)\n`
       + `· 공급가 합계: ${won(v.pay)}\n`
-      + (v.ded ? `· CS 차감(교환·반품): -${won(v.ded)}\n` : "")
+      + (v.ded ? `· 반품 차감: -${won(v.ded)}\n` : "")
       + `· 지급액: ${won(v.final)} (부가세 포함)`
       + (v.unpriced ? `\n\n※ 단가가 아직 확정되지 않은 ${v.unpriced}건은 이번 지급액에서 빠져 있습니다. 단가 확정 후 정산해 드리겠습니다.` : "");
     return {
@@ -2829,7 +2835,7 @@ const HS = (() => {
       box.innerHTML =
         `<div class="totline big"><span>업체 지급 합계</span><span>${won(t.final)}</span></div>` +
         `<div class="totline"><span>건수</span><span>${t.count}건</span></div>` +
-        (t.ded ? `<div class="totline"><span>CS 차감</span><span>-${won(t.ded)}</span></div>` : "");
+        (t.ded ? `<div class="totline"><span>반품 차감</span><span>-${won(t.ded)}</span></div>` : "");
       tbl.innerHTML =
         `<tr><th>정산월</th><th>업체</th><th>건수</th><th>공급가</th><th>차감</th><th>지급액</th><th>확정일</th></tr>` +
         list.map(r => `<tr><td>${esc(r.label || r.tag)}</td><td><b>${esc(r.vendor)}</b></td>` +
