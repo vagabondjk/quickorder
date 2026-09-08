@@ -2022,6 +2022,20 @@ const ST = (() => {
     };
     const qtyVals = [];
 
+    /* 날짜 열 위치 — 업체 정산서에는 날짜를 '진짜 날짜'로 적는다.
+       글자로 두면 업체가 정렬·필터를 못 걸고, 날짜 서식이 안 걸린 채
+       일련번호(46231)로 들어온 값은 숫자 그대로 보인다. */
+    const dateIdx = src.map((h, i) => (QO.isDateHeader(h) ? i : -1)).filter(i => i >= 0);
+    /* 그 줄의 날짜 칸을 진짜 날짜로 바꿔 적는다. 시간은 뺀다 — 정산서에는 날짜만 있으면 된다.
+       서식은 반드시 셀 단위로 새 객체를 만들어 건다 (열 전체에 걸면 수량·금액까지 날짜로 보인다). */
+    const putDates = (row, line) => dateIdx.forEach(i => {
+      const d = QO.toDateValue(line[i]);
+      if (!d) return;                                  // 못 읽는 값은 원본 그대로 둔다
+      const c = row.getCell(i + 1);
+      c.value = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      c.style = Object.assign({}, c.style, { numFmt: "yyyy-mm-dd" });
+    });
+
     /* 주문일이 이른 것부터 적는다 — 업체가 자기 출고 순서대로 훑을 수 있게.
        원본 v.rows 는 합계·검산이 함께 쓰므로 복사본을 정렬한다.
        주문일이 비어 있으면 수집일자로 대신하고, 그것도 없으면 원래 순서를 지킨다. */
@@ -2049,6 +2063,7 @@ const ST = (() => {
       line.push(Math.round(r.pay || 0));
       if (anyNote) line.push(noteOf(r));
       const row = ws.addRow(line);
+      putDates(row, line);
       // 행사 단가로 계산된 줄은 특이사항을 빨갛게 (셀 서식은 새 객체로 — 공유하면 표 전체에 번진다)
       if (anyNote && r.priceFrom) {
         const c = row.getCell(promoCol);
@@ -2163,6 +2178,13 @@ const ST = (() => {
       const r = ws.addRow([x.date || "", x.type || "", x.orderNo || "", x.product || "",
         Number(x.qty) || "", String(x.content || "").slice(0, 120), Math.round(Number(x.cost) || 0)]);
       r.getCell(7).numFmt = "#,##0";
+      // 접수일도 진짜 날짜로 — 업체가 자기 기록과 날짜로 맞춰볼 수 있어야 한다
+      const d = QO.toDateValue(x.date);
+      if (d) {
+        const c = r.getCell(1);
+        c.value = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        c.style = Object.assign({}, c.style, { numFmt: "yyyy-mm-dd" });
+      }
     });
     const tot = ws.addRow(["", "", "", "", "", "합계", Math.round(Number(v.ded) || 0)]);
     tot.font = { bold: true };

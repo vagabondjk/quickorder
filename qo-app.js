@@ -705,13 +705,13 @@ async function rebuildMerged() {
        정산은 출고된 건을 정산해야 하므로 절대 이 옵션을 주면 안 된다. */
     skipInvoiced: true,
   });
-  /* 전부 출고 완료라 한 줄도 안 남는 경우가 있다. '못 찾았다' 로 뭉뚱그리면
-     파일을 잘못 골랐나 싶어 헤매게 된다 — 왜 비었는지 그대로 말한다. */
-  if (!m.rows && m.invoiced) {
-    throw new Error(`고른 파일의 주문 ${m.invoiced}건이 전부 송장번호가 있는 출고 완료 건이라\n`
-      + "새로 발주할 주문이 없습니다.");
-  }
-  if (!m.rows) throw new Error("고른 파일에서 주문 줄을 찾지 못했습니다.");
+  /* 주문 줄이 한 줄도 안 남았을 때 —
+     ① 전부 출고 완료라 빠진 경우: 막지 않고 그대로 불러온다.
+        예전엔 여기서 오류를 세웠는데, 그러면 파일이 아예 안 올라가서
+        무엇이 들었는지 확인할 수도, 미리보기를 볼 수도 없었다.
+        왜 비었는지는 아래 '출고 완료로 뺐습니다' 안내가 말해 준다.
+     ② 정말 아무것도 못 읽은 경우만 오류로 세운다. */
+  if (!m.rows && !m.invoiced) throw new Error("고른 파일에서 주문 줄을 찾지 못했습니다.");
   S.merged = m;
   const buf = await QO.saveWorkbook(m.wb);
   const n = parts.length;
@@ -744,15 +744,21 @@ async function rebuildMerged() {
     const list = Object.entries(m.invoicedByMall || {});
     inote.style.display = m.invoiced ? "" : "none";
     inote.className = "msg show" + (m.invoiced ? " warn" : "");
-    inote.innerHTML = m.invoiced
-      ? `ℹ 이미 송장번호가 있는 <b>${m.invoiced}건</b>은 출고 완료로 보고 뺐습니다`
-        + (list.length
-          ? ` — ` + list.map(([mall, n]) => {
-              const all = (m.mallTotal || {})[mall] || 0;
-              return `<b>${esc(mall)} ${n === all ? `전체 ${n}건` : `${n}건`}</b>`;
-            }).join(" · ")
-          : "")
+    const per = list.length
+      ? ` — ` + list.map(([mall, n]) => {
+          const all = (m.mallTotal || {})[mall] || 0;
+          return `<b>${esc(mall)} ${n === all ? `전체 ${n}건` : `${n}건`}</b>`;
+        }).join(" · ")
       : "";
+    /* 한 줄도 안 남은 경우는 더 분명히 말한다 — 파일은 올라갔지만 발주할 게
+       없다는 뜻이라, 그냥 '뺐습니다' 로 두면 왜 화면이 비었는지 알기 어렵다. */
+    inote.innerHTML = !m.invoiced ? ""
+      : m.rows
+        ? `ℹ 이미 송장번호가 있는 <b>${m.invoiced}건</b>은 출고 완료로 보고 뺐습니다` + per
+        : `⚠ 고른 파일의 주문 <b>${m.invoiced}건</b>이 <b>전부</b> 송장번호가 있는 출고 완료 건입니다`
+          + ` — 새로 발주할 주문이 없습니다` + per
+          + `<span style="display:block;font-weight:600;color:var(--muted);font-size:11.5px;margin-top:2px">`
+          + `파일은 그대로 불러왔으니 미리보기로 내용을 확인하실 수 있습니다.</span>`;
   }
   /* 방금 무엇이 늘었는지 먼저 말한다 — '더하기' 인 걸 알 수 있게 */
   const a = S.orderAdded;

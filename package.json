@@ -1,0 +1,12 @@
+{
+  "name": "quickorder",
+  "version": "1.0.0",
+  "private": true,
+  "description": "퀵오더 웹 — 발주서·송장 자동화. 이 파일은 테스트를 돌리기 위한 것이고, 앱 자체는 빌드 없이 정적 파일(index.html + qo-*.js)로 동작한다.",
+  "scripts": {
+    "test": "TZ=Asia/Seoul node --test \"test/*.test.js\""
+  },
+  "devDependencies": {
+    "exceljs": "^4.4.0"
+  }
+}

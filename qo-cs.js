@@ -128,8 +128,19 @@ const CS = (() => {
   /* ---------- 날짜 정규화 → YYYY-MM-DD ---------- */
   const p2 = n => String(n).padStart(2, "0");
   const fromDate = d => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+  /* 엑셀 일련번호인가 — 날짜 서식이 안 걸린 채 46231 같은 숫자로 들어온 값.
+     글자로 흘려보내면 new Date("46231") 이 46231'년'으로 읽어서
+     정산일이 "46231-01-01" 로 나온다. 숫자일 때 먼저 걸러야 한다. */
+  const serialYmd = v => {
+    const n = typeof v === "number" ? v : (/^\d{1,5}(\.\d+)?$/.test(s(v)) ? Number(s(v)) : NaN);
+    if (!isFinite(n)) return "";
+    const d = QO.toDateValue(n);      // 엑셀 1900 체계 → 로컬 Date (범위 밖이면 null)
+    return d ? fromDate(d) : "";
+  };
   function toYmd(v) {
     if (v instanceof Date) return isNaN(v.getTime()) ? "" : fromDate(v);
+    const sv = serialYmd(v);
+    if (sv) return sv;
     const t = s(v);
     if (!t) return "";
     // 2026-07-26 / 2026.7.26 / 20260726 — 달·일 범위까지 확인해야
@@ -138,7 +149,8 @@ const CS = (() => {
     if (m && +m[2] >= 1 && +m[2] <= 12 && +m[3] >= 1 && +m[3] <= 31)
       return `${m[1]}-${p2(m[2])}-${p2(m[3])}`;
     const d = new Date(t);
-    if (!isNaN(d.getTime())) return fromDate(d);
+    // 연도가 말이 되는지까지 봐야 한다 — 안 그러면 "46231" 이 46231년으로 통과한다
+    if (!isNaN(d.getTime()) && d.getFullYear() >= 1900 && d.getFullYear() <= 2200) return fromDate(d);
     return t.slice(0, 10);
   }
   function today() { return toYmd(new Date()); }
