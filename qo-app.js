@@ -3652,7 +3652,9 @@ async function afterPull() {
   try { await loadForms(); } catch (e) {}
   try { if ($("setmodal").classList.contains("on")) drawSettings(); } catch (e) {}
   try { if (window.CS && CS.reload) await CS.reload(); } catch (e) {}
-  try { if (window.ST && ST.reload) await ST.reload(); } catch (e) {}
+  /* soft — 저장된 것만 다시 읽고, 정산 탭에 불러와 둔 파일·결과는 건드리지 않는다.
+     계정이 바뀐 게 아니라 같은 계정의 다른 기기 변경을 받아온 것이라서다 (2026-09-09) */
+  try { if (window.ST && ST.reload) await ST.reload({ soft: true }); } catch (e) {}
   try { if (window.HS && HS.reload) await HS.reload(); } catch (e) {}
   /* 마스터 화면을 열어둔 채로 다른 기기에서 업체를 승인하는 일이 실제로 있다.
      ※ MST 는 이 파일 안의 const 라 window 를 통해서는 안 잡힌다 (mastersync.test.js [9] 참고) */

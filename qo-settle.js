@@ -2703,12 +2703,25 @@ const ST = (() => {
   }
 
   init();
-  /* 로그인 계정이 바뀌어 저장소를 갈아탔을 때 — 이 탭 자료를 다시 읽는다 */
-  async function reload() {
-    files = []; payFiles = []; result = null; pbRaw = null;
+  /* 저장소 자료를 다시 읽는다. 두 경우가 있다 —
+     · 계정이 바뀌어 저장소를 갈아탔을 때(기본): 앞 계정에서 불러온 파일·결과까지 비운다.
+       화면 문구·파일명도 같이 지운다 — 파일은 없는데 '불러왔어요' 만 남으면 불러온 줄 안다.
+     · 자동 동기화가 드라이브 변경을 받아왔을 때(soft): 공급가표·연결표·확정 기록 같은
+       저장된 것만 다시 읽고, **지금 작업 중인 정산 파일과 결과는 그대로 둔다.**
+       ★ 예전엔 이때도 파일을 비웠다 (2026-09-09). 30초마다 도는 동기화가 다른 기기의 변경을
+         받아올 때마다 불러온 정산 파일이 소리 없이 사라지고 문구만 남았다. */
+  async function reload(opts) {
+    const soft = !!(opts && opts.soft);
+    if (!soft) {
+      files = []; payFiles = []; result = null;
+      const fn = $("st-fname"); if (fn) fn.textContent = "";
+      const fi = $("f-st"); if (fi) fi.value = "";
+      msg("msg-s", "", ""); msg("msg-pay", "", "");
+    }
+    pbRaw = null;
     await load();
     drawFiles(); drawPriceBook(); drawPay(); drawBrands(); drawMd(); refresh();
-    const box = $("result-s"); if (box) box.style.display = "none";
+    if (!soft) { const box = $("result-s"); if (box) box.style.display = "none"; }
   }
   return { onShow, reload, drawFilter: drawFilterLine, markSettled, calc, result: () => result, periodRange,
            /* 검증용 — 업체용 정산서(합계 수식·머리말)를 화면 없이 만들어 볼 수 있게 열어둔다 */
