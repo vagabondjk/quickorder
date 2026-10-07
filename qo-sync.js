@@ -28,6 +28,8 @@ const SYNC = (() => {
     "masterCompanies", "masterDeleted",
     /* v2.5.0 — 월별 정산 확정 기록. 돈 기록이라 기기마다 달라지면 안 된다 */
     "settleConfirms",
+    /* v2.5.8 — 기간별로 뺀 반품 주문번호. 빠지면 다른 기기에서 지난 달 반품이 또 경고로 뜬다 */
+    "settleRetDone",
     "formsDeleted", "masterRevoked", "signupSheetId", "rosterSheetId", "settlePins",
     "pbSenders", "pbKeywords", "pbExclude", "paySenders", "payKeywords", "payExclude",
     "priceBook", "priceAliases", "priceAliasInfo", "settleBrandVendor", "settleVendors", "settleCarry",
@@ -180,14 +182,15 @@ const SYNC = (() => {
            달·업체별로 한 건씩 들어 있는데, 통째로 교체하면 PC 에서 확정한 7월 기록이
            휴대폰이 올린 백업에 지워진다. 돈 기록이라 사라지면 안 된다.
            같은 달·같은 업체를 양쪽에서 확정했으면 나중에 확정한 쪽을 남긴다. */
-        if (k === "settleConfirms" && remote && typeof remote === "object" && !Array.isArray(remote)) {
-          const out = Object.assign({}, (await DB.get("settleConfirms", {})) || {});
+        /* 기간별 반품 차감 기록(settleRetDone)도 같은 모양·같은 규칙이다 — 기간 칸마다 나중에 뽑은 쪽 */
+        if ((k === "settleConfirms" || k === "settleRetDone") && remote && typeof remote === "object" && !Array.isArray(remote)) {
+          const out = Object.assign({}, (await DB.get(k, {})) || {});
           for (const key in remote) {
             const a = out[key], b = remote[key];
             if (!b) continue;
             if (!a || (Number(b.at) || 0) >= (Number(a.at) || 0)) out[key] = b;
           }
-          await DB.set("settleConfirms", out);
+          await DB.set(k, out);
           continue;
         }
         /* 지운 승인 업체 표시 — 더 늦게 지운 쪽을 남긴다 (formsDeleted 와 같은 규칙) */

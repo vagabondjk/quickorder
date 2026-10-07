@@ -138,6 +138,7 @@ const ST = (() => {
     carry = await DB.get("settleCarry", { at: 0, list: [] }) || { at: 0, list: [] };
     if (!carry.list) carry.list = [];
     confirms = (await DB.get("settleConfirms", {})) || {};
+    retDone = (await DB.get("settleRetDone", {})) || {};
     rebuildBook();
   }
 
@@ -190,6 +191,19 @@ const ST = (() => {
        7월 파일에서 찾다가 '이 파일에 아예 없다' 고 헛경고가 뜬다 — 7월엔 당연히 없다. */
     const p = period || {};
     await DB.set("settleCarry", { at: Date.now(), list, from: p.from || "", to: p.to || "", label: p.label || "" });
+  }
+  /* ★ 이번 정산에서 뺀 반품의 주문번호를 기간별로 남긴다 (2026-10-07).
+     드라이브 반품 시트는 달이 바뀌어도 누적된다. 8월에 뺀 반품이 9월 파일에도 그대로 들어오는데,
+     9월 줄에는 그 주문이 없으니 '못 찾았다' 며 빨간 경고가 떴다. 이 기록이 있으면
+     '지난 정산에서 이미 뺀 것' 으로 확실히 가려낼 수 있다. 기간별로 한 칸씩, 다시 뽑으면 덮어쓴다. */
+  let retDone = {};
+  async function saveRetDone(ret, period) {
+    const p = period || {};
+    if (!p.tag) return;
+    const nos = [];
+    ((ret && ret.done) || []).forEach(n => { if (n && nos.indexOf(n) < 0) nos.push(n); });
+    retDone[p.tag] = { at: Date.now(), from: p.from || "", to: p.to || "", label: p.label || "", nos };
+    await DB.set("settleRetDone", retDone);
   }
   async function saveBrandFix() { await DB.set("settleBrandVendor", brandFix); }
   /* 공급가표 풀어내는 코드는 qo-logic 한 곳에만 둔다 (QO.priceBookFromRaw).
@@ -505,6 +519,9 @@ const ST = (() => {
     { k: "content", n: "사유", kw: ["사유", "내용", "비고", "메모", "요청내용"] },
     // 입고일이 비어 있으면 아직 회수 중이다 — 빼되 따로 세어 둔다 (화면에는 안 띄운다)
     { k: "received", n: "입고일", kw: ["입고일", "회수완료", "입고"] },
+    /* 원 주문의 주문일 — 실제 시트 맨 끝 '주문일시' 열. 반품 시트는 달이 바뀌어도 누적되므로
+       '이 반품이 어느 달 주문 것인지' 를 알아야 지난 달 반품을 이번 달에서 찾지 않는다 (2026-10-07) */
+    { k: "orderDate", n: "주문일", kw: ["주문일시", "주문일자", "주문일"] },
   ];
   const RET_NAME = /교환|반품|취소|클레임|반송|환불|cs/i;
   /* 이 열들이 있으면 '반품 장부' 다 — 줄마다 유형이 안 적혀 있어도 반품으로 본다.
@@ -544,6 +561,7 @@ const ST = (() => {
           orderNo: s(cell(row, "orderNo")), product: s(cell(row, "product")),
           option: s(cell(row, "option")), qty: Number(String(cell(row, "qty")).replace(/[^\d.-]/g, "")) || 0,
           date: CS.toYmd(cell(row, "date")),    // 드라이브 파일은 날짜가 일련번호 글자로 온다
+          orderDate: CS.toYmd(cell(row, "orderDate")),
           content: s(cell(row, "content")) || s(cell(row, "status")),
           raw: s(cell(row, "type")),
           type, guessed, received,
@@ -875,11 +893,28 @@ const ST = (() => {
        매출 기준으로 빼면 우리 마진만큼 더 빼게 된다.
      · 수량이 적혀 있으면 그 수량만큼만 뺀다. 없으면 그 줄 전체를 뺀다.
      · CS 탭에서 이미 차감한 주문번호는 두 번 빼지 않는다.
-     · 못 찾은 반품 건은 버리지 않고 돌려준다 — 화면과 검산에 띄운다. */
-  function returnDeduction(shipped, ded) {
+     · 못 찾은 반품 건은 버리지 않고 돌려준다 — 화면과 검산에 띄운다.
+     · ★ 이번 줄에 없는 반품은 세 갈래로 가른다 (2026-10-07). 반품 시트가 달마다 누적되므로
+         지난 달 반품이 이번 파일에도 들어온다 — 그걸 전부 '못 찾았다' 고 하면 매달 헛경고다.
+         ① 지난 정산 기록(settleRetDone)에 있는 주문번호 → 이미 뺐다 (확실)
+         ② 주문일(없으면 반품 요청일)이 이 정산 기간 시작보다 앞 → 지난 기간 주문 (거의 확실)
+         ③ 그 밖 → 정말 못 찾은 것. 그만큼 차감이 안 됐으니 검산에 올린다.
+       줄에 '있는' 반품은 날짜를 따지지 않고 그대로 뺀다 — 8월 주문이 9월에 출고돼 이월된 건은
+       9월 줄에 있고 9월에 지급되므로 9월에서 빼는 게 맞다. */
+  function returnDeduction(shipped, ded, per) {
     const out = { on: false, sheet: "", 반품: 0, 교환: 0, 취소: 0, 기타: 0,
                   amount: 0, matched: 0, unmatched: [], dupCs: 0, noType: false, unusable: "",
-                  assumed: 0, pending: 0, basis: [], rows: 0 };
+                  assumed: 0, pending: 0, basis: [], rows: 0,
+                  priorDone: [], prior: [], priorLabels: [], done: [] };
+    const from = String((per && per.from) || "").replace(/\D/g, "");
+    const ymd8 = d => String(d || "").replace(/\D/g, "").slice(0, 8);
+    /* 이 기간보다 앞선 정산 기록들. 같은 기간(다시 뽑는 중)은 제외. 8·9월 파일이 8/31 하루 겹치므로
+       끝날이 아니라 시작일로 '앞선' 을 가린다 */
+    const earlier = from
+      ? Object.keys(retDone || {}).map(k => Object.assign({ tag: k }, retDone[k]))
+          .filter(rec => rec && rec.tag !== (per && per.tag) && ymd8(rec.from) && ymd8(rec.from) < from)
+      : [];
+    const doneIn = no => earlier.find(rec => (rec.nos || []).indexOf(no) >= 0) || null;
     const src = files.filter(f => f.ret);
     if (!src.length) return out;
     const bad = src.find(f => f.ret && !f.ret.usable);
@@ -912,9 +947,24 @@ const ST = (() => {
         if (t === "교환") { out.교환++; return; }
         if (t === "취소") { out.취소++; return; }
         if (t !== "반품") { out.기타++; return; }   // 유형을 못 가린 줄은 손대지 않는다
-        out.반품++;
         const cand = byNo[it.orderNo] || [];
-        if (!cand.length) { out.unmatched.push(it); return; }
+        if (!cand.length) {
+          const rec = doneIn(it.orderNo);
+          if (rec) {                                        // ① 지난 정산에서 이미 뺐다
+            out.priorDone.push(Object.assign({ when: rec.label || rec.tag }, it));
+            if (out.priorLabels.indexOf(rec.label || rec.tag) < 0) out.priorLabels.push(rec.label || rec.tag);
+            return;
+          }
+          const belong = ymd8(it.orderDate) || ymd8(it.date);
+          if (from && belong && belong < from) {             // ② 지난 기간 주문의 반품
+            out.prior.push(it);
+            return;
+          }
+          out.반품++;
+          out.unmatched.push(it);                            // ③ 정말 못 찾았다
+          return;
+        }
+        out.반품++;
         if (csNos.has(it.orderNo)) { out.dupCs++; return; }
         /* 한 주문에 여러 줄이면 상품명·옵션으로 좁힌다. 그래도 여럿이면 찍지 않고
            맨 앞 줄만 뺀다 — 여러 줄을 통째로 빼면 안 준 돈이 더 커진다. */
@@ -946,6 +996,7 @@ const ST = (() => {
           product: it.product || r.product || "", option: it.option || r.option || "", qty: useQty,
           content: it.content || `${out.sheet} 시트`, cost: amount, ref: r });
         out.amount += amount; out.matched++;
+        out.done.push(it.orderNo);                           // 기간별 기록에 남길 주문번호
       });
     });
     return out;
@@ -997,8 +1048,10 @@ const ST = (() => {
       if (!r.priced) { g.unpriced++; g.unpricedAmount += r.amount; }
       if (r.how === "앞부분일치" || r.how === "핵심어일치") g.loose++;
     }
+    /* 기간을 먼저 정한다 — 반품 차감이 '이 반품이 이번 기간 것인지' 를 봐야 해서다 (아래 result.period 에 그대로 쓴다) */
+    const per = periodOf(shipped.length ? shipped : rows);
     /* 정산 파일 안 교환반품 시트의 '반품' 을 차감에 합친다 (CS 탭 차감과 같은 자리) */
-    const retInfo = returnDeduction(shipped, ded);
+    const retInfo = returnDeduction(shipped, ded, per);
     for (const v in byVendor) {
       const d = ded[v];
       if (d) { byVendor[v].ded = d.amount; byVendor[v].dedRows = d.rows; }
@@ -1037,7 +1090,7 @@ const ST = (() => {
     result.unshipped = unshipped;
     /* ★ 기간을 검수보다 먼저 정한다 — 검수가 '이 파일이 어느 기간 것인지' 를 봐야
        지난 정산의 미출고 목록과 비교해도 되는지 판단할 수 있다 (reconcile 참고) */
-    result.period = periodOf(shipped.length ? shipped : rows);
+    result.period = per;
     result.check = reconcile(rows, shipped, unshipped, vendors, unpriced);
     drawResult();
     drawMd();          // MD 카드에 계산된 리워드 금액을 채워 넣는다
@@ -2500,6 +2553,12 @@ const ST = (() => {
        (건수는 rt.assumed · rt.pending 에 남겨 둔다) */
     if (kept.length) lines.push(`<span style="color:var(--muted)">그대로 둔 것: ${kept.join(" · ")} — 교환은 업체가 대체품을 보냈고, 취소는 송장이 없어 이미 빠져 있습니다</span>`);
     if (rt.dupCs) lines.push(`<span style="color:var(--muted)">CS 탭에서 이미 뺀 ${rt.dupCs}건은 두 번 빼지 않았습니다</span>`);
+    /* 지난 달 반품 — 시트가 누적되어 따라온 것. 경고가 아니라 '건너뛰었다' 는 안내로만 적는다 */
+    if (rt.priorDone && rt.priorDone.length)
+      lines.push(`<span style="color:var(--muted)">지난 정산(${esc((rt.priorLabels || []).join(", "))})에서 이미 뺀 반품 ${rt.priorDone.length}건은 건너뛰었습니다</span>`);
+    if (rt.prior && rt.prior.length)
+      lines.push(`<span style="color:var(--muted)">지난 기간 주문의 반품 ${rt.prior.length}건은 이번 정산 줄에 없어 건너뛰었습니다 — 주문번호 ${
+        esc(rt.prior.slice(0, 5).map(x => x.orderNo).join(", "))}${rt.prior.length > 5 ? ` 외 ${rt.prior.length - 5}건` : ""}</span>`);
     if (rt.unmatched && rt.unmatched.length)
       lines.push(`<b style="color:var(--danger)">정산 줄에서 못 찾은 반품 ${rt.unmatched.length}건은 차감되지 않았습니다</b>`);
     return `<div class="msg show ${rt.unmatched && rt.unmatched.length ? "warn" : "ok"}" style="margin-top:10px;line-height:1.7">${lines.join("<br>")}</div>`;
@@ -2664,6 +2723,8 @@ const ST = (() => {
         calc();
         // 이번 미출고 목록을 남겨 다음 달에 이월 여부를 알려준다
         if (result) saveCarry(result.unshipped || [], result.period).catch(() => {});
+        // 이번에 뺀 반품 주문번호를 남겨 다음 달에 같은 반품이 또 들어와도 헛경고가 안 뜨게 한다
+        if (result) saveRetDone(result.ret, result.period).catch(() => {});
         msg("msg-s", "ok", "✔ 뽑았습니다. 아래에서 업체별 정산내역을 확인하세요.");
       }
       catch (e) { msg("msg-s", "err", "⚠ " + e.message); }
@@ -2734,9 +2795,10 @@ const ST = (() => {
            takeMail,
            /* 검증용 — 교환반품 시트 판별과 차감 계산을 직접 돌려볼 수 있게 */
            _findRet: findReturnSheet,
-           _retDed: (fs2, shipped, ded) => {
-             const keep = files; files = fs2;
-             try { return returnDeduction(shipped, ded || {}); } finally { files = keep; }
+           _retDed: (fs2, shipped, ded, per, doneMap) => {
+             const keep = files, keepDone = retDone; files = fs2;
+             if (doneMap) retDone = doneMap;
+             try { return returnDeduction(shipped, ded || {}, per); } finally { files = keep; retDone = keepDone; }
            },
            _tpl: priceBookTemplate,
            _pbx: (raw) => { pbRaw = raw; return priceBookExcel(); } };
