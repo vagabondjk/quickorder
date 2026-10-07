@@ -908,11 +908,13 @@ const ST = (() => {
                   priorDone: [], prior: [], priorLabels: [], done: [] };
     const from = String((per && per.from) || "").replace(/\D/g, "");
     const ymd8 = d => String(d || "").replace(/\D/g, "").slice(0, 8);
-    /* 이 기간보다 앞선 정산 기록들. 같은 기간(다시 뽑는 중)은 제외. 8·9월 파일이 8/31 하루 겹치므로
-       끝날이 아니라 시작일로 '앞선' 을 가린다 */
+    /* 이 기간보다 앞서 '끝난' 정산 기록들만 믿는다. 같은 기간(다시 뽑는 중)은 제외.
+       ★ 시작일이 앞서다는 것만으로는 안 된다 — 같은 9월 파일을 8/31 줄 포함(08~09)으로 한 번 뽑고
+         8/31 줄을 뺀 뒤(09) 다시 뽑으면, 앞 기록은 시작만 앞설 뿐 같은 달 것이라 거기 적힌 반품을
+         '지난 정산에서 뺐다' 고 조용히 건너뛰게 된다. 끝난 기록만 본다 (8·9월이 8/31 하루 겹쳐도 to ≤ from 으로 통과) */
     const earlier = from
       ? Object.keys(retDone || {}).map(k => Object.assign({ tag: k }, retDone[k]))
-          .filter(rec => rec && rec.tag !== (per && per.tag) && ymd8(rec.from) && ymd8(rec.from) < from)
+          .filter(rec => rec && rec.tag !== (per && per.tag) && ymd8(rec.to) && ymd8(rec.to) <= from)
       : [];
     const doneIn = no => earlier.find(rec => (rec.nos || []).indexOf(no) >= 0) || null;
     const src = files.filter(f => f.ret);
